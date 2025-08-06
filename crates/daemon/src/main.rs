@@ -1,9 +1,7 @@
 use clap::Parser;
-use std::net::Ipv4Addr;
-use std::net::TcpListener;
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::thread::spawn;
-use tungstenite::Message;
-use tungstenite::accept;
+use tungstenite::{Message, accept};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: CLIArgs = CLIArgs::parse();
@@ -15,31 +13,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         let (stream, addr) = server.accept()?;
-
-        spawn(move || {
-            let mut websocket = accept(stream).unwrap();
-
-            loop {
-                let message = websocket.read();
-
-                if message.is_err() {
-                    break;
-                }
-
-                match message.unwrap() {
-                    Message::Text(utf8_bytes) => {
-                        let text: &str = utf8_bytes.as_str();
-                        println!(
-                            "Message from {}: {}",
-                            addr,
-                            text.strip_suffix("\n").unwrap()
-                        );
-                    }
-                    _ => (),
-                }
-            }
-        });
+        read_stream(stream, addr)?;
     }
+}
+
+fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    spawn(move || {
+        let mut websocket = accept(stream).unwrap();
+
+        loop {
+            let message = websocket.read();
+
+            if message.is_err() {
+                break;
+            }
+
+            match message.unwrap() {
+                Message::Text(utf8_bytes) => {
+                    let text: &str = utf8_bytes.as_str();
+                    println!(
+                        "Message from {}: {}",
+                        addr,
+                        text.strip_suffix("\n").unwrap()
+                    );
+
+                    save_message(text, addr).unwrap();
+                }
+                _ => (),
+            }
+        }
+    });
+
+    Ok(())
+}
+
+fn save_message(text: &str, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
 }
 
 #[derive(Parser)]
