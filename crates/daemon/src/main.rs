@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let server = TcpListener::bind(&address)?;
     eprintln!("Running on ws://{}", &address);
+    eprintln!("Use Ctrl-C to stop this program");
 
     loop {
         let (stream, addr) = server.accept()?;
