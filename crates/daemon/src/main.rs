@@ -2,30 +2,43 @@ use clap::Parser;
 use std::net::Ipv4Addr;
 use std::net::TcpListener;
 use std::thread::spawn;
+use tungstenite::Message;
 use tungstenite::accept;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: CLIArgs = CLIArgs::parse();
     let address: String = format!("{}:{}", args.ip, args.port);
 
+    let server = TcpListener::bind(&address)?;
     eprintln!("Running on ws://{}", &address);
 
-    let server = TcpListener::bind(&address)?;
-    for stream in server.incoming() {
+    loop {
+        let (stream, addr) = server.accept()?;
+
         spawn(move || {
-            let mut websocket = accept(stream.unwrap()).unwrap();
+            let mut websocket = accept(stream).unwrap();
 
             loop {
-                let msg = websocket.read().unwrap();
+                let message = websocket.read();
 
-                if msg.is_binary() || msg.is_text() {
-                    websocket.send(msg).unwrap();
+                if message.is_err() {
+                    break;
+                }
+
+                match message.unwrap() {
+                    Message::Text(utf8_bytes) => {
+                        let text: &str = utf8_bytes.as_str();
+                        println!(
+                            "Message from {}: {}",
+                            addr,
+                            text.strip_suffix("\n").unwrap()
+                        );
+                    }
+                    _ => (),
                 }
             }
         });
     }
-
-    Ok(())
 }
 
 #[derive(Parser)]
