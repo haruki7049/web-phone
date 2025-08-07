@@ -149,8 +149,8 @@ impl std::default::Default for Configuration {
 }
 
 fn default_log_file() -> PathBuf {
-    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
-        .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-daemon");
+    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone")
+        .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone");
 
     let mut result: PathBuf = proj_dirs.data_dir().to_path_buf();
     result.push("messages.json");

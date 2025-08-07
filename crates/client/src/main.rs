@@ -2,11 +2,10 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 use directories::ProjectDirs;
-use tracing::info;
 
 pub static DEFAULT_MESSAGES_LOG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
-    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
-        .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-daemon");
+    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone")
+        .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone");
     let mut result: PathBuf = proj_dirs.data_dir().to_path_buf();
     let filename: &str = "messages.json";
 
