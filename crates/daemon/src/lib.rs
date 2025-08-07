@@ -10,8 +10,6 @@ use std::thread::spawn;
 use tracing::{debug, info};
 use tungstenite::{Message, accept};
 
-const LOG_FILENAME: &str = "log.json";
-
 pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
         .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-daemon");
@@ -75,9 +73,7 @@ fn save_message(text: String, address: SocketAddr) -> Result<(), Box<dyn std::er
 
     debug!("config: {:?}", config);
 
-    std::fs::create_dir_all(&config.log_dir)?;
-    let mut filepath: PathBuf = config.log_dir.clone();
-    filepath.push(LOG_FILENAME);
+    std::fs::create_dir_all(&config.log_file)?;
 
     let now = Utc::now();
     let log_data: LogData = LogData {
@@ -86,9 +82,9 @@ fn save_message(text: String, address: SocketAddr) -> Result<(), Box<dyn std::er
         text: text.clone(),
     };
 
-    match std::fs::exists(&filepath) {
+    match std::fs::exists(&config.log_file) {
         Ok(true) => {
-            let mut original_log: File = File::open(&filepath)?;
+            let mut original_log: File = File::open(&config.log_file)?;
             let mut original_contents: String = String::new();
             original_log.read_to_string(&mut original_contents)?;
 
@@ -96,14 +92,14 @@ fn save_message(text: String, address: SocketAddr) -> Result<(), Box<dyn std::er
             log_data_list.push(log_data);
 
             let log_data_string: String = serde_json::to_string(&log_data_list)?;
-            let mut new_log: File = File::create(&filepath)?;
+            let mut new_log: File = File::create(&config.log_file)?;
             let bytes: &[u8] = log_data_string.as_bytes();
             new_log.write_all(bytes)?;
         }
         Ok(false) => {
             let log_data_list: Vec<LogData> = vec![log_data];
 
-            let mut log: File = File::create(filepath)?;
+            let mut log: File = File::create(&config.log_file)?;
             let log_data_string: String = serde_json::to_string(&log_data_list)?;
             let bytes: &[u8] = log_data_string.as_bytes();
             log.write_all(bytes)?;
@@ -139,7 +135,7 @@ impl SaveMessageError {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Configuration {
-    pub log_dir: PathBuf,
+    pub log_file: PathBuf,
     pub ip: Ipv4Addr,
     pub port: u16,
 }
@@ -147,18 +143,20 @@ pub struct Configuration {
 impl std::default::Default for Configuration {
     fn default() -> Self {
         Self {
-            log_dir: default_log_dir(),
+            log_file: default_log_file(),
             ip: Ipv4Addr::new(127, 0, 0, 1),
             port: 15000,
         }
     }
 }
 
-fn default_log_dir() -> PathBuf {
+fn default_log_file() -> PathBuf {
     let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
         .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-daemon");
 
-    proj_dirs.data_dir().to_path_buf()
+    let mut result: PathBuf = proj_dirs.data_dir().to_path_buf();
+    result.push("log.json");
+    result
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
