@@ -1,5 +1,8 @@
 use directories::ProjectDirs;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
+use std::fs::File;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex, OnceLock};
@@ -32,7 +35,7 @@ pub fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn st
 
             match message.unwrap() {
                 Message::Text(utf8_bytes) => {
-                    let text: &str = utf8_bytes.as_str();
+                    let text: String = utf8_bytes.as_str().to_string();
                     info!(
                         "Message from {}: {}",
                         addr,
@@ -60,12 +63,23 @@ pub fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn st
 }
 
 #[tracing::instrument]
-fn save_message(text: &str, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+fn save_message(text: String, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
     let config: &Configuration = CONFIGURATION
         .get()
         .ok_or("Failed to get Configuration from CONFIGURATION")?;
 
     debug!("config: {:?}", config);
+
+    std::fs::create_dir_all(&config.log_dir)?;
+    let now = Utc::now();
+    let filename: String = format!("{}-{}.log", addr, now);
+    let mut filepath: PathBuf = config.log_dir.clone();
+    filepath.push(filename);
+
+    debug!("Writing {} into {}...", &text, &filepath.display());
+
+    let mut log: File = File::create(filepath)?;
+    log.write_all(text.as_bytes())?;
 
     Ok(())
 }
