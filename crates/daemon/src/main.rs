@@ -1,23 +1,8 @@
+use daemon::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 use clap::Parser;
-use directories::ProjectDirs;
-use serde::{Deserialize, Serialize};
-use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex, OnceLock};
-use std::thread::spawn;
 use tracing::info;
-use tungstenite::{Message, accept};
-
-static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
-    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
-        .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-daemon");
-    let mut config_path: PathBuf = proj_dirs.config_dir().to_path_buf();
-    let filename: &str = "config.toml";
-
-    config_path.push(filename);
-    Mutex::new(config_path)
-});
-static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
 #[tracing::instrument]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,76 +26,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         let (stream, addr) = server.accept()?;
-        read_stream(stream, addr)?;
+        daemon::read_stream(stream, addr)?;
     }
-}
-
-#[tracing::instrument]
-fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
-    spawn(move || {
-        let mut websocket = accept(stream).unwrap();
-
-        loop {
-            let message = websocket.read();
-
-            if message.is_err() {
-                break;
-            }
-
-            match message.unwrap() {
-                Message::Text(utf8_bytes) => {
-                    let text: &str = utf8_bytes.as_str();
-                    info!(
-                        "Message from {}: {}",
-                        addr,
-                        text.strip_suffix("\n").unwrap()
-                    );
-
-                    save_message(text, addr).unwrap();
-                }
-                _ => (),
-            }
-        }
-    });
-
-    Ok(())
-}
-
-#[tracing::instrument]
-fn save_message(text: &str, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
-    let config: &Configuration = CONFIGURATION
-        .get()
-        .ok_or("Failed to get Configuration from CONFIGURATION")?;
-
-    Ok(())
 }
 
 #[derive(Parser)]
 struct CLIArgs {
     #[arg(short, long, default_value = DEFAULT_CONFIG_PATH.lock().unwrap().display().to_string())]
     config_path: PathBuf,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Configuration {
-    log_dir: PathBuf,
-    ip: Ipv4Addr,
-    port: u16,
-}
-
-impl std::default::Default for Configuration {
-    fn default() -> Self {
-        Self {
-            log_dir: default_log_dir(),
-            ip: Ipv4Addr::new(127, 0, 0, 1),
-            port: 15000,
-        }
-    }
-}
-
-fn default_log_dir() -> PathBuf {
-    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
-        .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-daemon");
-
-    proj_dirs.data_dir().to_path_buf()
 }
