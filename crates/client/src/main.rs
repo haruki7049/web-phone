@@ -31,8 +31,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     MESSAGES.set(serde_json::from_str(&contents)?).unwrap();
 
     match args.action {
-        Actions::Messages => messages(),
+        Actions::Messages => messages()?,
     }
+
+    Ok(())
 }
 
 fn messages() -> Result<(), Box<dyn std::error::Error>> {
