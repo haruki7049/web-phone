@@ -4,7 +4,7 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, OnceLock, Mutex};
 use std::thread::spawn;
 use tungstenite::{Message, accept};
 
@@ -17,18 +17,20 @@ static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     config_path.push(filename);
     Mutex::new(config_path)
 });
+static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
 #[tracing::instrument]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let args: CLIArgs = CLIArgs::parse();
-    let config: Configuration = confy::load_path(&args.config_path).unwrap_or_else(|_| {
+    CONFIGURATION.set(confy::load_path(&args.config_path).unwrap_or_else(|_| {
         info!("Running web-phone-daemon with default Configuration...");
         Configuration::default()
-    });
+    })).unwrap();
+    let config: &Configuration = CONFIGURATION.get().ok_or("Failed to get Configuration from CONFIGURATION")?;
 
-    let address: String = format!("{}:{}", config.ip, config.port);
+    let address: String = format!("{}:{}", &config.ip, &config.port);
     let server = TcpListener::bind(&address)?;
     info!("Running on ws://{}", &address);
     info!("Use Ctrl-C to stop this program");
@@ -72,6 +74,8 @@ fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn std::e
 
 #[tracing::instrument]
 fn save_message(text: &str, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    let config: &Configuration = CONFIGURATION.get().ok_or("Failed to get Configuration from CONFIGURATION")?;
+
     Ok(())
 }
 
@@ -83,6 +87,7 @@ struct CLIArgs {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Configuration {
+    log_dir: PathBuf,
     ip: Ipv4Addr,
     port: u16,
 }
@@ -90,8 +95,16 @@ struct Configuration {
 impl std::default::Default for Configuration {
     fn default() -> Self {
         Self {
+            log_dir: default_log_dir(),
             ip: Ipv4Addr::new(127, 0, 0, 1),
             port: 15000,
         }
     }
+}
+
+fn default_log_dir() -> PathBuf {
+    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
+        .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-daemon");
+
+    proj_dirs.data_dir().to_path_buf()
 }
