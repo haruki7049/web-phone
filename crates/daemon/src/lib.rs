@@ -153,7 +153,7 @@ fn default_log_file() -> PathBuf {
         .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-daemon");
 
     let mut result: PathBuf = proj_dirs.data_dir().to_path_buf();
-    result.push("log.json");
+    result.push("messages.json");
     result
 }
 
