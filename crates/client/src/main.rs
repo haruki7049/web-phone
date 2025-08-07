@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
+use directories::ProjectDirs;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
-use directories::ProjectDirs;
 
 pub static DEFAULT_MESSAGES_LOG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone")
