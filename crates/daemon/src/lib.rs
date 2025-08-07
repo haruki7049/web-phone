@@ -73,8 +73,6 @@ fn save_message(text: String, address: SocketAddr) -> Result<(), Box<dyn std::er
 
     debug!("config: {:?}", config);
 
-    std::fs::create_dir_all(&config.log_file)?;
-
     let now = Utc::now();
     let log_data: LogData = LogData {
         address: address,
