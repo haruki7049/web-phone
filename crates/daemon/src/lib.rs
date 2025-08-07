@@ -1,15 +1,11 @@
+use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
-use std::net::{
-    SocketAddr,
-    TcpStream,
-    Ipv4Addr,
-};
 use std::sync::{LazyLock, Mutex, OnceLock};
 use std::thread::spawn;
-use serde::{Serialize, Deserialize};
+use tracing::{debug, info};
 use tungstenite::{Message, accept};
-use tracing::{info, debug};
-use directories::ProjectDirs;
 
 pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
@@ -54,7 +50,7 @@ pub fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn st
                         info!("{} is closed without any reason", addr);
                         break;
                     }
-                }
+                },
                 _ => (),
             }
         }
