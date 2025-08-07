@@ -1,11 +1,11 @@
 use clap::Parser;
-use tracing::info;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::{LazyLock, OnceLock, Mutex};
+use std::sync::{LazyLock, Mutex, OnceLock};
 use std::thread::spawn;
+use tracing::info;
 use tungstenite::{Message, accept};
 
 static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
@@ -24,11 +24,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let args: CLIArgs = CLIArgs::parse();
-    CONFIGURATION.set(confy::load_path(&args.config_path).unwrap_or_else(|_| {
-        info!("Running web-phone-daemon with default Configuration...");
-        Configuration::default()
-    })).unwrap();
-    let config: &Configuration = CONFIGURATION.get().ok_or("Failed to get Configuration from CONFIGURATION")?;
+    CONFIGURATION
+        .set(confy::load_path(&args.config_path).unwrap_or_else(|_| {
+            info!("Running web-phone-daemon with default Configuration...");
+            Configuration::default()
+        }))
+        .unwrap();
+    let config: &Configuration = CONFIGURATION
+        .get()
+        .ok_or("Failed to get Configuration from CONFIGURATION")?;
 
     let address: String = format!("{}:{}", &config.ip, &config.port);
     let server = TcpListener::bind(&address)?;
@@ -74,7 +78,9 @@ fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn std::e
 
 #[tracing::instrument]
 fn save_message(text: &str, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
-    let config: &Configuration = CONFIGURATION.get().ok_or("Failed to get Configuration from CONFIGURATION")?;
+    let config: &Configuration = CONFIGURATION
+        .get()
+        .ok_or("Failed to get Configuration from CONFIGURATION")?;
 
     Ok(())
 }
