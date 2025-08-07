@@ -1,4 +1,5 @@
 use clap::Parser;
+use tracing::info;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -17,17 +18,20 @@ static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     Mutex::new(config_path)
 });
 
+#[tracing::instrument]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt::init();
+
     let args: CLIArgs = CLIArgs::parse();
     let config: Configuration = confy::load_path(&args.config_path).unwrap_or_else(|_| {
-        eprintln!("Running web-phone-daemon with default Configuration...");
+        info!("Running web-phone-daemon with default Configuration...");
         Configuration::default()
     });
 
     let address: String = format!("{}:{}", config.ip, config.port);
     let server = TcpListener::bind(&address)?;
-    eprintln!("Running on ws://{}", &address);
-    eprintln!("Use Ctrl-C to stop this program");
+    info!("Running on ws://{}", &address);
+    info!("Use Ctrl-C to stop this program");
 
     loop {
         let (stream, addr) = server.accept()?;
@@ -35,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+#[tracing::instrument]
 fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
     spawn(move || {
         let mut websocket = accept(stream).unwrap();
@@ -49,7 +54,7 @@ fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn std::e
             match message.unwrap() {
                 Message::Text(utf8_bytes) => {
                     let text: &str = utf8_bytes.as_str();
-                    println!(
+                    info!(
                         "Message from {}: {}",
                         addr,
                         text.strip_suffix("\n").unwrap()
@@ -65,6 +70,7 @@ fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
+#[tracing::instrument]
 fn save_message(text: &str, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
