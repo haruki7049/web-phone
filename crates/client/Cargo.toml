@@ -5,6 +5,7 @@ description = "web-phone system's CLI client"
 edition = "2024"
 
 [dependencies]
+chrono = { version = "0.4.41", features = ["serde"] }
 clap = { version = "4.5.43", features = ["derive", "string"] }
 confy = "1.0.0"
 directories = "6.0.0"

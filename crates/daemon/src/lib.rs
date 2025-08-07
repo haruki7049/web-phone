@@ -97,6 +97,13 @@ fn save_message(text: String, address: SocketAddr) -> Result<(), Box<dyn std::er
         Ok(false) => {
             let log_data_list: Vec<LogData> = vec![log_data];
 
+            std::fs::create_dir_all(
+                &config
+                    .log_file
+                    .parent()
+                    .ok_or("Failed to get the parent path from log_file")?,
+            )?;
+
             let mut log: File = File::create(&config.log_file)?;
             let log_data_string: String = serde_json::to_string(&log_data_list)?;
             let bytes: &[u8] = log_data_string.as_bytes();

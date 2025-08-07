@@ -1,9 +1,15 @@
+use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::Read;
+use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, OnceLock};
+use tracing::info;
 
-pub static DEFAULT_MESSAGES_LOG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
+static DEFAULT_MESSAGES_LOG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone")
         .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone");
     let mut result: PathBuf = proj_dirs.data_dir().to_path_buf();
@@ -13,10 +19,16 @@ pub static DEFAULT_MESSAGES_LOG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|
     Mutex::new(result)
 });
 
+static MESSAGES: OnceLock<Vec<LogData>> = OnceLock::new();
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
-
     let args: CLIArgs = CLIArgs::parse();
+
+    let mut log: File = File::open(&args.messages_log_path)?;
+    let mut contents: String = String::new();
+    log.read_to_string(&mut contents)?;
+    MESSAGES.set(serde_json::from_str(&contents)?).unwrap();
 
     match args.action {
         Actions::Messages => messages(),
@@ -24,7 +36,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn messages() -> Result<(), Box<dyn std::error::Error>> {
-    todo!();
+    let messages: &Vec<LogData> = MESSAGES.get().ok_or("Failed to get Messages")?;
+
+    for message in messages {
+        info!("message: {:?}", message);
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Parser)]
@@ -40,4 +58,11 @@ struct CLIArgs {
 #[derive(Debug, Clone, Subcommand)]
 enum Actions {
     Messages,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LogData {
+    address: SocketAddr,
+    date: DateTime<Utc>,
+    text: String,
 }
