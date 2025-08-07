@@ -25,9 +25,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     let args: CLIArgs = CLIArgs::parse();
 
-    let mut log: File = File::open(&args.messages_log_path)?;
+    let mut log: File = File::open(&args.messages_log_path).unwrap();
     let mut contents: String = String::new();
     log.read_to_string(&mut contents)?;
+
+    if contents.is_empty() {
+        // If the log file has no log, Use empty JSON array
+        contents.push_str("[]");
+    }
+
     MESSAGES.set(serde_json::from_str(&contents)?).unwrap();
 
     match args.action {
