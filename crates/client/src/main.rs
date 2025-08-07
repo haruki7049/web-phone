@@ -37,12 +37,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn messages() -> Result<(), Box<dyn std::error::Error>> {
     let messages: &Vec<LogData> = MESSAGES.get().ok_or("Failed to get Messages")?;
+    if messages.is_empty() {
+        return Err(Box::new(Errors::NoMessages));
+    }
 
     for message in messages {
         info!("message: {:?}", message);
     }
 
     Ok(())
+}
+
+#[derive(Debug)]
+enum Errors {
+    NoMessages,
+}
+
+impl std::error::Error for Errors {}
+
+impl std::fmt::Display for Errors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Errors::NoMessages => write!(f, "No messages"),
+        }
+    }
 }
 
 #[derive(Debug, Parser)]
