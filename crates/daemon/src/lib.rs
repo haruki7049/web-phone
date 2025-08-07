@@ -1,8 +1,8 @@
-use directories::ProjectDirs;
 use chrono::{DateTime, Utc};
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::io::{Write, Read};
 use std::fs::File;
+use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex, OnceLock};
@@ -24,7 +24,10 @@ pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
 pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
 #[tracing::instrument]
-pub fn read_stream(stream: TcpStream, address: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+pub fn read_stream(
+    stream: TcpStream,
+    address: SocketAddr,
+) -> Result<(), Box<dyn std::error::Error>> {
     spawn(move || {
         let mut websocket = accept(stream).unwrap();
 
@@ -105,7 +108,11 @@ fn save_message(text: String, address: SocketAddr) -> Result<(), Box<dyn std::er
             let bytes: &[u8] = log_data_string.as_bytes();
             log.write_all(bytes)?;
         }
-        Err(_) => return Err(Box::new(SaveMessageError::new("Failed to get original log file".to_string()))),
+        Err(_) => {
+            return Err(Box::new(SaveMessageError::new(
+                "Failed to get original log file".to_string(),
+            )));
+        }
     }
 
     Ok(())
