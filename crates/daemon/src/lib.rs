@@ -1,7 +1,7 @@
 use directories::ProjectDirs;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::io::Write;
+use std::io::{Write, Read};
 use std::fs::File;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
@@ -9,6 +9,8 @@ use std::sync::{LazyLock, Mutex, OnceLock};
 use std::thread::spawn;
 use tracing::{debug, info};
 use tungstenite::{Message, accept};
+
+const LOG_FILENAME: &str = "log.json";
 
 pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
@@ -22,7 +24,7 @@ pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
 pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
 #[tracing::instrument]
-pub fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+pub fn read_stream(stream: TcpStream, address: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
     spawn(move || {
         let mut websocket = accept(stream).unwrap();
 
@@ -38,19 +40,19 @@ pub fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn st
                     let text: String = utf8_bytes.as_str().to_string();
                     info!(
                         "Message from {}: {}",
-                        addr,
+                        address,
                         text.strip_suffix("\n").unwrap()
                     );
 
-                    save_message(text, addr).unwrap();
+                    save_message(text, address).unwrap();
                 }
                 Message::Close(v) => match v {
                     Some(close_frame) => {
-                        info!("{} is closed by: {}", addr, close_frame);
+                        info!("{} is closed by: {}", address, close_frame);
                         break;
                     }
                     None => {
-                        info!("{} is closed without any reason", addr);
+                        info!("{} is closed without any reason", address);
                         break;
                     }
                 },
@@ -63,7 +65,7 @@ pub fn read_stream(stream: TcpStream, addr: SocketAddr) -> Result<(), Box<dyn st
 }
 
 #[tracing::instrument]
-fn save_message(text: String, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+fn save_message(text: String, address: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
     let config: &Configuration = CONFIGURATION
         .get()
         .ok_or("Failed to get Configuration from CONFIGURATION")?;
@@ -71,17 +73,61 @@ fn save_message(text: String, addr: SocketAddr) -> Result<(), Box<dyn std::error
     debug!("config: {:?}", config);
 
     std::fs::create_dir_all(&config.log_dir)?;
-    let now = Utc::now();
-    let filename: String = format!("{}-{}.log", addr, now);
     let mut filepath: PathBuf = config.log_dir.clone();
-    filepath.push(filename);
+    filepath.push(LOG_FILENAME);
 
-    debug!("Writing {} into {}...", &text, &filepath.display());
+    let now = Utc::now();
+    let log_data: LogData = LogData {
+        address: address,
+        date: now,
+        text: text.clone(),
+    };
 
-    let mut log: File = File::create(filepath)?;
-    log.write_all(text.as_bytes())?;
+    match std::fs::exists(&filepath) {
+        Ok(true) => {
+            let mut original_log: File = File::open(&filepath)?;
+            let mut original_contents: String = String::new();
+            original_log.read_to_string(&mut original_contents)?;
+
+            let mut log_data_list: Vec<LogData> = serde_json::from_str(&original_contents)?;
+            log_data_list.push(log_data);
+
+            let log_data_string: String = serde_json::to_string(&log_data_list)?;
+            let mut new_log: File = File::create(&filepath)?;
+            let bytes: &[u8] = log_data_string.as_bytes();
+            new_log.write_all(bytes)?;
+        }
+        Ok(false) => {
+            let log_data_list: Vec<LogData> = vec![log_data];
+
+            let mut log: File = File::create(filepath)?;
+            let log_data_string: String = serde_json::to_string(&log_data_list)?;
+            let bytes: &[u8] = log_data_string.as_bytes();
+            log.write_all(bytes)?;
+        }
+        Err(_) => return Err(Box::new(SaveMessageError::new("Failed to get original log file".to_string()))),
+    }
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct SaveMessageError {
+    err_message: String,
+}
+
+impl std::fmt::Display for SaveMessageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Error from log saving process: {}", self.err_message)
+    }
+}
+
+impl std::error::Error for SaveMessageError {}
+
+impl SaveMessageError {
+    pub fn new(err_message: String) -> Self {
+        Self { err_message }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -106,4 +152,11 @@ fn default_log_dir() -> PathBuf {
         .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-daemon");
 
     proj_dirs.data_dir().to_path_buf()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LogData {
+    address: SocketAddr,
+    date: DateTime<Utc>,
+    text: String,
 }
