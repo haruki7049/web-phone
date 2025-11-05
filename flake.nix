@@ -56,13 +56,14 @@
           };
 
           treefmt = {
-            projectRootFile = "flake.nix";
+            projectRootFile = ".git/config";
 
             # Nix
             programs.nixfmt.enable = true;
 
             # Rust
             programs.rustfmt.enable = true;
+            settings.formatter.rustfmt.command = "${rust}/bin/rustfmt";
 
             # TOML
             programs.taplo.enable = true;
