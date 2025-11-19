@@ -11,8 +11,8 @@ use tracing::{debug, info};
 use tungstenite::{Message, WebSocket, accept};
 
 pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
-    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
-        .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-daemon");
+    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-server")
+        .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-server");
     let mut config_path: PathBuf = proj_dirs.config_dir().to_path_buf();
     let filename: &str = "config.toml";
 
