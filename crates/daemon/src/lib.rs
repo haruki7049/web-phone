@@ -5,10 +5,10 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::thread::spawn;
 use tracing::{debug, info};
-use tungstenite::{Message, accept};
+use tungstenite::{Message, WebSocket, accept};
 
 pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
@@ -21,18 +21,37 @@ pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
 });
 pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
+// Store all connected clients for broadcasting
+pub static CONNECTED_CLIENTS: LazyLock<Arc<Mutex<Vec<Arc<Mutex<WebSocket<TcpStream>>>>>>> = 
+    LazyLock::new(|| Arc::new(Mutex::new(Vec::new())));
+
 #[tracing::instrument]
 pub fn read_stream(
     stream: TcpStream,
     address: SocketAddr,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let websocket = accept(stream).unwrap();
+    let websocket_arc = Arc::new(Mutex::new(websocket));
+    
+    // Add this client to the connected clients list
+    {
+        let mut clients = CONNECTED_CLIENTS.lock().unwrap();
+        clients.push(websocket_arc.clone());
+        info!("Client {} connected. Total clients: {}", address, clients.len());
+    }
+    
     spawn(move || {
-        let mut websocket = accept(stream).unwrap();
-
         loop {
-            let message = websocket.read();
+            let message = {
+                let mut ws = websocket_arc.lock().unwrap();
+                ws.read()
+            };
 
             if message.is_err() {
+                // Remove this client from the connected clients list
+                let mut clients = CONNECTED_CLIENTS.lock().unwrap();
+                clients.retain(|client| !Arc::ptr_eq(client, &websocket_arc));
+                info!("Client {} disconnected. Total clients: {}", address, clients.len());
                 break;
             }
 
@@ -42,26 +61,53 @@ pub fn read_stream(
                     info!(
                         "Message from {}: {}",
                         address,
-                        text.strip_suffix("\n").unwrap()
+                        text.strip_suffix("\n").unwrap_or(&text)
                     );
 
-                    save_message(text, address).unwrap();
+                    save_message(text.clone(), address).unwrap();
+                    
+                    // Broadcast the message to all connected clients
+                    broadcast_message(&text, address).unwrap();
                 }
-                Message::Close(v) => match v {
-                    Some(close_frame) => {
-                        info!("{} is closed by: {}", address, close_frame);
-                        break;
+                Message::Close(v) => {
+                    // Remove this client from the connected clients list
+                    let mut clients = CONNECTED_CLIENTS.lock().unwrap();
+                    clients.retain(|client| !Arc::ptr_eq(client, &websocket_arc));
+                    
+                    match v {
+                        Some(close_frame) => {
+                            info!("{} is closed by: {}. Total clients: {}", address, close_frame, clients.len());
+                        }
+                        None => {
+                            info!("{} is closed without any reason. Total clients: {}", address, clients.len());
+                        }
                     }
-                    None => {
-                        info!("{} is closed without any reason", address);
-                        break;
-                    }
-                },
+                    break;
+                }
                 _ => (),
             }
         }
     });
 
+    Ok(())
+}
+
+#[tracing::instrument]
+fn broadcast_message(text: &str, sender_address: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    let clients = CONNECTED_CLIENTS.lock().unwrap();
+    let message_with_sender = format!("[{}] {}", sender_address, text);
+    let msg = Message::Text(message_with_sender.into());
+    
+    info!("Broadcasting message to {} clients", clients.len());
+    for client in clients.iter() {
+        let mut ws = client.lock().unwrap();
+        if let Err(e) = ws.send(msg.clone()) {
+            debug!("Failed to send message to client: {}", e);
+        } else {
+            debug!("Successfully sent message to client");
+        }
+    }
+    
     Ok(())
 }
 
