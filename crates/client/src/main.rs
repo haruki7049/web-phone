@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex, OnceLock};
 use tracing::info;
-use tungstenite::{connect, Message};
+use tungstenite::{Message, connect};
 
 static DEFAULT_MESSAGES_LOG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone")
@@ -63,10 +63,10 @@ fn messages() -> Result<(), Box<dyn std::error::Error>> {
 fn send_message(server: &str, message: &str) -> Result<(), Box<dyn std::error::Error>> {
     let url = format!("ws://{}", server);
     let (mut socket, _response) = connect(url)?;
-    
+
     socket.send(Message::Text(message.to_string().into()))?;
     info!("Message sent: {}", message);
-    
+
     socket.close(None)?;
     Ok(())
 }
@@ -75,17 +75,17 @@ fn chat(server: &str) -> Result<(), Box<dyn std::error::Error>> {
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
     use std::thread;
-    
+
     let url = format!("ws://{}", server);
     let (socket, _response) = connect(url)?;
-    
+
     info!("Connected to server at {}", server);
     info!("Type messages to send. Press Ctrl+C to exit.");
     println!("\n=== Chat started ===");
-    
+
     let socket = Arc::new(StdMutex::new(socket));
     let socket_clone = Arc::clone(&socket);
-    
+
     // Spawn a thread to handle incoming messages
     let _receiver = thread::spawn(move || {
         loop {
@@ -93,7 +93,7 @@ fn chat(server: &str) -> Result<(), Box<dyn std::error::Error>> {
                 let mut ws = socket_clone.lock().unwrap();
                 ws.read()
             };
-            
+
             match msg {
                 Ok(Message::Text(text)) => {
                     println!("\r{}", text);
@@ -109,12 +109,12 @@ fn chat(server: &str) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-    
+
     // Main thread handles user input
     let stdin = io::stdin();
     print!("> ");
     io::stdout().flush()?;
-    
+
     for line in stdin.lock().lines() {
         if let Ok(message) = line {
             let message = message.trim();
@@ -126,7 +126,7 @@ fn chat(server: &str) -> Result<(), Box<dyn std::error::Error>> {
             io::stdout().flush()?;
         }
     }
-    
+
     Ok(())
 }
 

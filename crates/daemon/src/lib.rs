@@ -22,7 +22,7 @@ pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
 pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
 // Store all connected clients for broadcasting
-pub static CONNECTED_CLIENTS: LazyLock<Arc<Mutex<Vec<Arc<Mutex<WebSocket<TcpStream>>>>>>> = 
+pub static CONNECTED_CLIENTS: LazyLock<Arc<Mutex<Vec<Arc<Mutex<WebSocket<TcpStream>>>>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(Vec::new())));
 
 #[tracing::instrument]
@@ -32,14 +32,18 @@ pub fn read_stream(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let websocket = accept(stream).unwrap();
     let websocket_arc = Arc::new(Mutex::new(websocket));
-    
+
     // Add this client to the connected clients list
     {
         let mut clients = CONNECTED_CLIENTS.lock().unwrap();
         clients.push(websocket_arc.clone());
-        info!("Client {} connected. Total clients: {}", address, clients.len());
+        info!(
+            "Client {} connected. Total clients: {}",
+            address,
+            clients.len()
+        );
     }
-    
+
     spawn(move || {
         loop {
             let message = {
@@ -51,7 +55,11 @@ pub fn read_stream(
                 // Remove this client from the connected clients list
                 let mut clients = CONNECTED_CLIENTS.lock().unwrap();
                 clients.retain(|client| !Arc::ptr_eq(client, &websocket_arc));
-                info!("Client {} disconnected. Total clients: {}", address, clients.len());
+                info!(
+                    "Client {} disconnected. Total clients: {}",
+                    address,
+                    clients.len()
+                );
                 break;
             }
 
@@ -65,7 +73,7 @@ pub fn read_stream(
                     );
 
                     save_message(text.clone(), address).unwrap();
-                    
+
                     // Broadcast the message to all connected clients
                     broadcast_message(&text, address).unwrap();
                 }
@@ -73,13 +81,22 @@ pub fn read_stream(
                     // Remove this client from the connected clients list
                     let mut clients = CONNECTED_CLIENTS.lock().unwrap();
                     clients.retain(|client| !Arc::ptr_eq(client, &websocket_arc));
-                    
+
                     match v {
                         Some(close_frame) => {
-                            info!("{} is closed by: {}. Total clients: {}", address, close_frame, clients.len());
+                            info!(
+                                "{} is closed by: {}. Total clients: {}",
+                                address,
+                                close_frame,
+                                clients.len()
+                            );
                         }
                         None => {
-                            info!("{} is closed without any reason. Total clients: {}", address, clients.len());
+                            info!(
+                                "{} is closed without any reason. Total clients: {}",
+                                address,
+                                clients.len()
+                            );
                         }
                     }
                     break;
@@ -93,11 +110,14 @@ pub fn read_stream(
 }
 
 #[tracing::instrument]
-fn broadcast_message(text: &str, sender_address: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+fn broadcast_message(
+    text: &str,
+    sender_address: SocketAddr,
+) -> Result<(), Box<dyn std::error::Error>> {
     let clients = CONNECTED_CLIENTS.lock().unwrap();
     let message_with_sender = format!("[{}] {}", sender_address, text);
     let msg = Message::Text(message_with_sender.into());
-    
+
     info!("Broadcasting message to {} clients", clients.len());
     for client in clients.iter() {
         let mut ws = client.lock().unwrap();
@@ -107,7 +127,7 @@ fn broadcast_message(text: &str, sender_address: SocketAddr) -> Result<(), Box<d
             debug!("Successfully sent message to client");
         }
     }
-    
+
     Ok(())
 }
 
