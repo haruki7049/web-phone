@@ -4,11 +4,10 @@ A WebSocket-based client-server text chat system written in Rust.
 
 ## Architecture
 
-The system consists of three components:
+The system consists of two components:
 
 - **Server**: WebSocket server that accepts connections and broadcasts messages to all connected clients
-- **Daemon**: WebSocket client for sending messages and interactive chat
-- **Client**: Message viewer for displaying saved message history
+- **Client**: Unified client with message viewer (default) and daemon mode for WebSocket client functionality
 
 ## Features
 
@@ -28,10 +27,10 @@ cargo run -p server
 
 By default, the server runs on `ws://127.0.0.1:15000`.
 
-### Send a Message
+### Send a Message (Daemon Mode)
 
 ```bash
-cargo run -p daemon -- send --message "Your message here"
+cargo run -p client -- --daemon send --message "Your message here"
 ```
 
 Options:
@@ -39,10 +38,10 @@ Options:
 - `--server`: Server address (default: `127.0.0.1:15000`)
 - `--message`: Message to send
 
-### Interactive Chat
+### Interactive Chat (Daemon Mode)
 
 ```bash
-cargo run -p daemon -- chat
+cargo run -p client -- --daemon chat
 ```
 
 Type messages and press Enter to send. Press Ctrl+C to exit.
@@ -51,7 +50,7 @@ Options:
 
 - `--server`: Server address (default: `127.0.0.1:15000`)
 
-### View Message History
+### View Message History (Default Mode)
 
 ```bash
 cargo run -p client

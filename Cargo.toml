@@ -7,4 +7,4 @@ edition = "2024"
 
 [workspace]
 
-members = ["crates/client", "crates/daemon", "crates/server"]
+members = ["crates/client", "crates/server"]
