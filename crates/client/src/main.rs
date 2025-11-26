@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use client::{Configuration, CONFIGURATION, DEFAULT_CONFIG_PATH};
+use client::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 use std::path::PathBuf;
 use tracing::info;
 
