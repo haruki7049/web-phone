@@ -1,15 +1,17 @@
 # web-phone
 
-A real-time audio transmission system over WebSocket, written in Rust.
+A real-time audio transmission system over WebTransport, written in Rust.
 
 ## Overview
 
-web-phone enables real-time voice communication between multiple clients through a WebSocket server. Audio is captured from the microphone, transmitted over WebSocket, and played back on connected clients' speakers.
+web-phone enables real-time voice communication between multiple clients through a WebTransport server. Audio is captured from the microphone, transmitted over WebTransport (HTTP/3 + QUIC), and played back on connected clients' speakers.
+
+WebTransport provides lower latency and better performance compared to WebSocket, making it ideal for real-time audio applications.
 
 ## Components
 
-- **daemon**: WebSocket server that broadcasts audio data to all connected clients
-- **client**: WebSocket client that captures microphone input and plays received audio
+- **daemon**: WebTransport server that broadcasts audio data to all connected clients
+- **client**: WebTransport client that captures microphone input and plays received audio
 
 ## Requirements
 
@@ -24,7 +26,7 @@ web-phone enables real-time voice communication between multiple clients through
 cargo run -p daemon
 ```
 
-The server listens on `ws://127.0.0.1:15000` by default.
+The server listens on `https://127.0.0.1:15000` by default (uses self-signed certificate).
 
 ### Start a Client
 
@@ -62,8 +64,8 @@ channels = 1
 ```
 ┌─────────┐     Audio Data      ┌─────────┐
 │ Client  │ ◄─────────────────► │ Server  │
-│  (mic)  │      WebSocket      │(daemon) │
-└─────────┘                     └─────────┘
+│  (mic)  │     WebTransport    │(daemon) │
+└─────────┘     (HTTP/3+QUIC)   └─────────┘
                                     │
                                     │ Broadcast
                                     ▼

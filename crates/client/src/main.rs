@@ -6,9 +6,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+use std::sync::{LazyLock, Mutex, OnceLock};
+use tokio::sync::mpsc;
 use tracing::{error, info};
-use tungstenite::{Message, connect};
+use wtransport::tls::client::NoServerVerification;
+use wtransport::{ClientConfig, Endpoint};
 
 static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-client")
@@ -22,10 +24,11 @@ static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
 
 static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
-/// Audio buffer for receiving audio data from WebSocket (FIFO queue)
+/// Audio buffer for receiving audio data from WebTransport (FIFO queue)
 static AUDIO_BUFFER: LazyLock<Mutex<VecDeque<f32>>> = LazyLock::new(|| Mutex::new(VecDeque::new()));
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     let args: CLIArgs = CLIArgs::parse();
 
@@ -36,12 +39,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .unwrap();
 
-    let config: &Configuration = CONFIGURATION
-        .get()
-        .ok_or("Failed to get Configuration")?;
+    let config: &Configuration = CONFIGURATION.get().ok_or("Failed to get Configuration")?;
 
     match args.action {
-        Actions::Call => start_audio_call(config)?,
+        Actions::Call => start_audio_call(config).await?,
         Actions::ListDevices => list_audio_devices()?,
     }
 
@@ -68,15 +69,33 @@ fn list_audio_devices() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn start_audio_call(config: &Configuration) -> Result<(), Box<dyn std::error::Error>> {
-    let server_url = format!("ws://{}:{}", config.server_ip, config.server_port);
+async fn start_audio_call(config: &Configuration) -> Result<(), Box<dyn std::error::Error>> {
+    let server_url = format!("https://{}:{}", config.server_ip, config.server_port);
     info!("Connecting to audio server at {}...", server_url);
 
-    let (websocket, _) = connect(&server_url)?;
-    let websocket = Arc::new(Mutex::new(websocket));
+    // Build custom TLS config that accepts self-signed certificates
+    let tls_config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(std::sync::Arc::new(NoServerVerification::default()))
+        .with_no_client_auth();
 
-    info!("Connected to audio server");
+    // Configure client with custom TLS (for development with self-signed certs)
+    let client_config = ClientConfig::builder()
+        .with_bind_default()
+        .with_custom_tls(tls_config)
+        .build();
+
+    let endpoint = Endpoint::client(client_config)?;
+    let connection = endpoint.connect(&server_url).await?;
+
+    info!("Connected to audio server via WebTransport");
     info!("Press Ctrl-C to disconnect");
+
+    // Open bidirectional stream for audio
+    let (mut send_stream, mut recv_stream) = connection.open_bi().await?.await?;
+
+    // Create channel for sending audio from capture thread
+    let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<u8>>(100);
 
     // Set up audio host
     let host = cpal::default_host();
@@ -103,9 +122,6 @@ fn start_audio_call(config: &Configuration) -> Result<(), Box<dyn std::error::Er
         buffer_size: cpal::BufferSize::Default,
     };
 
-    // Clone websocket for input stream
-    let ws_for_input = Arc::clone(&websocket);
-
     // Create input stream (capture from microphone)
     let input_stream = input_device.build_input_stream(
         &stream_config,
@@ -116,12 +132,8 @@ fn start_audio_call(config: &Configuration) -> Result<(), Box<dyn std::error::Er
                 .flat_map(|&sample| sample.to_le_bytes())
                 .collect();
 
-            // Send audio data over WebSocket
-            if let Ok(mut ws) = ws_for_input.lock()
-                && let Err(e) = ws.send(Message::Binary(bytes.into()))
-            {
-                error!("Failed to send audio: {}", e);
-            }
+            // Send audio data through channel
+            let _ = audio_tx.blocking_send(bytes);
         },
         |err| error!("Input stream error: {}", err),
         None,
@@ -148,45 +160,65 @@ fn start_audio_call(config: &Configuration) -> Result<(), Box<dyn std::error::Er
 
     info!("Audio streams started. Speaking now will transmit audio.");
 
-    // Handle incoming audio in main thread
+    // Task to send audio to server
+    let send_task = tokio::spawn(async move {
+        while let Some(audio_data) = audio_rx.recv().await {
+            // Send length prefix then data
+            let len = audio_data.len() as u32;
+            if send_stream.write_all(&len.to_le_bytes()).await.is_err() {
+                break;
+            }
+            if send_stream.write_all(&audio_data).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Receive audio from server
+    let mut buf = vec![0u8; 65536];
     loop {
-        let message = {
-            let mut ws = websocket.lock().unwrap();
-            ws.read()
-        };
-
-        match message {
-            Ok(Message::Binary(audio_data)) => {
-                // Convert received bytes back to f32 samples
-                let samples: Vec<f32> = audio_data
-                    .chunks_exact(4)
-                    .map(|chunk| {
-                        let bytes: [u8; 4] = chunk.try_into().unwrap();
-                        f32::from_le_bytes(bytes)
-                    })
-                    .collect();
-
-                // Add to playback buffer (FIFO order for proper audio playback)
-                let mut buffer = AUDIO_BUFFER.lock().unwrap();
-                for sample in samples {
-                    buffer.push_back(sample);
-                }
-            }
-            Ok(Message::Close(_)) => {
-                info!("Connection closed by server");
-                break;
-            }
-            Ok(Message::Ping(data)) => {
-                let mut ws = websocket.lock().unwrap();
-                let _ = ws.send(Message::Pong(data));
-            }
+        // Read length prefix
+        let mut len_buf = [0u8; 4];
+        match recv_stream.read_exact(&mut len_buf).await {
+            Ok(_) => {}
             Err(e) => {
-                error!("WebSocket error: {}", e);
+                error!("Connection closed: {}", e);
                 break;
             }
-            _ => {}
+        }
+        let len = u32::from_le_bytes(len_buf) as usize;
+
+        if len > buf.len() {
+            buf.resize(len, 0);
+        }
+
+        // Read audio data
+        match recv_stream.read_exact(&mut buf[..len]).await {
+            Ok(_) => {}
+            Err(e) => {
+                error!("Failed to read audio: {}", e);
+                break;
+            }
+        }
+
+        // Convert bytes back to f32 samples
+        let samples: Vec<f32> = buf[..len]
+            .chunks_exact(4)
+            .map(|chunk| {
+                let bytes: [u8; 4] = chunk.try_into().unwrap();
+                f32::from_le_bytes(bytes)
+            })
+            .collect();
+
+        // Add to playback buffer (FIFO order for proper audio playback)
+        let mut buffer = AUDIO_BUFFER.lock().unwrap();
+        for sample in samples {
+            buffer.push_back(sample);
         }
     }
+
+    send_task.abort();
+    info!("Disconnected from server");
 
     Ok(())
 }
