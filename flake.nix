@@ -39,6 +39,7 @@
           craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rust;
           overlays = [ inputs.rust-overlay.overlays.default ];
 
+          src = lib.cleanSource ./.;
           nativeBuildInputs = [
             # Compiler
             rust
@@ -50,10 +51,41 @@
             # Debugging tools
             pkgs.websocat
           ];
-
           buildInputs = lib.optionals pkgs.stdenv.isLinux [
             pkgs.alsa-lib
           ];
+
+          cargoArtifacts = craneLib.buildDepsOnly {
+            inherit src nativeBuildInputs buildInputs;
+          };
+          app = craneLib.buildPackage {
+            inherit
+              src
+              cargoArtifacts
+              nativeBuildInputs
+              buildInputs
+              ;
+            strictDeps = true;
+
+            doCheck = true;
+          };
+          cargo-clippy = craneLib.cargoClippy {
+            inherit
+              src
+              cargoArtifacts
+              nativeBuildInputs
+              buildInputs
+              ;
+            cargoClippyExtraArgs = "--verbose -- --deny warnings";
+          };
+          cargo-doc = craneLib.cargoDoc {
+            inherit
+              src
+              cargoArtifacts
+              nativeBuildInputs
+              buildInputs
+              ;
+          };
         in
         {
           _module.args.pkgs = import inputs.nixpkgs {
@@ -84,13 +116,18 @@
             programs.shfmt.enable = true;
           };
 
+          packages = {
+            inherit app;
+            default = app;
+            doc = cargo-doc;
+          };
+
+          checks = {
+            inherit app cargo-clippy cargo-doc;
+          };
+
           devShells.default = pkgs.mkShell {
             inherit nativeBuildInputs buildInputs;
-
-            env = {
-              LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
-              DYLD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
-            };
 
             shellHook = ''
               export PS1="\n[nix-shell:\w]$ "
