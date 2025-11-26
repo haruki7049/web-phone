@@ -196,7 +196,10 @@ async fn start_audio_call(config: &Configuration) -> Result<(), Box<dyn std::err
 
         // Validate message size to prevent excessive memory allocation
         if len > MAX_MESSAGE_SIZE {
-            error!("Server sent oversized message ({} bytes), disconnecting", len);
+            error!(
+                "Server sent oversized message ({} bytes), disconnecting",
+                len
+            );
             break;
         }
 

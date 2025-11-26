@@ -16,6 +16,7 @@ WebTransport provides lower latency and better performance compared to WebSocket
 ## Requirements
 
 ### Linux
+
 - ALSA development libraries: `sudo apt-get install libasound2-dev`
 
 ## Usage
@@ -41,6 +42,7 @@ cargo run -p client -- list-devices
 ### Configuration
 
 Configuration files are stored in platform-specific directories:
+
 - Linux: `~/.config/web-phone-daemon/config.toml` (server), `~/.config/web-phone-client/config.toml` (client)
 
 #### Server Configuration (`config.toml`)

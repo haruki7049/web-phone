@@ -36,10 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let endpoint = Endpoint::server(server_config)?;
 
-    info!(
-        "WebTransport audio server running on https://{}",
-        &address
-    );
+    info!("WebTransport audio server running on https://{}", &address);
     info!("Use Ctrl-C to stop this program");
     info!("Waiting for audio clients to connect...");
 
@@ -62,10 +59,7 @@ async fn handle_connection_impl(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let session_request = incoming.await?;
 
-    info!(
-        "New session request from: {}",
-        session_request.authority()
-    );
+    info!("New session request from: {}", session_request.authority());
 
     let connection = session_request.accept().await?;
     let client_id = CLIENT_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -113,7 +107,11 @@ async fn handle_connection_impl(
 
         // Validate message size to prevent DoS attacks
         if len > MAX_MESSAGE_SIZE {
-            tracing::warn!("Client {} sent oversized message ({} bytes), disconnecting", client_id, len);
+            tracing::warn!(
+                "Client {} sent oversized message ({} bytes), disconnecting",
+                client_id,
+                len
+            );
             break;
         }
 
