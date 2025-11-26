@@ -19,6 +19,10 @@ pub async fn start_call(config: &Configuration) -> Result<(), Box<dyn std::error
     let server_url = format!("https://{}:{}", config.server_ip, config.server_port);
     info!("Connecting to audio server at {}...", server_url);
 
+    // Install the default crypto provider for rustls
+    // This is required for rustls 0.23+ when using custom TLS configuration
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // SECURITY NOTE: NoServerVerification disables TLS certificate verification.
     // This is only suitable for development with self-signed certificates.
     // For production use, replace with proper certificate validation using
