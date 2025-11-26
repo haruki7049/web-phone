@@ -25,6 +25,9 @@ pub struct Configuration {
     pub server_port: u16,
     pub sample_rate: u32,
     pub channels: u16,
+    /// Enable echo back (hear your own voice)
+    #[serde(default)]
+    pub echo_enabled: bool,
 }
 
 impl Default for Configuration {
@@ -34,6 +37,7 @@ impl Default for Configuration {
             server_port: 15000,
             sample_rate: 48000,
             channels: 1,
+            echo_enabled: false,
         }
     }
 }

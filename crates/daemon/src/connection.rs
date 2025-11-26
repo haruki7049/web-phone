@@ -1,4 +1,5 @@
-use crate::broadcast::AUDIO_BROADCAST;
+use crate::broadcast::{AudioMessage, AUDIO_BROADCAST};
+use crate::config::CONFIGURATION;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::info;
 use wtransport::endpoint::IncomingSession;
@@ -28,6 +29,12 @@ async fn handle_connection_impl(
     let client_id = CLIENT_COUNT.fetch_add(1, Ordering::SeqCst);
     info!("Client {} connected", client_id);
 
+    // Get echo_enabled setting from configuration
+    let echo_enabled = CONFIGURATION
+        .get()
+        .map(|c| c.echo_enabled)
+        .unwrap_or(false);
+
     // Subscribe to broadcast channel for receiving audio from others
     let mut audio_rx = AUDIO_BROADCAST.subscribe();
 
@@ -38,13 +45,18 @@ async fn handle_connection_impl(
     let send_task = tokio::spawn(async move {
         loop {
             match audio_rx.recv().await {
-                Ok(audio_data) => {
+                Ok(audio_msg) => {
+                    // Skip if this is our own audio and echo is disabled
+                    if !echo_enabled && audio_msg.sender_id == client_id {
+                        continue;
+                    }
+
                     // Send length prefix then data
-                    let len = audio_data.len() as u32;
+                    let len = audio_msg.data.len() as u32;
                     if send_stream.write_all(&len.to_le_bytes()).await.is_err() {
                         break;
                     }
-                    if send_stream.write_all(&audio_data).await.is_err() {
+                    if send_stream.write_all(&audio_msg.data).await.is_err() {
                         break;
                     }
                 }
@@ -85,8 +97,11 @@ async fn handle_connection_impl(
             Err(_) => break,
         }
 
-        // Broadcast to all other clients
-        let _ = AUDIO_BROADCAST.send(buf[..len].to_vec());
+        // Broadcast to all clients (filtering happens on receive side)
+        let _ = AUDIO_BROADCAST.send(AudioMessage {
+            sender_id: client_id,
+            data: buf[..len].to_vec(),
+        });
     }
 
     send_task.abort();

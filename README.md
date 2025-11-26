@@ -50,6 +50,8 @@ Configuration files are stored in platform-specific directories:
 ```toml
 ip = "127.0.0.1"
 port = 15000
+# Enable echo back (clients hear their own voice)
+echo_enabled = false
 ```
 
 #### Client Configuration (`config.toml`)
@@ -59,6 +61,8 @@ server_ip = "127.0.0.1"
 server_port = 15000
 sample_rate = 48000
 channels = 1
+# Enable echo back (hear your own voice) - Note: Server-side setting takes precedence
+echo_enabled = false
 ```
 
 ## Architecture
