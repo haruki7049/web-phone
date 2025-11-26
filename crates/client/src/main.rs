@@ -73,7 +73,10 @@ async fn start_audio_call(config: &Configuration) -> Result<(), Box<dyn std::err
     let server_url = format!("https://{}:{}", config.server_ip, config.server_port);
     info!("Connecting to audio server at {}...", server_url);
 
-    // Build custom TLS config that accepts self-signed certificates
+    // SECURITY NOTE: NoServerVerification disables TLS certificate verification.
+    // This is only suitable for development with self-signed certificates.
+    // For production use, replace with proper certificate validation using
+    // `with_native_certs()` or `with_server_certificate_hashes()`.
     let tls_config = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(std::sync::Arc::new(NoServerVerification::default()))
@@ -174,6 +177,9 @@ async fn start_audio_call(config: &Configuration) -> Result<(), Box<dyn std::err
         }
     });
 
+    // Maximum audio message size (1MB should be more than enough for audio buffers)
+    const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+
     // Receive audio from server
     let mut buf = vec![0u8; 65536];
     loop {
@@ -187,6 +193,12 @@ async fn start_audio_call(config: &Configuration) -> Result<(), Box<dyn std::err
             }
         }
         let len = u32::from_le_bytes(len_buf) as usize;
+
+        // Validate message size to prevent excessive memory allocation
+        if len > MAX_MESSAGE_SIZE {
+            error!("Server sent oversized message ({} bytes), disconnecting", len);
+            break;
+        }
 
         if len > buf.len() {
             buf.resize(len, 0);

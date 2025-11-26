@@ -97,6 +97,9 @@ async fn handle_connection_impl(
         }
     });
 
+    // Maximum audio message size (1MB should be more than enough for audio buffers)
+    const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+
     // Receive audio from this client and broadcast to others
     let mut buf = vec![0u8; 65536];
     loop {
@@ -107,6 +110,12 @@ async fn handle_connection_impl(
             Err(_) => break,
         }
         let len = u32::from_le_bytes(len_buf) as usize;
+
+        // Validate message size to prevent DoS attacks
+        if len > MAX_MESSAGE_SIZE {
+            tracing::warn!("Client {} sent oversized message ({} bytes), disconnecting", client_id, len);
+            break;
+        }
 
         if len > buf.len() {
             buf.resize(len, 0);
