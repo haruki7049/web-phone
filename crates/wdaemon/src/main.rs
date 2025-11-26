@@ -1,8 +1,8 @@
 use clap::Parser;
-use wdaemon::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::info;
+use wdaemon::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 use wtransport::{Endpoint, Identity, ServerConfig};
 
 #[tokio::main]

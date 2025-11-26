@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
-use wclient::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 use std::path::PathBuf;
 use tracing::info;
+use wclient::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 
 #[tokio::main]
 async fn main() -> Result<()> {
