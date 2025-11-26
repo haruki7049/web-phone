@@ -3,6 +3,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleRate, StreamConfig};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
@@ -21,8 +22,8 @@ static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
 
 static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
-/// Audio buffer for receiving audio data from WebSocket
-static AUDIO_BUFFER: LazyLock<Mutex<Vec<f32>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+/// Audio buffer for receiving audio data from WebSocket (FIFO queue)
+static AUDIO_BUFFER: LazyLock<Mutex<VecDeque<f32>>> = LazyLock::new(|| Mutex::new(VecDeque::new()));
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
@@ -132,9 +133,9 @@ fn start_audio_call(config: &Configuration) -> Result<(), Box<dyn std::error::Er
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut buffer = AUDIO_BUFFER.lock().unwrap();
 
-            // Fill output buffer with received audio or silence
+            // Fill output buffer with received audio (FIFO) or silence
             for sample in data.iter_mut() {
-                *sample = buffer.pop().unwrap_or(0.0);
+                *sample = buffer.pop_front().unwrap_or(0.0);
             }
         },
         |err| error!("Output stream error: {}", err),
@@ -165,10 +166,10 @@ fn start_audio_call(config: &Configuration) -> Result<(), Box<dyn std::error::Er
                     })
                     .collect();
 
-                // Add to playback buffer (in reverse order for LIFO pop)
+                // Add to playback buffer (FIFO order for proper audio playback)
                 let mut buffer = AUDIO_BUFFER.lock().unwrap();
-                for sample in samples.into_iter().rev() {
-                    buffer.push(sample);
+                for sample in samples {
+                    buffer.push_back(sample);
                 }
             }
             Ok(Message::Close(_)) => {

@@ -98,7 +98,12 @@ fn broadcast_audio(
     audio_data: &[u8],
     sender: &Client,
 ) {
-    let clients = CONNECTED_CLIENTS.lock().unwrap();
+    // Clone the client list to minimize lock duration
+    let clients: Vec<Client> = {
+        let locked = CONNECTED_CLIENTS.lock().unwrap();
+        locked.clone()
+    };
+    
     let message = Message::Binary(audio_data.to_vec().into());
 
     for client in clients.iter() {
