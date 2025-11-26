@@ -23,9 +23,6 @@ pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 pub struct Configuration {
     pub ip: Ipv4Addr,
     pub port: u16,
-    /// Allow echo back (clients hear their own voice)
-    #[serde(default)]
-    pub allow_echoback: bool,
 }
 
 impl std::default::Default for Configuration {
@@ -33,7 +30,6 @@ impl std::default::Default for Configuration {
         Self {
             ip: Ipv4Addr::new(127, 0, 0, 1),
             port: 15000,
-            allow_echoback: false,
         }
     }
 }

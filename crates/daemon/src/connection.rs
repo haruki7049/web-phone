@@ -1,5 +1,4 @@
 use crate::broadcast::{AudioMessage, AUDIO_BROADCAST};
-use crate::config::CONFIGURATION;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::info;
 use wtransport::endpoint::IncomingSession;
@@ -29,29 +28,28 @@ async fn handle_connection_impl(
     let client_id = CLIENT_COUNT.fetch_add(1, Ordering::SeqCst);
     info!("Client {} connected", client_id);
 
-    // Get allow_echoback setting from configuration
-    let allow_echoback = CONFIGURATION
-        .get()
-        .map(|c| c.allow_echoback)
-        .unwrap_or(false);
-
     // Subscribe to broadcast channel for receiving audio from others
     let mut audio_rx = AUDIO_BROADCAST.subscribe();
 
     // Open a bidirectional stream for audio
     let (mut send_stream, mut recv_stream) = connection.accept_bi().await?;
 
+    // Send client_id to client first so they can filter their own audio
+    send_stream.write_all(&client_id.to_le_bytes()).await?;
+
     // Spawn task to send audio to this client
     let send_task = tokio::spawn(async move {
         loop {
             match audio_rx.recv().await {
                 Ok(audio_msg) => {
-                    // Skip if this is our own audio and echoback is disabled
-                    if !allow_echoback && audio_msg.sender_id == client_id {
-                        continue;
+                    // Send sender_id (8 bytes) + length prefix (4 bytes) + data
+                    if send_stream
+                        .write_all(&audio_msg.sender_id.to_le_bytes())
+                        .await
+                        .is_err()
+                    {
+                        break;
                     }
-
-                    // Send length prefix then data
                     let len = audio_msg.data.len() as u32;
                     if send_stream.write_all(&len.to_le_bytes()).await.is_err() {
                         break;
@@ -97,7 +95,7 @@ async fn handle_connection_impl(
             Err(_) => break,
         }
 
-        // Broadcast to all clients (filtering happens on receive side)
+        // Broadcast to all clients (clients filter their own audio based on their settings)
         let _ = AUDIO_BROADCAST.send(AudioMessage {
             sender_id: client_id,
             data: buf[..len].to_vec(),

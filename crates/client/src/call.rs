@@ -53,6 +53,19 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
     // Open bidirectional stream for audio
     let (mut send_stream, mut recv_stream) = connection.open_bi().await?.await?;
 
+    // Receive our client_id from server
+    let mut client_id_buf = [0u8; 8];
+    recv_stream.read_exact(&mut client_id_buf).await?;
+    let my_client_id = u64::from_le_bytes(client_id_buf);
+    info!("Assigned client ID: {}", my_client_id);
+
+    // Get allow_echoback setting from config
+    let allow_echoback = config.allow_echoback;
+    info!(
+        "Echo back: {}",
+        if allow_echoback { "enabled" } else { "disabled" }
+    );
+
     // Create channel for sending audio from capture thread
     let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<u8>>(100);
 
@@ -136,6 +149,17 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
     // Receive audio from server
     let mut buf = vec![0u8; 65536];
     loop {
+        // Read sender_id (8 bytes)
+        let mut sender_id_buf = [0u8; 8];
+        match recv_stream.read_exact(&mut sender_id_buf).await {
+            Ok(_) => {}
+            Err(e) => {
+                error!("Connection closed: {}", e);
+                break;
+            }
+        }
+        let sender_id = u64::from_le_bytes(sender_id_buf);
+
         // Read length prefix
         let mut len_buf = [0u8; 4];
         match recv_stream.read_exact(&mut len_buf).await {
@@ -167,6 +191,11 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
                 error!("Failed to read audio: {}", e);
                 break;
             }
+        }
+
+        // Skip our own audio if echoback is disabled
+        if !allow_echoback && sender_id == my_client_id {
+            continue;
         }
 
         // Convert bytes back to f32 samples
