@@ -6,4 +6,4 @@ pub mod connection;
 
 // Re-export commonly used types
 pub use broadcast::AUDIO_BROADCAST;
-pub use config::{Configuration, CONFIGURATION, DEFAULT_CONFIG_PATH};
+pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};

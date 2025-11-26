@@ -1,5 +1,5 @@
 use clap::Parser;
-use daemon::{Configuration, CONFIGURATION, DEFAULT_CONFIG_PATH};
+use daemon::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::info;

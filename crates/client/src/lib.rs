@@ -5,4 +5,4 @@ pub mod call;
 pub mod config;
 
 // Re-export commonly used types
-pub use config::{Configuration, CONFIGURATION, DEFAULT_CONFIG_PATH};
+pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
