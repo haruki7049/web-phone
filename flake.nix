@@ -42,6 +42,7 @@
           nativeBuildInputs = [
             # Compiler
             rust
+            pkgs.pkg-config # pkg-config
 
             # LSP
             pkgs.nil
