@@ -6,7 +6,7 @@ members = ["crates/wclient", "crates/wdaemon"]
 version = "0.1.0"
 edition = "2024"
 
-[workspace.metadata.crate]
+[workspace.metadata.crane]
 name = "web-phone"
 
 [workspace.dependencies]
