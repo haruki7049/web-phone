@@ -1,12 +1,10 @@
-[package]
-name = "web-phone"
+[workspace]
+resolver = "3"
+members = ["crates/client", "crates/daemon"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-
-[dependencies]
-
-[workspace]
-members = ["crates/client", "crates/daemon"]
 
 [workspace.dependencies]
 clap = { version = "4.5.43", features = ["derive", "string"] }

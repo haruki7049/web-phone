@@ -1906,10 +1906,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "web-phone"
-version = "0.1.0"
-
-[[package]]
 name = "web-sys"
 version = "0.3.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
