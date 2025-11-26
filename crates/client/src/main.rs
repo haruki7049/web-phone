@@ -1,10 +1,11 @@
+use anyhow::Result;
 use clap::Parser;
-use client::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
+use client::{Configuration, CONFIGURATION, DEFAULT_CONFIG_PATH};
 use std::path::PathBuf;
 use tracing::info;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let args: CLIArgs = CLIArgs::parse();
 
@@ -15,7 +16,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .unwrap();
 
-    let config: &Configuration = CONFIGURATION.get().ok_or("Failed to get Configuration")?;
+    let config: &Configuration = CONFIGURATION
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("Failed to get Configuration"))?;
 
     match args.action {
         Actions::Call => client::call::start_call(config).await?,

@@ -1,4 +1,5 @@
 use crate::config::Configuration;
+use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleRate, StreamConfig};
 use std::collections::VecDeque;
@@ -15,13 +16,15 @@ static AUDIO_BUFFER: LazyLock<Mutex<VecDeque<f32>>> = LazyLock::new(|| Mutex::ne
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 
 /// Start an audio call to the server
-pub async fn start_call(config: &Configuration) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_call(config: &Configuration) -> Result<()> {
     let server_url = format!("https://{}:{}", config.server_ip, config.server_port);
     info!("Connecting to audio server at {}...", server_url);
 
     // Install the default crypto provider for rustls
     // This is required for rustls 0.23+ when using custom TLS configuration
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .map_err(|arc| anyhow!("failed to install ring provider: {:?}", arc))?;
 
     // SECURITY NOTE: NoServerVerification disables TLS certificate verification.
     // This is only suitable for development with self-signed certificates.
@@ -56,13 +59,13 @@ pub async fn start_call(config: &Configuration) -> Result<(), Box<dyn std::error
     // Set up input (microphone)
     let input_device = host
         .default_input_device()
-        .ok_or("No input device available")?;
+        .ok_or_else(|| anyhow!("No input device available"))?;
     info!("Using input device: {}", input_device.name()?);
 
     // Set up output (speakers)
     let output_device = host
         .default_output_device()
-        .ok_or("No output device available")?;
+        .ok_or_else(|| anyhow!("No output device available"))?;
     info!("Using output device: {}", output_device.name()?);
 
     // Configure audio format - use a common format

@@ -1,8 +1,9 @@
+use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait};
 use tracing::info;
 
 /// List all available audio input and output devices
-pub fn list_devices() -> Result<(), Box<dyn std::error::Error>> {
+pub fn list_devices() -> Result<()> {
     let host = cpal::default_host();
 
     info!("Available input devices:");
