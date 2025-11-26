@@ -1,14 +1,10 @@
-use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex, OnceLock};
-use std::thread::spawn;
-use tracing::{debug, info};
-use tungstenite::{Message, accept};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+use tracing::info;
+use tungstenite::{Message, WebSocket, accept};
 
 pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
@@ -21,126 +17,106 @@ pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
 });
 pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
-#[tracing::instrument]
+/// Type alias for a WebSocket client connection
+type Client = Arc<Mutex<WebSocket<TcpStream>>>;
+
+/// Global list of all connected WebSocket clients for broadcasting audio
+pub static CONNECTED_CLIENTS: LazyLock<Mutex<Vec<Client>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Handle incoming WebSocket stream and broadcast audio data to all other clients
+#[tracing::instrument(skip(stream))]
 pub fn read_stream(
     stream: TcpStream,
     address: SocketAddr,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    spawn(move || {
-        let mut websocket = accept(stream).unwrap();
+    std::thread::spawn(move || {
+        let websocket = match accept(stream) {
+            Ok(ws) => ws,
+            Err(e) => {
+                tracing::error!("Failed to accept WebSocket connection from {}: {}", address, e);
+                return;
+            }
+        };
+
+        let client = Arc::new(Mutex::new(websocket));
+
+        // Register client
+        {
+            let mut clients = CONNECTED_CLIENTS.lock().unwrap();
+            clients.push(Arc::clone(&client));
+            info!("Client {} connected. Total clients: {}", address, clients.len());
+        }
 
         loop {
-            let message = websocket.read();
+            let message = {
+                let mut ws = client.lock().unwrap();
+                ws.read()
+            };
 
-            if message.is_err() {
-                break;
-            }
-
-            match message.unwrap() {
-                Message::Text(utf8_bytes) => {
-                    let text: String = utf8_bytes.as_str().to_string();
-                    info!(
-                        "Message from {}: {}",
-                        address,
-                        text.strip_suffix("\n").unwrap()
-                    );
-
-                    save_message(text, address).unwrap();
+            match message {
+                Ok(Message::Binary(audio_data)) => {
+                    // Broadcast audio data to all other connected clients
+                    broadcast_audio(&audio_data, &client);
                 }
-                Message::Close(v) => match v {
-                    Some(close_frame) => {
-                        info!("{} is closed by: {}", address, close_frame);
-                        break;
+                Ok(Message::Close(frame)) => {
+                    match frame {
+                        Some(close_frame) => {
+                            info!("{} disconnected: {}", address, close_frame);
+                        }
+                        None => {
+                            info!("{} disconnected without reason", address);
+                        }
                     }
-                    None => {
-                        info!("{} is closed without any reason", address);
-                        break;
-                    }
-                },
-                _ => (),
+                    break;
+                }
+                Ok(Message::Ping(data)) => {
+                    let mut ws = client.lock().unwrap();
+                    let _ = ws.send(Message::Pong(data));
+                }
+                Err(e) => {
+                    tracing::error!("Error reading from {}: {}", address, e);
+                    break;
+                }
+                _ => {}
             }
+        }
+
+        // Unregister client
+        {
+            let mut clients = CONNECTED_CLIENTS.lock().unwrap();
+            clients.retain(|c| !Arc::ptr_eq(c, &client));
+            info!("Client {} removed. Total clients: {}", address, clients.len());
         }
     });
 
     Ok(())
 }
 
-#[tracing::instrument]
-fn save_message(text: String, address: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
-    let config: &Configuration = CONFIGURATION
-        .get()
-        .ok_or("Failed to get Configuration from CONFIGURATION")?;
+/// Broadcast audio data to all connected clients except the sender
+fn broadcast_audio(
+    audio_data: &[u8],
+    sender: &Client,
+) {
+    let clients = CONNECTED_CLIENTS.lock().unwrap();
+    let message = Message::Binary(audio_data.to_vec().into());
 
-    debug!("config: {:?}", config);
-
-    let now = Utc::now();
-    let log_data: LogData = LogData {
-        address: address,
-        date: now,
-        text: text.clone(),
-    };
-
-    match std::fs::exists(&config.log_file) {
-        Ok(true) => {
-            let mut original_log: File = File::open(&config.log_file)?;
-            let mut original_contents: String = String::new();
-            original_log.read_to_string(&mut original_contents)?;
-
-            let mut log_data_list: Vec<LogData> = serde_json::from_str(&original_contents)?;
-            log_data_list.push(log_data);
-
-            let log_data_string: String = serde_json::to_string(&log_data_list)?;
-            let mut new_log: File = File::create(&config.log_file)?;
-            let bytes: &[u8] = log_data_string.as_bytes();
-            new_log.write_all(bytes)?;
+    for client in clients.iter() {
+        // Don't send back to the sender
+        if Arc::ptr_eq(client, sender) {
+            continue;
         }
-        Ok(false) => {
-            let log_data_list: Vec<LogData> = vec![log_data];
 
-            std::fs::create_dir_all(
-                &config
-                    .log_file
-                    .parent()
-                    .ok_or("Failed to get the parent path from log_file")?,
-            )?;
-
-            let mut log: File = File::create(&config.log_file)?;
-            let log_data_string: String = serde_json::to_string(&log_data_list)?;
-            let bytes: &[u8] = log_data_string.as_bytes();
-            log.write_all(bytes)?;
+        if let Ok(mut ws) = client.lock()
+            && let Err(e) = ws.send(message.clone())
+        {
+            tracing::warn!("Failed to send audio to client: {}", e);
         }
-        Err(_) => {
-            return Err(Box::new(SaveMessageError::new(
-                "Failed to get original log file".to_string(),
-            )));
-        }
-    }
-
-    Ok(())
-}
-
-#[derive(Debug)]
-struct SaveMessageError {
-    err_message: String,
-}
-
-impl std::fmt::Display for SaveMessageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Error from log saving process: {}", self.err_message)
-    }
-}
-
-impl std::error::Error for SaveMessageError {}
-
-impl SaveMessageError {
-    pub fn new(err_message: String) -> Self {
-        Self { err_message }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Configuration {
-    pub log_file: PathBuf,
     pub ip: Ipv4Addr,
     pub port: u16,
 }
@@ -148,25 +124,8 @@ pub struct Configuration {
 impl std::default::Default for Configuration {
     fn default() -> Self {
         Self {
-            log_file: default_log_file(),
             ip: Ipv4Addr::new(127, 0, 0, 1),
             port: 15000,
         }
     }
-}
-
-fn default_log_file() -> PathBuf {
-    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone")
-        .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone");
-
-    let mut result: PathBuf = proj_dirs.data_dir().to_path_buf();
-    result.push("messages.json");
-    result
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LogData {
-    address: SocketAddr,
-    date: DateTime<Utc>,
-    text: String,
 }

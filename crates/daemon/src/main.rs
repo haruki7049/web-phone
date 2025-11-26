@@ -2,7 +2,7 @@ use clap::Parser;
 use daemon::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 use std::net::TcpListener;
 use std::path::PathBuf;
-use tracing::{debug, info};
+use tracing::info;
 
 #[tracing::instrument]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,12 +21,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let address: String = format!("{}:{}", &config.ip, &config.port);
     let server = TcpListener::bind(&address)?;
-    info!("Running on ws://{}", &address);
+    info!("WebSocket audio server running on ws://{}", &address);
     info!("Use Ctrl-C to stop this program");
-    debug!(
-        "The messages you received will be saved to {}",
-        &config.log_file.display()
-    );
+    info!("Waiting for audio clients to connect...");
 
     loop {
         let (stream, addr) = server.accept()?;
