@@ -1,16 +1,13 @@
 [package]
-name = "client"
+name = "wdaemon"
 version = "0.1.0"
-description = "WebTransport client for real-time audio transmission"
+description = "WebTransport server for real-time audio transmission"
 edition = "2024"
 
 [dependencies]
-anyhow.workspace = true
 clap.workspace = true
 confy.workspace = true
-cpal.workspace = true
 directories.workspace = true
-rustls.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true

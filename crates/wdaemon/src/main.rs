@@ -1,5 +1,5 @@
 use clap::Parser;
-use daemon::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
+use wdaemon::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::info;
@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: CLIArgs = CLIArgs::parse();
     CONFIGURATION
         .set(confy::load_path(&args.config_path).unwrap_or_else(|_| {
-            info!("Running web-phone-daemon with default Configuration...");
+            info!("Running wdaemon with default Configuration...");
             Configuration::default()
         }))
         .unwrap();
@@ -39,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Accept incoming connections
     loop {
         let incoming = endpoint.accept().await;
-        tokio::spawn(daemon::connection::handle_connection(incoming));
+        tokio::spawn(wdaemon::connection::handle_connection(incoming));
     }
 }
 

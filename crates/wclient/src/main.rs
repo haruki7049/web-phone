@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use client::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
+use wclient::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 use std::path::PathBuf;
 use tracing::info;
 
@@ -11,7 +11,7 @@ async fn main() -> Result<()> {
 
     CONFIGURATION
         .set(confy::load_path(&args.config_path).unwrap_or_else(|_| {
-            info!("Running web-phone-client with default Configuration...");
+            info!("Running wclient with default Configuration...");
             Configuration::default()
         }))
         .unwrap();
@@ -21,8 +21,8 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Failed to get Configuration"))?;
 
     match args.action {
-        Actions::Call => client::call::start_call(config).await?,
-        Actions::ListDevices => client::audio::list_devices()?,
+        Actions::Call => wclient::call::start_call(config).await?,
+        Actions::ListDevices => wclient::audio::list_devices()?,
     }
 
     Ok(())
