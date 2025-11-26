@@ -1,9 +1,9 @@
 use crate::config::Configuration;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleRate, StreamConfig};
 use std::collections::VecDeque;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 use wtransport::tls::client::NoServerVerification;
@@ -30,10 +30,13 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
     // This is only suitable for development with self-signed certificates.
     // For production use, replace with proper certificate validation using
     // `with_native_certs()` or `with_server_certificate_hashes()`.
-    let tls_config = rustls::ClientConfig::builder()
+    let mut tls_config = rustls::ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(std::sync::Arc::new(NoServerVerification::default()))
+        .with_custom_certificate_verifier(Arc::new(NoServerVerification::default()))
         .with_no_client_auth();
+
+    // Set ALPN protocols for HTTP/3 (required for WebTransport)
+    tls_config.alpn_protocols = vec![b"h3".to_vec()];
 
     // Configure client with custom TLS (for development with self-signed certs)
     let client_config = ClientConfig::builder()
