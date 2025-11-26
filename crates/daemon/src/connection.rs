@@ -1,4 +1,4 @@
-use crate::broadcast::{AudioMessage, AUDIO_BROADCAST};
+use crate::broadcast::{AUDIO_BROADCAST, AudioMessage};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::info;
 use wtransport::endpoint::IncomingSession;

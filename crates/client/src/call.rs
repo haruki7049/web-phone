@@ -63,7 +63,11 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
     let allow_echoback = config.allow_echoback;
     info!(
         "Echo back: {}",
-        if allow_echoback { "enabled" } else { "disabled" }
+        if allow_echoback {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
 
     // Create channel for sending audio from capture thread
