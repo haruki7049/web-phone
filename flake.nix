@@ -49,6 +49,10 @@
             # Debugging tools
             pkgs.websocat
           ];
+
+          buildInputs = lib.optionals pkgs.stdenv.isLinux [
+            pkgs.alsa-lib
+          ];
         in
         {
           _module.args.pkgs = import inputs.nixpkgs {
@@ -80,7 +84,12 @@
           };
 
           devShells.default = pkgs.mkShell {
-            inherit nativeBuildInputs;
+            inherit nativeBuildInputs buildInputs;
+
+            env = {
+              LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
+              DYLD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
+            };
 
             shellHook = ''
               export PS1="\n[nix-shell:\w]$ "
