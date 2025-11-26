@@ -29,10 +29,10 @@ async fn handle_connection_impl(
     let client_id = CLIENT_COUNT.fetch_add(1, Ordering::SeqCst);
     info!("Client {} connected", client_id);
 
-    // Get echo_enabled setting from configuration
-    let echo_enabled = CONFIGURATION
+    // Get allow_echoback setting from configuration
+    let allow_echoback = CONFIGURATION
         .get()
-        .map(|c| c.echo_enabled)
+        .map(|c| c.allow_echoback)
         .unwrap_or(false);
 
     // Subscribe to broadcast channel for receiving audio from others
@@ -46,8 +46,8 @@ async fn handle_connection_impl(
         loop {
             match audio_rx.recv().await {
                 Ok(audio_msg) => {
-                    // Skip if this is our own audio and echo is disabled
-                    if !echo_enabled && audio_msg.sender_id == client_id {
+                    // Skip if this is our own audio and echoback is disabled
+                    if !allow_echoback && audio_msg.sender_id == client_id {
                         continue;
                     }
 
