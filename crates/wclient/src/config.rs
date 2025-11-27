@@ -150,7 +150,7 @@ mod tests {
         assert_eq!(config.sample_rate, 48000);
         assert_eq!(config.channels, 1);
         assert!(!config.allow_echoback);
-        assert_eq!(config.tls_verify, TlsVerifyMode::Skip);
+        assert_eq!(config.tls_verify, TlsVerifyMode::Native);
     }
 
     #[test]
