@@ -38,7 +38,6 @@ pub enum TlsVerifyMode {
     /// **WARNING**: This mode is insecure and should only be used for
     /// development with self-signed certificates. It allows connections
     /// to any server without validating the certificate.
-    #[default]
     Skip,
 
     /// Use the system's native certificate store for verification.
@@ -46,6 +45,7 @@ pub enum TlsVerifyMode {
     /// This is the recommended mode for production use. The client will
     /// verify the server's certificate against the certificates trusted
     /// by the operating system.
+    #[default]
     Native,
 
     /// Verify using specific certificate SHA-256 hashes.
