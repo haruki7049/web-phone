@@ -1,0 +1,18 @@
+[package]
+name = "wdaemon"
+version = "0.1.0"
+description = "WebTransport server for real-time audio transmission"
+edition = "2024"
+
+[dependencies]
+clap.workspace = true
+confy.workspace = true
+directories.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+wtransport.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
