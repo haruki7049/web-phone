@@ -10,6 +10,7 @@
 //! - Playing received audio through speakers
 
 use crate::config::{Configuration, TlsVerifyMode};
+use crate::tls;
 use anyhow::{Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleRate, StreamConfig};
@@ -254,8 +255,9 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
 /// specified [`TlsVerifyMode`]:
 ///
 /// - `Skip`: No certificate verification (development only)
-/// - `Native`: Uses system's native certificate store
-/// - `CertificateHash`: Pins specific certificate SHA-256 hashes
+/// - `Native`: Uses system's native certificate store (default, recommended)
+/// - `SpkiHash`: Pins specific SPKI (Subject Public Key Info) SHA-256 hashes
+/// - `CertificateHash`: Pins specific certificate SHA-256 hashes (legacy)
 ///
 /// # Arguments
 ///
@@ -280,9 +282,37 @@ fn build_client_config(tls_verify: &TlsVerifyMode) -> Result<ClientConfig> {
                 .with_native_certs()
                 .build()
         }
+        TlsVerifyMode::SpkiHash { hashes } => {
+            info!(
+                "Using SPKI hash pinning verification with {} hash(es)",
+                hashes.len()
+            );
+
+            // Parse the SPKI hashes
+            let parsed_hashes: Vec<tls::SpkiSha256> = hashes
+                .iter()
+                .map(|h| tls::parse_hex_hash(h))
+                .collect::<Result<Vec<_>>>()?;
+
+            // Log the hashes for debugging
+            for (i, hash) in parsed_hashes.iter().enumerate() {
+                info!("  SPKI hash {}: {}", i + 1, tls::format_hash_dotted(hash));
+            }
+
+            // Convert to wtransport's Sha256Digest format
+            let digests: Vec<Sha256Digest> = parsed_hashes
+                .iter()
+                .map(|h| Sha256Digest::new(*h))
+                .collect();
+
+            ClientConfig::builder()
+                .with_bind_default()
+                .with_server_certificate_hashes(digests)
+                .build()
+        }
         TlsVerifyMode::CertificateHash { hashes } => {
             info!(
-                "Using certificate hash verification with {} hash(es)",
+                "Using certificate hash verification with {} hash(es) (legacy mode)",
                 hashes.len()
             );
             let digests: Vec<Sha256Digest> = hashes

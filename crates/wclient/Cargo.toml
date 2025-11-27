@@ -11,12 +11,14 @@ color-eyre.workspace = true
 confy.workspace = true
 cpal.workspace = true
 directories.workspace = true
+ring.workspace = true
 rustls.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 wtransport.workspace = true
+x509-parser.workspace = true
 
 [dev-dependencies]
 toml.workspace = true

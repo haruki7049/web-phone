@@ -19,15 +19,15 @@ use std::sync::{LazyLock, Mutex, OnceLock};
 /// ```
 /// use wclient::config::TlsVerifyMode;
 ///
+/// // For production with proper CA-signed certificates (default)
+/// let prod_mode = TlsVerifyMode::Native;
+///
 /// // For development with self-signed certificates
 /// let dev_mode = TlsVerifyMode::Skip;
 ///
-/// // For production with proper CA-signed certificates
-/// let prod_mode = TlsVerifyMode::Native;
-///
-/// // For pinning specific certificate hashes
-/// let pinned = TlsVerifyMode::CertificateHash {
-///     hashes: vec!["abc123...".to_string()],
+/// // For SPKI pinning (recommended for self-signed certs in production)
+/// let pinned = TlsVerifyMode::SpkiHash {
+///     hashes: vec!["ab:cd:ef:...".to_string()],
 /// };
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -38,7 +38,6 @@ pub enum TlsVerifyMode {
     /// **WARNING**: This mode is insecure and should only be used for
     /// development with self-signed certificates. It allows connections
     /// to any server without validating the certificate.
-    #[default]
     Skip,
 
     /// Use the system's native certificate store for verification.
@@ -46,13 +45,35 @@ pub enum TlsVerifyMode {
     /// This is the recommended mode for production use. The client will
     /// verify the server's certificate against the certificates trusted
     /// by the operating system.
+    #[default]
     Native,
 
-    /// Verify using specific certificate SHA-256 hashes.
+    /// Verify using specific SPKI (Subject Public Key Info) SHA-256 hashes.
     ///
     /// This mode allows certificate pinning by specifying the expected
-    /// SHA-256 hash(es) of the server's certificate. Useful for
-    /// self-signed certificates in controlled environments.
+    /// SHA-256 hash(es) of the server's certificate's SPKI (public key).
+    /// 
+    /// SPKI pinning is preferred over full certificate hash pinning because:
+    /// - It survives certificate renewals as long as the public key stays the same
+    /// - It's more flexible for certificate rotation
+    ///
+    /// Useful for self-signed certificates in controlled environments.
+    SpkiHash {
+        /// List of acceptable SPKI SHA-256 hashes.
+        ///
+        /// Supported formats:
+        /// - Dotted hex format: `"ab:cd:ef:12:34:..."`
+        /// - Plain hex format: `"abcdef1234..."`
+        hashes: Vec<String>,
+    },
+
+    /// Verify using specific certificate SHA-256 hashes (legacy).
+    ///
+    /// **Note**: Prefer `SpkiHash` for new configurations as it's more
+    /// flexible for certificate rotation.
+    ///
+    /// This mode allows certificate pinning by specifying the expected
+    /// SHA-256 hash(es) of the server's full certificate.
     CertificateHash {
         /// List of acceptable SHA-256 certificate hashes.
         ///
@@ -117,10 +138,11 @@ pub struct Configuration {
     /// TLS certificate verification mode.
     ///
     /// Controls how the client verifies the server's TLS certificate.
-    /// Defaults to `TlsVerifyMode::Skip` for backward compatibility.
+    /// Defaults to `TlsVerifyMode::Native` for production security.
     ///
-    /// For production use, set to `TlsVerifyMode::Native` to use
-    /// the system's certificate store.
+    /// For development with self-signed certificates, set to
+    /// `TlsVerifyMode::Skip` or use `TlsVerifyMode::SpkiHash` with
+    /// the server's public key hash.
     #[serde(default)]
     pub tls_verify: TlsVerifyMode,
 }
@@ -150,7 +172,7 @@ mod tests {
         assert_eq!(config.sample_rate, 48000);
         assert_eq!(config.channels, 1);
         assert!(!config.allow_echoback);
-        assert_eq!(config.tls_verify, TlsVerifyMode::Skip);
+        assert_eq!(config.tls_verify, TlsVerifyMode::Native);
     }
 
     #[test]
@@ -191,8 +213,8 @@ mod tests {
         let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
         // allow_echoback should default to false when not specified
         assert!(!config.allow_echoback);
-        // tls_verify should default to Skip when not specified
-        assert_eq!(config.tls_verify, TlsVerifyMode::Skip);
+        // tls_verify should default to Native when not specified
+        assert_eq!(config.tls_verify, TlsVerifyMode::Native);
     }
 
     #[test]
@@ -224,6 +246,27 @@ mod tests {
     }
 
     #[test]
+    fn test_tls_verify_mode_spki_hash() {
+        let toml_str = r#"
+            server_ip = "127.0.0.1"
+            server_port = 15000
+            sample_rate = 48000
+            channels = 1
+            [tls_verify]
+            type = "spki_hash"
+            hashes = ["ab:cd:ef:12:34:56:78:90:ab:cd:ef:12:34:56:78:90:ab:cd:ef:12:34:56:78:90:ab:cd:ef:12:34:56:78:90", "11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00"]
+        "#;
+        let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
+        match config.tls_verify {
+            TlsVerifyMode::SpkiHash { hashes } => {
+                assert_eq!(hashes.len(), 2);
+                assert!(hashes[0].starts_with("ab:cd:ef"));
+            }
+            _ => panic!("Expected SpkiHash mode"),
+        }
+    }
+
+    #[test]
     fn test_tls_verify_mode_certificate_hash() {
         let toml_str = r#"
             server_ip = "127.0.0.1"
@@ -250,6 +293,13 @@ mod tests {
         let mode = TlsVerifyMode::Native;
         let toml_str = toml::to_string(&mode).expect("Failed to serialize");
         assert!(toml_str.contains("native"));
+
+        let mode = TlsVerifyMode::SpkiHash {
+            hashes: vec!["hash1".to_string()],
+        };
+        let toml_str = toml::to_string(&mode).expect("Failed to serialize");
+        assert!(toml_str.contains("spki_hash"));
+        assert!(toml_str.contains("hash1"));
 
         let mode = TlsVerifyMode::CertificateHash {
             hashes: vec!["hash1".to_string()],

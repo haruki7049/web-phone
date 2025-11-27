@@ -1998,6 +1998,7 @@ dependencies = [
  "confy",
  "cpal",
  "directories",
+ "ring",
  "rustls",
  "serde",
  "tokio",
@@ -2005,6 +2006,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wtransport",
+ "x509-parser",
 ]
 
 [[package]]

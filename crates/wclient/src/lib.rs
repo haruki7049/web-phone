@@ -9,6 +9,7 @@
 //! - [`audio`] - Audio device enumeration and management
 //! - [`call`] - Audio call functionality (connect, transmit, receive)
 //! - [`config`] - Client configuration types and defaults
+//! - [`tls`] - TLS configuration and SPKI pinning utilities
 //!
 //! # Example
 //!
@@ -22,6 +23,7 @@
 pub mod audio;
 pub mod call;
 pub mod config;
+pub mod tls;
 
 // Re-export commonly used types
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, TlsVerifyMode};
