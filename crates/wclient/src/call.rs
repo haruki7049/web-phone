@@ -1,3 +1,14 @@
+//! Audio call module.
+//!
+//! This module provides the main functionality for establishing and
+//! maintaining an audio call connection over WebTransport. It handles:
+//!
+//! - Connecting to the WebTransport server
+//! - Capturing audio from the microphone
+//! - Transmitting audio to the server
+//! - Receiving audio from other clients
+//! - Playing received audio through speakers
+
 use crate::config::Configuration;
 use anyhow::{Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -9,13 +20,44 @@ use tracing::{error, info};
 use wtransport::tls::client::NoServerVerification;
 use wtransport::{ClientConfig, Endpoint};
 
-/// Audio buffer for receiving audio data from WebTransport (FIFO queue)
+/// Audio buffer for receiving audio data from WebTransport.
+///
+/// This FIFO queue stores incoming audio samples until they are
+/// consumed by the audio output stream for playback.
 static AUDIO_BUFFER: LazyLock<Mutex<VecDeque<f32>>> = LazyLock::new(|| Mutex::new(VecDeque::new()));
 
-/// Maximum audio message size (1MB should be more than enough for audio buffers)
+/// Maximum audio message size in bytes (1MB).
+///
+/// This limit prevents excessive memory allocation from malicious
+/// or malformed messages from the server.
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 
-/// Start an audio call to the server
+/// Start an audio call to the server.
+///
+/// This function establishes a WebTransport connection to the audio
+/// server and begins bidirectional audio streaming. It:
+///
+/// 1. Connects to the server using WebTransport/HTTP3/QUIC
+/// 2. Receives a unique client ID from the server
+/// 3. Sets up microphone capture and speaker playback
+/// 4. Transmits captured audio to the server
+/// 5. Receives and plays audio from other connected clients
+///
+/// # Arguments
+///
+/// * `config` - Client configuration containing server address and audio settings
+///
+/// # Returns
+///
+/// Returns `Ok(())` when the call ends normally, or an error if
+/// connection or audio setup fails.
+///
+/// # Security Note
+///
+/// This function uses `NoServerVerification` which disables TLS
+/// certificate verification. This is only suitable for development
+/// with self-signed certificates. For production, use proper
+/// certificate validation.
 pub async fn start_call(config: &Configuration) -> Result<()> {
     let server_url = format!("https://{}:{}", config.server_ip, config.server_port);
     info!("Connecting to audio server at {}...", server_url);

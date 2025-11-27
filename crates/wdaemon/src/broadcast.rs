@@ -1,20 +1,43 @@
+//! Audio broadcast module.
+//!
+//! This module provides the broadcast channel infrastructure for
+//! distributing audio data to all connected clients. It uses a
+//! tokio broadcast channel for efficient fan-out.
+
 use std::sync::LazyLock;
 use tokio::sync::broadcast;
 use wtransport::SendStream;
 
-/// Type alias for a client's send stream
+/// Type alias for a client's send stream.
+///
+/// This is wrapped in `Arc<Mutex>` to allow safe sharing between
+/// the connection handler and broadcast tasks.
 pub type ClientSender = std::sync::Arc<tokio::sync::Mutex<SendStream>>;
 
-/// Audio message with sender information
+/// Audio message with sender information.
+///
+/// This struct encapsulates audio data along with the sender's ID,
+/// allowing clients to identify and optionally filter their own audio.
 #[derive(Clone, Debug)]
 pub struct AudioMessage {
-    /// ID of the client who sent this audio
+    /// ID of the client who sent this audio.
+    ///
+    /// This is used by clients to filter their own audio when
+    /// echo back is disabled.
     pub sender_id: u64,
-    /// Audio data
+    /// Raw audio data bytes.
+    ///
+    /// The format is little-endian f32 samples.
     pub data: Vec<u8>,
 }
 
-/// Broadcast channel for audio data (includes sender ID for echo filtering)
+/// Broadcast channel for audio data.
+///
+/// This channel distributes audio messages to all connected clients.
+/// Each message includes the sender ID for echo filtering.
+///
+/// The channel capacity is 100 messages, which provides a buffer
+/// for temporary network slowdowns while avoiding excessive memory use.
 pub static AUDIO_BROADCAST: LazyLock<broadcast::Sender<AudioMessage>> = LazyLock::new(|| {
     let (tx, _) = broadcast::channel(100);
     tx

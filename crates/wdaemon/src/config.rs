@@ -1,10 +1,20 @@
+//! Server configuration module.
+//!
+//! This module provides configuration types and defaults for the
+//! WebTransport audio server daemon.
+
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex, OnceLock};
 
-/// Default path to the configuration file
+/// Default path to the configuration file.
+///
+/// The configuration file is located at:
+/// - Linux: `~/.config/web-phone-daemon/config.toml`
+/// - macOS: `~/Library/Application Support/dev.haruki7049.web-phone-daemon/config.toml`
+/// - Windows: `C:\Users\<user>\AppData\Roaming\haruki7049\web-phone-daemon\config\config.toml`
 pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-daemon")
         .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-daemon");
@@ -15,13 +25,33 @@ pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
     Mutex::new(config_path)
 });
 
-/// Global configuration instance
+/// Global configuration instance.
+///
+/// This is initialized once at startup and provides read-only access
+/// to the server configuration throughout the application.
 pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
-/// Server configuration
+/// Server configuration for the WebTransport audio daemon.
+///
+/// This struct holds all configuration options for binding the server
+/// and managing audio transmission.
+///
+/// # Example
+///
+/// ```
+/// use wdaemon::Configuration;
+///
+/// let config = Configuration::default();
+/// assert_eq!(config.port, 15000);
+/// ```
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Configuration {
+    /// IP address to bind the server to.
+    ///
+    /// Use `0.0.0.0` to listen on all interfaces, or a specific IP
+    /// to bind to a particular interface.
     pub ip: Ipv4Addr,
+    /// Port number to listen on.
     pub port: u16,
 }
 

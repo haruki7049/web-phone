@@ -1,3 +1,28 @@
+//! WebTransport audio server entry point.
+//!
+//! This binary provides the server daemon for the web-phone audio
+//! transmission system. It accepts WebTransport connections and
+//! broadcasts audio between all connected clients.
+//!
+//! # Usage
+//!
+//! ```bash
+//! # Start server with default configuration
+//! wdaemon
+//!
+//! # Start server with custom config file
+//! wdaemon --config-path /path/to/config.toml
+//! ```
+//!
+//! # Configuration
+//!
+//! The server reads configuration from a TOML file:
+//!
+//! ```toml
+//! ip = "127.0.0.1"
+//! port = 15000
+//! ```
+
 use clap::Parser;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -5,6 +30,7 @@ use tracing::info;
 use wdaemon::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 use wtransport::{Endpoint, Identity, ServerConfig};
 
+/// Main entry point for the audio server daemon.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
@@ -43,8 +69,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+/// Command-line arguments for the audio server daemon.
 #[derive(Parser)]
 struct CLIArgs {
+    /// Path to the configuration file.
     #[arg(short, long, default_value = DEFAULT_CONFIG_PATH.lock().unwrap().display().to_string())]
     config_path: PathBuf,
 }

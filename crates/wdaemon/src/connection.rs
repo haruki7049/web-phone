@@ -1,15 +1,44 @@
+//! Connection handling module.
+//!
+//! This module provides the logic for handling incoming WebTransport
+//! connections, managing client sessions, and routing audio between
+//! connected clients.
+
 use crate::broadcast::{AUDIO_BROADCAST, AudioMessage};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::info;
 use wtransport::endpoint::IncomingSession;
 
-/// Counter for connected clients
+/// Counter for connected clients.
+///
+/// This atomic counter generates unique client IDs for each new
+/// connection. IDs are assigned sequentially starting from 0.
 static CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 
-/// Maximum audio message size (1MB should be more than enough for audio buffers)
+/// Maximum audio message size in bytes (1MB).
+///
+/// This limit prevents DoS attacks where a malicious client sends
+/// extremely large messages to exhaust server memory.
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 
-/// Handle an incoming WebTransport connection
+/// Handle an incoming WebTransport connection.
+///
+/// This function processes a new client connection:
+///
+/// 1. Accepts the WebTransport session
+/// 2. Assigns a unique client ID
+/// 3. Opens a bidirectional stream for audio
+/// 4. Sends the client ID to the client
+/// 5. Spawns tasks to send/receive audio
+///
+/// # Arguments
+///
+/// * `incoming` - The incoming WebTransport session to handle
+///
+/// # Error Handling
+///
+/// Errors are logged but do not propagate, allowing the server to
+/// continue accepting new connections even if one fails.
 pub async fn handle_connection(incoming: IncomingSession) {
     let result = handle_connection_impl(incoming).await;
     if let Err(e) = result {
