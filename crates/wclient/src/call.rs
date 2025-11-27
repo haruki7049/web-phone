@@ -294,7 +294,10 @@ fn build_client_config(tls_verify: &TlsVerifyMode) -> Result<ClientConfig> {
                             // Fallback to bytes array format (e.g., "[0xab, 0xcd, ...]")
                             Sha256Digest::from_str_fmt(h, Sha256DigestFmt::BytesArray)
                         })
-                        .map_err(|_| anyhow!("Invalid certificate hash format: {}", h))
+                        .map_err(|_| anyhow!(
+                            "Invalid certificate hash format: {}. Expected dotted hex (ab:cd:ef:...) or bytes array ([0xab, 0xcd, ...]) format.",
+                            h
+                        ))
                 })
                 .collect::<Result<Vec<_>>>()?;
 

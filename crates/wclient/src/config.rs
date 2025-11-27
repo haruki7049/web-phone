@@ -54,7 +54,11 @@ pub enum TlsVerifyMode {
     /// SHA-256 hash(es) of the server's certificate. Useful for
     /// self-signed certificates in controlled environments.
     CertificateHash {
-        /// List of acceptable SHA-256 certificate hashes (hex-encoded).
+        /// List of acceptable SHA-256 certificate hashes.
+        ///
+        /// Supported formats:
+        /// - Dotted hex format: `"ab:cd:ef:12:34:..."`
+        /// - Bytes array format: `"[0xab, 0xcd, 0xef, 0x12, 0x34, ...]"`
         hashes: Vec<String>,
     },
 }
