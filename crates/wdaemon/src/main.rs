@@ -33,6 +33,7 @@ use wtransport::{Endpoint, Identity, ServerConfig};
 /// Main entry point for the audio server daemon.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    color_eyre::install().ok();
     tracing_subscriber::fmt::init();
 
     let args: CLIArgs = CLIArgs::parse();

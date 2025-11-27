@@ -28,6 +28,7 @@ use wclient::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 /// Main entry point for the audio client.
 #[tokio::main]
 async fn main() -> Result<()> {
+    color_eyre::install().ok();
     tracing_subscriber::fmt::init();
     let args: CLIArgs = CLIArgs::parse();
 

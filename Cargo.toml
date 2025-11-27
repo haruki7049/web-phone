@@ -11,6 +11,7 @@ name = "web-phone"
 
 [workspace.dependencies]
 anyhow = "1.0"
+color-eyre = "0.6.5"
 clap = { version = "4.5.43", features = ["derive", "string"] }
 confy = "1.0.0"
 directories = "6.0.0"
