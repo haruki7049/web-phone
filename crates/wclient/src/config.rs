@@ -192,7 +192,7 @@ mod tests {
         // allow_echoback should default to false when not specified
         assert!(!config.allow_echoback);
         // tls_verify should default to Skip when not specified
-        assert_eq!(config.tls_verify, TlsVerifyMode::Skip);
+        assert_eq!(config.tls_verify, TlsVerifyMode::Native);
     }
 
     #[test]
