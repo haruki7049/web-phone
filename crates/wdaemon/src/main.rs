@@ -33,6 +33,7 @@ use wtransport::{Endpoint, Identity, ServerConfig};
 /// Main entry point for the audio server daemon.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    color_eyre::install().expect("Failed to install color_eyre panic handler");
     tracing_subscriber::fmt::init();
 
     let args: CLIArgs = CLIArgs::parse();
