@@ -26,3 +26,4 @@ tracing-subscriber = "0.3.19"
 wtransport = "0.6.1"
 cpal = "0.16.0"
 rustls = { version = "0.23", features = ["ring"] }
+toml = "0.8"

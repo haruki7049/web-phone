@@ -18,4 +18,4 @@ tracing-subscriber.workspace = true
 wtransport.workspace = true
 
 [dev-dependencies]
-toml = "0.8"
+toml.workspace = true
