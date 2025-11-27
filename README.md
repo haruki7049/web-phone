@@ -81,6 +81,18 @@ allow_echoback = false
 
 Multiple clients can connect to the server. Audio from each client is broadcast to all other connected clients.
 
+### Room Feature
+
+Currently, all connected clients share a single global room - audio from any client is broadcast to all other connected clients. This is referred to as the "Room" feature.
+
+## TODO
+
+- [ ] **Multiple Rooms**: Allow creation of multiple rooms so that audio is only broadcast to clients within the same room, not to all connected clients
+  - Room creation/deletion API
+  - Room join/leave commands
+  - Room listing functionality
+  - Optional room passwords/access control
+
 ## License
 
 MIT

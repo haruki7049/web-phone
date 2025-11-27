@@ -10,6 +10,21 @@
 //! client is sent to all connected clients. Each client receives a
 //! unique ID and can filter their own audio based on their settings.
 //!
+//! ## Room Feature
+//!
+//! Currently, all connected clients share a single global room - audio
+//! from any client is broadcast to all other connected clients. This
+//! functions as if all clients are in the same room.
+//!
+//! ### TODO: Multiple Rooms
+//!
+//! Future versions should support multiple rooms:
+//! - Room creation and deletion
+//! - Room join/leave functionality
+//! - Room listing
+//! - Audio broadcast scoped to room members only
+//! - Optional room passwords/access control
+//!
 //! # Modules
 //!
 //! - [`broadcast`] - Audio broadcast channel for distributing audio
