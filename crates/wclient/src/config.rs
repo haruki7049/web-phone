@@ -9,6 +9,56 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex, OnceLock};
 
+/// TLS certificate verification mode for connecting to the server.
+///
+/// This enum determines how the client verifies the server's TLS certificate
+/// during the connection handshake.
+///
+/// # Example
+///
+/// ```
+/// use wclient::config::TlsVerifyMode;
+///
+/// // For development with self-signed certificates
+/// let dev_mode = TlsVerifyMode::Skip;
+///
+/// // For production with proper CA-signed certificates
+/// let prod_mode = TlsVerifyMode::Native;
+///
+/// // For pinning specific certificate hashes
+/// let pinned = TlsVerifyMode::CertificateHash {
+///     hashes: vec!["abc123...".to_string()],
+/// };
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TlsVerifyMode {
+    /// Skip TLS certificate verification entirely.
+    ///
+    /// **WARNING**: This mode is insecure and should only be used for
+    /// development with self-signed certificates. It allows connections
+    /// to any server without validating the certificate.
+    #[default]
+    Skip,
+
+    /// Use the system's native certificate store for verification.
+    ///
+    /// This is the recommended mode for production use. The client will
+    /// verify the server's certificate against the certificates trusted
+    /// by the operating system.
+    Native,
+
+    /// Verify using specific certificate SHA-256 hashes.
+    ///
+    /// This mode allows certificate pinning by specifying the expected
+    /// SHA-256 hash(es) of the server's certificate. Useful for
+    /// self-signed certificates in controlled environments.
+    CertificateHash {
+        /// List of acceptable SHA-256 certificate hashes (hex-encoded).
+        hashes: Vec<String>,
+    },
+}
+
 /// Default path to the configuration file.
 ///
 /// The configuration file is located at:
@@ -60,6 +110,15 @@ pub struct Configuration {
     /// When `false` (default), the client's own audio is filtered out.
     #[serde(default)]
     pub allow_echoback: bool,
+    /// TLS certificate verification mode.
+    ///
+    /// Controls how the client verifies the server's TLS certificate.
+    /// Defaults to `TlsVerifyMode::Skip` for backward compatibility.
+    ///
+    /// For production use, set to `TlsVerifyMode::Native` to use
+    /// the system's certificate store.
+    #[serde(default)]
+    pub tls_verify: TlsVerifyMode,
 }
 
 impl Default for Configuration {
@@ -70,6 +129,7 @@ impl Default for Configuration {
             sample_rate: 48000,
             channels: 1,
             allow_echoback: false,
+            tls_verify: TlsVerifyMode::default(),
         }
     }
 }
@@ -86,6 +146,7 @@ mod tests {
         assert_eq!(config.sample_rate, 48000);
         assert_eq!(config.channels, 1);
         assert!(!config.allow_echoback);
+        assert_eq!(config.tls_verify, TlsVerifyMode::Skip);
     }
 
     #[test]
@@ -126,5 +187,71 @@ mod tests {
         let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
         // allow_echoback should default to false when not specified
         assert!(!config.allow_echoback);
+        // tls_verify should default to Skip when not specified
+        assert_eq!(config.tls_verify, TlsVerifyMode::Skip);
+    }
+
+    #[test]
+    fn test_tls_verify_mode_skip() {
+        let toml_str = r#"
+            server_ip = "127.0.0.1"
+            server_port = 15000
+            sample_rate = 48000
+            channels = 1
+            [tls_verify]
+            type = "skip"
+        "#;
+        let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
+        assert_eq!(config.tls_verify, TlsVerifyMode::Skip);
+    }
+
+    #[test]
+    fn test_tls_verify_mode_native() {
+        let toml_str = r#"
+            server_ip = "127.0.0.1"
+            server_port = 15000
+            sample_rate = 48000
+            channels = 1
+            [tls_verify]
+            type = "native"
+        "#;
+        let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
+        assert_eq!(config.tls_verify, TlsVerifyMode::Native);
+    }
+
+    #[test]
+    fn test_tls_verify_mode_certificate_hash() {
+        let toml_str = r#"
+            server_ip = "127.0.0.1"
+            server_port = 15000
+            sample_rate = 48000
+            channels = 1
+            [tls_verify]
+            type = "certificate_hash"
+            hashes = ["abc123", "def456"]
+        "#;
+        let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
+        match config.tls_verify {
+            TlsVerifyMode::CertificateHash { hashes } => {
+                assert_eq!(hashes.len(), 2);
+                assert_eq!(hashes[0], "abc123");
+                assert_eq!(hashes[1], "def456");
+            }
+            _ => panic!("Expected CertificateHash mode"),
+        }
+    }
+
+    #[test]
+    fn test_tls_verify_mode_serialization() {
+        let mode = TlsVerifyMode::Native;
+        let toml_str = toml::to_string(&mode).expect("Failed to serialize");
+        assert!(toml_str.contains("native"));
+
+        let mode = TlsVerifyMode::CertificateHash {
+            hashes: vec!["hash1".to_string()],
+        };
+        let toml_str = toml::to_string(&mode).expect("Failed to serialize");
+        assert!(toml_str.contains("certificate_hash"));
+        assert!(toml_str.contains("hash1"));
     }
 }

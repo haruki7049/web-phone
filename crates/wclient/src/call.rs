@@ -9,15 +9,16 @@
 //! - Receiving audio from other clients
 //! - Playing received audio through speakers
 
-use crate::config::Configuration;
+use crate::config::{Configuration, TlsVerifyMode};
 use anyhow::{Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleRate, StreamConfig};
 use std::collections::VecDeque;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex};
 use tokio::sync::mpsc;
-use tracing::{error, info};
-use wtransport::tls::client::NoServerVerification;
+use tracing::{error, info, warn};
+use wtransport::tls::Sha256Digest;
+use wtransport::tls::Sha256DigestFmt;
 use wtransport::{ClientConfig, Endpoint};
 
 /// Audio buffer for receiving audio data from WebTransport.
@@ -52,39 +53,20 @@ const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 /// Returns `Ok(())` when the call ends normally, or an error if
 /// connection or audio setup fails.
 ///
-/// # Security Note
+/// # TLS Verification
 ///
-/// This function uses `NoServerVerification` which disables TLS
-/// certificate verification. This is only suitable for development
-/// with self-signed certificates. For production, use proper
-/// certificate validation.
+/// The TLS certificate verification behavior is determined by the
+/// `tls_verify` configuration option:
+///
+/// - `TlsVerifyMode::Skip` - Skips certificate verification (development only)
+/// - `TlsVerifyMode::Native` - Uses system's native certificate store (production)
+/// - `TlsVerifyMode::CertificateHash` - Pins specific certificate hashes
 pub async fn start_call(config: &Configuration) -> Result<()> {
     let server_url = format!("https://{}:{}", config.server_ip, config.server_port);
     info!("Connecting to audio server at {}...", server_url);
 
-    // Install the default crypto provider for rustls
-    // This is required for rustls 0.23+ when using custom TLS configuration
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .map_err(|arc| anyhow!("failed to install ring provider: {:?}", arc))?;
-
-    // SECURITY NOTE: NoServerVerification disables TLS certificate verification.
-    // This is only suitable for development with self-signed certificates.
-    // For production use, replace with proper certificate validation using
-    // `with_native_certs()` or `with_server_certificate_hashes()`.
-    let mut tls_config = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(NoServerVerification::default()))
-        .with_no_client_auth();
-
-    // Set ALPN protocols for HTTP/3 (required for WebTransport)
-    tls_config.alpn_protocols = vec![b"h3".to_vec()];
-
-    // Configure client with custom TLS (for development with self-signed certs)
-    let client_config = ClientConfig::builder()
-        .with_bind_default()
-        .with_custom_tls(tls_config)
-        .build();
+    // Build client configuration based on TLS verification mode
+    let client_config = build_client_config(&config.tls_verify)?;
 
     let endpoint = Endpoint::client(client_config)?;
     let connection = endpoint.connect(&server_url).await?;
@@ -264,4 +246,64 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
     info!("Disconnected from server");
 
     Ok(())
+}
+
+/// Build WebTransport client configuration based on TLS verification mode.
+///
+/// This function creates the appropriate [`ClientConfig`] based on the
+/// specified [`TlsVerifyMode`]:
+///
+/// - `Skip`: No certificate verification (development only)
+/// - `Native`: Uses system's native certificate store
+/// - `CertificateHash`: Pins specific certificate SHA-256 hashes
+///
+/// # Arguments
+///
+/// * `tls_verify` - The TLS verification mode to use
+///
+/// # Returns
+///
+/// Returns a configured [`ClientConfig`] or an error if configuration fails.
+fn build_client_config(tls_verify: &TlsVerifyMode) -> Result<ClientConfig> {
+    let client_config = match tls_verify {
+        TlsVerifyMode::Skip => {
+            warn!("TLS certificate verification is disabled - use only for development!");
+            ClientConfig::builder()
+                .with_bind_default()
+                .with_no_cert_validation()
+                .build()
+        }
+        TlsVerifyMode::Native => {
+            info!("Using native certificate store for TLS verification");
+            ClientConfig::builder()
+                .with_bind_default()
+                .with_native_certs()
+                .build()
+        }
+        TlsVerifyMode::CertificateHash { hashes } => {
+            info!(
+                "Using certificate hash verification with {} hash(es)",
+                hashes.len()
+            );
+            let digests: Vec<Sha256Digest> = hashes
+                .iter()
+                .map(|h| {
+                    // Try parsing as dotted hex format (e.g., "ab:cd:ef:...")
+                    Sha256Digest::from_str_fmt(h, Sha256DigestFmt::DottedHex)
+                        .or_else(|_| {
+                            // Fallback to bytes array format (e.g., "[0xab, 0xcd, ...]")
+                            Sha256Digest::from_str_fmt(h, Sha256DigestFmt::BytesArray)
+                        })
+                        .map_err(|_| anyhow!("Invalid certificate hash format: {}", h))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            ClientConfig::builder()
+                .with_bind_default()
+                .with_server_certificate_hashes(digests)
+                .build()
+        }
+    };
+
+    Ok(client_config)
 }
