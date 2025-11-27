@@ -6,6 +6,7 @@ edition = "2024"
 
 [dependencies]
 clap.workspace = true
+color-eyre.workspace = true
 confy.workspace = true
 directories.workspace = true
 serde.workspace = true

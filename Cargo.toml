@@ -27,3 +27,4 @@ wtransport = "0.6"
 cpal = "0.16.0"
 rustls = { version = "0.23", features = ["ring"] }
 toml = "0.9"
+color-eyre = "0.6"
