@@ -38,6 +38,7 @@ pub enum TlsVerifyMode {
     /// **WARNING**: This mode is insecure and should only be used for
     /// development with self-signed certificates. It allows connections
     /// to any server without validating the certificate.
+    #[default]
     Skip,
 
     /// Use the system's native certificate store for verification.
@@ -45,7 +46,6 @@ pub enum TlsVerifyMode {
     /// This is the recommended mode for production use. The client will
     /// verify the server's certificate against the certificates trusted
     /// by the operating system.
-    #[default]
     Native,
 
     /// Verify using specific certificate SHA-256 hashes.
@@ -150,7 +150,7 @@ mod tests {
         assert_eq!(config.sample_rate, 48000);
         assert_eq!(config.channels, 1);
         assert!(!config.allow_echoback);
-        assert_eq!(config.tls_verify, TlsVerifyMode::Native);
+        assert_eq!(config.tls_verify, TlsVerifyMode::Skip);
     }
 
     #[test]
@@ -192,7 +192,7 @@ mod tests {
         // allow_echoback should default to false when not specified
         assert!(!config.allow_echoback);
         // tls_verify should default to Skip when not specified
-        assert_eq!(config.tls_verify, TlsVerifyMode::Native);
+        assert_eq!(config.tls_verify, TlsVerifyMode::Skip);
     }
 
     #[test]
