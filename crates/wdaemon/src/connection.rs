@@ -35,8 +35,108 @@ static PEER_CONNECTIONS: LazyLock<Mutex<HashMap<u64, Arc<RTCPeerConnection>>>> =
 static CLIENT_ADDRESSES: LazyLock<Mutex<HashMap<u64, UserAddress>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Registered client target addresses (client_id -> target UserAddress).
+static CLIENT_TARGETS: LazyLock<Mutex<HashMap<u64, UserAddress>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// Maximum audio message size in bytes (1MB).
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+
+/// Helper to check if address matches room key (exact match or prefix match).
+fn matches_address(addr: &UserAddress, key: &UserAddress) -> bool {
+    addr.id == key.id
+        || (!key.id.is_empty() && key.id.len() <= addr.id.len() && addr.id.starts_with(&key.id))
+        || (!addr.id.is_empty() && addr.id.len() <= key.id.len() && key.id.starts_with(&addr.id))
+}
+
+/// Check if a client belongs to the ad-hoc room identified by room_key.
+fn is_client_in_room(client_id: u64, room_key: &UserAddress) -> bool {
+    let my_addr = CLIENT_ADDRESSES.lock().unwrap().get(&client_id).cloned();
+    let my_target = CLIENT_TARGETS.lock().unwrap().get(&client_id).cloned();
+
+    if let Some(ref addr) = my_addr
+        && matches_address(addr, room_key)
+    {
+        return true;
+    }
+
+    if let Some(ref target) = my_target
+        && matches_address(target, room_key)
+    {
+        return true;
+    }
+    false
+}
+
+fn count_participants_inner(
+    addrs: &HashMap<u64, UserAddress>,
+    targets: &HashMap<u64, UserAddress>,
+    room_key: &UserAddress,
+) -> usize {
+    let mut count = 0;
+    for (&cid, addr) in addrs.iter() {
+        let target = targets.get(&cid);
+        if matches_address(addr, room_key) || target.is_some_and(|t| matches_address(t, room_key)) {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Count participants in room identified by `room_key`.
+pub fn get_participant_count_for_room(room_key: &UserAddress) -> usize {
+    let addrs = CLIENT_ADDRESSES.lock().unwrap();
+    let targets = CLIENT_TARGETS.lock().unwrap();
+    count_participants_inner(&addrs, &targets, room_key)
+}
+
+/// Check if client_id is already part of the call with target_key.
+fn is_client_in_same_call(client_id: u64, target_key: &UserAddress) -> bool {
+    if is_client_in_room(client_id, target_key) {
+        return true;
+    }
+
+    let addrs = CLIENT_ADDRESSES.lock().unwrap();
+    let targets = CLIENT_TARGETS.lock().unwrap();
+
+    let my_addr = match addrs.get(&client_id) {
+        Some(a) => a,
+        None => return false,
+    };
+
+    // Check if target client (matching target_key) is targeting my_addr
+    for (&cid, addr) in addrs.iter() {
+        if matches_address(addr, target_key)
+            && let Some(other_target) = targets.get(&cid)
+            && matches_address(other_target, my_addr)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if room or target user is already in a call with maximum allowed participants (2).
+fn is_room_or_target_full(target_key: &UserAddress) -> bool {
+    let addrs = CLIENT_ADDRESSES.lock().unwrap();
+    let targets = CLIENT_TARGETS.lock().unwrap();
+
+    if count_participants_inner(&addrs, &targets, target_key) >= 2 {
+        return true;
+    }
+
+    for (&cid, addr) in addrs.iter() {
+        if matches_address(addr, target_key)
+            && let Some(other_room) = targets.get(&cid)
+            && !matches_address(other_room, target_key)
+            && count_participants_inner(&addrs, &targets, other_room) >= 2
+        {
+            return true;
+        }
+    }
+
+    false
+}
 
 /// Get currently registered wclient addresses across active connections.
 pub fn get_registered_addresses() -> Vec<UserAddress> {
@@ -98,6 +198,7 @@ pub async fn handle_sdp_offer(
                 );
                 PEER_CONNECTIONS.lock().unwrap().remove(&client_id);
                 CLIENT_ADDRESSES.lock().unwrap().remove(&client_id);
+                CLIENT_TARGETS.lock().unwrap().remove(&client_id);
             }
             Box::pin(async move {})
         },
@@ -135,18 +236,18 @@ pub async fn handle_sdp_offer(
                     return;
                 }
 
-                // Forward 1-to-1 targeted audio to this client
+                // Forward ad-hoc room audio to this client if it belongs to the target room
                 tokio::spawn(async move {
                     loop {
                         match audio_rx.recv().await {
                             Ok(audio_msg) => {
-                                let target_addr = &audio_msg.target_address;
-                                // Deliver audio ONLY if target_address matches this client's address (or prefix)
-                                if target_addr.id == my_addr.id
-                                    || (!target_addr.id.is_empty()
-                                        && target_addr.id.len() < my_addr.id.len()
-                                        && my_addr.id.starts_with(&target_addr.id))
-                                {
+                                // Skip loopback to sender
+                                if audio_msg.sender_id == client_id {
+                                    continue;
+                                }
+
+                                let target_room = &audio_msg.target_address;
+                                if is_client_in_room(client_id, target_room) {
                                     let sender_addr_bytes = audio_msg
                                         .sender_address
                                         .map(|a| a.to_bytes())
@@ -155,7 +256,7 @@ pub async fn handle_sdp_offer(
                                     // Packet: [0x03, target_address (32b), sender_id (8b LE), sender_address (32b), audio_data...]
                                     let mut packet = Vec::with_capacity(73 + audio_msg.data.len());
                                     packet.push(0x03);
-                                    packet.extend_from_slice(&target_addr.to_bytes());
+                                    packet.extend_from_slice(&target_room.to_bytes());
                                     packet.extend_from_slice(&audio_msg.sender_id.to_le_bytes());
                                     packet.extend_from_slice(&sender_addr_bytes);
                                     packet.extend_from_slice(&audio_msg.data);
@@ -173,7 +274,9 @@ pub async fn handle_sdp_offer(
             })
         }));
 
+        let dc_msg = Arc::clone(&dc);
         dc.on_message(Box::new(move |msg: DataChannelMessage| {
+            let dc_inner = Arc::clone(&dc_msg);
             Box::pin(async move {
                 if msg.data.is_empty() {
                     return;
@@ -183,19 +286,41 @@ pub async fn handle_sdp_offer(
                 let sender_addr = CLIENT_ADDRESSES.lock().unwrap().get(&client_id).cloned();
 
                 if msg_type == 0x03 && msg.data.len() >= 33 {
-                    // Targeted 1-to-1 audio message: [0x03, target_address (32 bytes SHA256), audio_data...]
+                    // Targeted / Room audio message: [0x03, target_address (32 bytes SHA256), audio_data...]
                     let target_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
                     let target_address = UserAddress::from_bytes(target_bytes);
                     let payload = msg.data[33..].to_vec();
 
                     if payload.len() > MAX_MESSAGE_SIZE {
                         warn!(
-                            "Client {} sent oversized targeted audio packet ({} bytes), ignoring",
+                            "Client {} sent oversized audio packet ({} bytes), ignoring",
                             client_id,
                             payload.len()
                         );
                         return;
                     }
+
+                    // Enforce maximum 2 participants per call. Reject 3rd-party connection attempts.
+                    if !is_client_in_same_call(client_id, &target_address)
+                        && is_room_or_target_full(&target_address)
+                    {
+                        warn!(
+                            "Rejecting Client {} connection to target {}: call already has maximum 2 participants",
+                            client_id,
+                            target_address.short_id()
+                        );
+                        let mut err_packet = Vec::with_capacity(33);
+                        err_packet.push(0xFF);
+                        err_packet.extend_from_slice(&target_address.to_bytes());
+                        let _ = dc_inner.send(&Bytes::from(err_packet)).await;
+                        return;
+                    }
+
+                    // Register/update client's target address for call routing
+                    CLIENT_TARGETS
+                        .lock()
+                        .unwrap()
+                        .insert(client_id, target_address.clone());
 
                     let _ = AUDIO_BROADCAST.send(AudioMessage {
                         sender_id: client_id,
@@ -204,11 +329,6 @@ pub async fn handle_sdp_offer(
                         origin_node: my_node_id,
                         data: payload,
                     });
-                } else if msg_type == 0x01 {
-                    warn!(
-                        "Client {} attempted room broadcast (0x01), which is disabled",
-                        client_id
-                    );
                 }
             })
         }));
@@ -277,5 +397,41 @@ mod tests {
         CLIENT_ADDRESSES.lock().unwrap().remove(&999);
         let addrs_after = get_registered_addresses();
         assert!(!addrs_after.contains(&test_addr));
+    }
+
+    #[test]
+    fn test_participant_limit_2() {
+        let host_addr = UserAddress::generate_from_time();
+        let caller_addr = UserAddress::generate_from_time();
+        let third_addr = UserAddress::generate_from_time();
+
+        CLIENT_ADDRESSES
+            .lock()
+            .unwrap()
+            .insert(101, host_addr.clone());
+        CLIENT_ADDRESSES
+            .lock()
+            .unwrap()
+            .insert(102, caller_addr.clone());
+        CLIENT_TARGETS
+            .lock()
+            .unwrap()
+            .insert(102, host_addr.clone());
+        CLIENT_ADDRESSES
+            .lock()
+            .unwrap()
+            .insert(103, third_addr.clone());
+
+        assert_eq!(get_participant_count_for_room(&host_addr), 2);
+        assert!(is_room_or_target_full(&host_addr));
+        assert!(is_client_in_same_call(101, &host_addr));
+        assert!(is_client_in_same_call(102, &host_addr));
+        assert!(!is_client_in_same_call(103, &host_addr));
+
+        // Cleanup
+        CLIENT_ADDRESSES.lock().unwrap().remove(&101);
+        CLIENT_ADDRESSES.lock().unwrap().remove(&102);
+        CLIENT_ADDRESSES.lock().unwrap().remove(&103);
+        CLIENT_TARGETS.lock().unwrap().remove(&102);
     }
 }

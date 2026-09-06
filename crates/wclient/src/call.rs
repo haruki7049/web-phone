@@ -156,22 +156,36 @@ pub async fn start_call(config: &Configuration, target_address: Option<UserAddre
                     return;
                 }
 
-                tracing::trace!(
-                    "Received targeted audio frame from {}",
-                    sender_addr.short_id()
-                );
+                tracing::trace!("Received audio frame from {}", sender_addr.short_id());
 
                 let samples: Vec<f32> = msg.data[73..]
                     .as_chunks::<4>()
                     .0
                     .iter()
-                    .map(|chunk| f32::from_le_bytes(*chunk))
+                    .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
                     .collect();
 
                 let mut buffer = AUDIO_BUFFER.lock().unwrap();
                 for sample in samples {
                     buffer.push_back(sample);
                 }
+            } else if msg_type == 0xFF {
+                // Connection rejection message: [0xFF, target_address (32b)]
+                let target_str = if msg.data.len() >= 33 {
+                    let addr_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
+                    UserAddress::from_bytes(addr_bytes).short_id().to_string()
+                } else {
+                    "target".to_string()
+                };
+                error!("============================================================");
+                error!(
+                    " Call Connection Error: Target user ({}) is currently in another call.",
+                    target_str
+                );
+                error!(" Calls are restricted to 1-to-1 only (Maximum 2 participants allowed).");
+                error!(" Connection rejected.");
+                error!("============================================================");
+                std::process::exit(1);
             }
         })
     }));
