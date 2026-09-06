@@ -1,19 +1,25 @@
 [package]
 name = "wdaemon"
 version = "0.1.0"
-description = "WebTransport server for real-time audio transmission"
+description = "WebRTC server daemon, STUN/TURN server, and peer mesh daemon"
 edition = "2024"
 
 [dependencies]
+axum.workspace = true
+bytes.workspace = true
 clap.workspace = true
 color-eyre.workspace = true
 confy.workspace = true
 directories.workspace = true
+reqwest.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+stun.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-wtransport.workspace = true
+turn.workspace = true
+webrtc.workspace = true
 
 [dev-dependencies]
 toml.workspace = true

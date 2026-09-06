@@ -1,138 +1,169 @@
 //! Connection handling module.
 //!
-//! This module provides the logic for handling incoming WebTransport
-//! connections, managing client sessions, and routing audio between
-//! connected clients.
+//! This module provides the logic for handling WebRTC SDP offer requests,
+//! managing client PeerConnections, and routing audio between connected WebRTC clients.
 
 use crate::broadcast::{AUDIO_BROADCAST, AudioMessage};
+use crate::config::CONFIGURATION;
+use axum::{extract::Json, http::StatusCode};
+use bytes::Bytes;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tracing::info;
-use wtransport::endpoint::IncomingSession;
+use std::sync::{Arc, LazyLock, Mutex};
+use tracing::{error, info, warn};
+use webrtc::api::APIBuilder;
+use webrtc::data_channel::data_channel_message::DataChannelMessage;
+use webrtc::data_channel::RTCDataChannel;
+use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
+use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use webrtc::peer_connection::RTCPeerConnection;
 
 /// Counter for connected clients.
-///
-/// This atomic counter generates unique client IDs for each new
-/// connection. IDs are assigned sequentially starting from 0.
 static CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 
+/// Active WebRTC peer connections.
+static PEER_CONNECTIONS: LazyLock<Mutex<HashMap<u64, Arc<RTCPeerConnection>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// Maximum audio message size in bytes (1MB).
-///
-/// This limit prevents DoS attacks where a malicious client sends
-/// extremely large messages to exhaust server memory.
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 
-/// Handle an incoming WebTransport connection.
-///
-/// This function processes a new client connection:
-///
-/// 1. Accepts the WebTransport session
-/// 2. Assigns a unique client ID
-/// 3. Opens a bidirectional stream for audio
-/// 4. Sends the client ID to the client
-/// 5. Spawns tasks to send/receive audio
-///
-/// # Arguments
-///
-/// * `incoming` - The incoming WebTransport session to handle
-///
-/// # Error Handling
-///
-/// Errors are logged but do not propagate, allowing the server to
-/// continue accepting new connections even if one fails.
-pub async fn handle_connection(incoming: IncomingSession) {
-    let result = handle_connection_impl(incoming).await;
-    if let Err(e) = result {
-        tracing::error!("Connection error: {}", e);
-    }
-}
+/// Handle an SDP offer from a WebRTC client.
+pub async fn handle_sdp_offer(
+    Json(offer): Json<RTCSessionDescription>,
+) -> Result<Json<RTCSessionDescription>, (StatusCode, String)> {
+    let daemon_config = CONFIGURATION.get().cloned().unwrap_or_default();
+    let my_node_id = daemon_config.node_id;
 
-async fn handle_connection_impl(
-    incoming: IncomingSession,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let session_request = incoming.await?;
+    let api = APIBuilder::new().build();
+    let config = RTCConfiguration::default();
 
-    info!("New session request from: {}", session_request.authority());
+    let peer_connection = Arc::new(
+        api.new_peer_connection(config)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create PeerConnection: {}", e)))?,
+    );
 
-    let connection = session_request.accept().await?;
     let client_id = CLIENT_COUNT.fetch_add(1, Ordering::SeqCst);
-    info!("Client {} connected", client_id);
+    info!("Client {} initiating WebRTC connection", client_id);
 
-    // Subscribe to broadcast channel for receiving audio from others
-    let mut audio_rx = AUDIO_BROADCAST.subscribe();
+    PEER_CONNECTIONS
+        .lock()
+        .unwrap()
+        .insert(client_id, Arc::clone(&peer_connection));
 
-    // Open a bidirectional stream for audio
-    let (mut send_stream, mut recv_stream) = connection.accept_bi().await?;
+    peer_connection.on_peer_connection_state_change(Box::new(move |state: RTCPeerConnectionState| {
+        info!("Client {} PeerConnection state: {}", client_id, state);
+        if state == RTCPeerConnectionState::Failed
+            || state == RTCPeerConnectionState::Closed
+            || state == RTCPeerConnectionState::Disconnected
+        {
+            info!("Client {} disconnected", client_id);
+            PEER_CONNECTIONS.lock().unwrap().remove(&client_id);
+        }
+        Box::pin(async move {})
+    }));
 
-    // Send client_id to client first so they can filter their own audio
-    send_stream.write_all(&client_id.to_le_bytes()).await?;
+    peer_connection.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
+        let dc_label = dc.label().to_string();
+        info!("Client {} created DataChannel: {}", client_id, dc_label);
 
-    // Spawn task to send audio to this client
-    let send_task = tokio::spawn(async move {
-        loop {
-            match audio_rx.recv().await {
-                Ok(audio_msg) => {
-                    // Send sender_id (8 bytes) + length prefix (4 bytes) + data
-                    if send_stream
-                        .write_all(&audio_msg.sender_id.to_le_bytes())
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                    let len = audio_msg.data.len() as u32;
-                    if send_stream.write_all(&len.to_le_bytes()).await.is_err() {
-                        break;
-                    }
-                    if send_stream.write_all(&audio_msg.data).await.is_err() {
-                        break;
-                    }
+        let dc_open = Arc::clone(&dc);
+
+        dc.on_open(Box::new(move || {
+            let dc_inner = Arc::clone(&dc_open);
+            let mut audio_rx = AUDIO_BROADCAST.subscribe();
+
+            Box::pin(async move {
+                info!("Client {} DataChannel opened", client_id);
+
+                // Send client ID assignment message: [0x00, client_id (8 bytes LE)]
+                let mut init_msg = Vec::with_capacity(9);
+                init_msg.push(0x00);
+                init_msg.extend_from_slice(&client_id.to_le_bytes());
+
+                if let Err(e) = dc_inner.send(&Bytes::from(init_msg)).await {
+                    error!("Failed to send client ID to client {}: {}", client_id, e);
+                    return;
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-            }
-        }
-    });
 
-    // Receive audio from this client and broadcast to others
-    let mut buf = vec![0u8; 65536];
-    loop {
-        // Read length prefix
-        let mut len_buf = [0u8; 4];
-        match recv_stream.read_exact(&mut len_buf).await {
-            Ok(_) => {}
-            Err(_) => break,
-        }
-        let len = u32::from_le_bytes(len_buf) as usize;
+                // Forward broadcast audio to this client
+                tokio::spawn(async move {
+                    loop {
+                        match audio_rx.recv().await {
+                            Ok(audio_msg) => {
+                                // Packet: [0x01, sender_id (8 bytes LE), audio_data...]
+                                let mut packet = Vec::with_capacity(9 + audio_msg.data.len());
+                                packet.push(0x01);
+                                packet.extend_from_slice(&audio_msg.sender_id.to_le_bytes());
+                                packet.extend_from_slice(&audio_msg.data);
 
-        // Validate message size to prevent DoS attacks
-        if len > MAX_MESSAGE_SIZE {
-            tracing::warn!(
-                "Client {} sent oversized message ({} bytes), disconnecting",
-                client_id,
-                len
-            );
-            break;
-        }
+                                if dc_inner.send(&Bytes::from(packet)).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        }
+                    }
+                });
+            })
+        }));
 
-        if len > buf.len() {
-            buf.resize(len, 0);
-        }
+        dc.on_message(Box::new(move |msg: DataChannelMessage| {
+            Box::pin(async move {
+                if msg.data.is_empty() {
+                    return;
+                }
 
-        // Read audio data
-        match recv_stream.read_exact(&mut buf[..len]).await {
-            Ok(_) => {}
-            Err(_) => break,
-        }
+                let msg_type = msg.data[0];
+                if msg_type == 0x01 {
+                    // Audio message from client: [0x01, audio_data...]
+                    let payload = msg.data[1..].to_vec();
+                    if payload.len() > MAX_MESSAGE_SIZE {
+                        warn!(
+                            "Client {} sent oversized audio packet ({} bytes), ignoring",
+                            client_id,
+                            payload.len()
+                        );
+                        return;
+                    }
 
-        // Broadcast to all clients (clients filter their own audio based on their settings)
-        let _ = AUDIO_BROADCAST.send(AudioMessage {
-            sender_id: client_id,
-            data: buf[..len].to_vec(),
-        });
-    }
+                    let _ = AUDIO_BROADCAST.send(AudioMessage {
+                        sender_id: client_id,
+                        origin_node: my_node_id,
+                        data: payload,
+                    });
+                }
+            })
+        }));
 
-    send_task.abort();
-    info!("Client {} disconnected", client_id);
+        Box::pin(async move {})
+    }));
 
-    Ok(())
+    peer_connection
+        .set_remote_description(offer)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid offer SDP: {}", e)))?;
+
+    let answer = peer_connection
+        .create_answer(None)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create answer: {}", e)))?;
+
+    peer_connection
+        .set_local_description(answer)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to set local description: {}", e)))?;
+
+    let mut gather_complete = peer_connection.gathering_complete_promise().await;
+    let _ = gather_complete.recv().await;
+
+    let local_desc = peer_connection
+        .local_description()
+        .await
+        .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "No local description available".to_string()))?;
+
+    Ok(Json(local_desc))
 }

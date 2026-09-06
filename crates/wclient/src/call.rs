@@ -1,107 +1,53 @@
 //! Audio call module.
 //!
-//! This module provides the main functionality for establishing and
-//! maintaining an audio call connection over WebTransport. It handles:
+//! This module provides the main CLI functionality for establishing and
+//! maintaining an audio call connection over WebRTC. It handles:
 //!
-//! - Connecting to the WebTransport server
-//! - Capturing audio from the microphone
-//! - Transmitting audio to the server
-//! - Receiving audio from other clients
-//! - Playing received audio through speakers
+//! - Establishing WebRTC PeerConnection with wdaemon server
+//! - Exchanging SDP offer/answer over HTTP signaling
+//! - Capturing microphone audio with cpal
+//! - Transmitting audio over WebRTC DataChannel
+//! - Receiving and playing back audio through speakers
 
 use crate::config::Configuration;
 use anyhow::{Result, anyhow};
+use bytes::Bytes;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleRate, StreamConfig};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use tokio::sync::mpsc;
 use tracing::{error, info};
-use wtransport::tls::client::NoServerVerification;
-use wtransport::{ClientConfig, Endpoint};
+use webrtc::api::APIBuilder;
+use webrtc::data_channel::data_channel_message::DataChannelMessage;
+use webrtc::ice_transport::ice_server::RTCIceServer;
+use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
-/// Audio buffer for receiving audio data from WebTransport.
-///
-/// This FIFO queue stores incoming audio samples until they are
-/// consumed by the audio output stream for playback.
+/// Audio buffer for receiving audio data from WebRTC DataChannel.
 static AUDIO_BUFFER: LazyLock<Mutex<VecDeque<f32>>> = LazyLock::new(|| Mutex::new(VecDeque::new()));
 
-/// Maximum audio message size in bytes (1MB).
-///
-/// This limit prevents excessive memory allocation from malicious
-/// or malformed messages from the server.
-const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+/// Store assigned client ID received from server.
+static MY_CLIENT_ID: AtomicU64 = AtomicU64::new(u64::MAX);
 
-/// Start an audio call to the server.
-///
-/// This function establishes a WebTransport connection to the audio
-/// server and begins bidirectional audio streaming. It:
-///
-/// 1. Connects to the server using WebTransport/HTTP3/QUIC
-/// 2. Receives a unique client ID from the server
-/// 3. Sets up microphone capture and speaker playback
-/// 4. Transmits captured audio to the server
-/// 5. Receives and plays audio from other connected clients
-///
-/// # Arguments
-///
-/// * `config` - Client configuration containing server address and audio settings
-///
-/// # Returns
-///
-/// Returns `Ok(())` when the call ends normally, or an error if
-/// connection or audio setup fails.
-///
-/// # Security Note
-///
-/// This function uses `NoServerVerification` which disables TLS
-/// certificate verification. This is only suitable for development
-/// with self-signed certificates. For production, use proper
-/// certificate validation.
+/// Start an audio CLI call to the server using WebRTC.
 pub async fn start_call(config: &Configuration) -> Result<()> {
-    let server_url = format!("https://{}:{}", config.server_ip, config.server_port);
-    info!("Connecting to audio server at {}...", server_url);
+    let server_url = format!("http://{}:{}", config.server_ip, config.server_port);
+    info!("Connecting to WebRTC audio server at {}...", server_url);
 
-    // Install the default crypto provider for rustls
-    // This is required for rustls 0.23+ when using custom TLS configuration
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .map_err(|arc| anyhow!("failed to install ring provider: {:?}", arc))?;
+    let api = APIBuilder::new().build();
+    let rtc_config = RTCConfiguration {
+        ice_servers: vec![RTCIceServer {
+            urls: vec![config.stun_server.clone()],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
 
-    // SECURITY NOTE: NoServerVerification disables TLS certificate verification.
-    // This is only suitable for development with self-signed certificates.
-    // For production use, replace with proper certificate validation using
-    // `with_native_certs()` or `with_server_certificate_hashes()`.
-    let mut tls_config = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(NoServerVerification::default()))
-        .with_no_client_auth();
+    let peer_connection = Arc::new(api.new_peer_connection(rtc_config).await?);
+    let data_channel = peer_connection.create_data_channel("audio", None).await?;
 
-    // Set ALPN protocols for HTTP/3 (required for WebTransport)
-    tls_config.alpn_protocols = vec![b"h3".to_vec()];
-
-    // Configure client with custom TLS (for development with self-signed certs)
-    let client_config = ClientConfig::builder()
-        .with_bind_default()
-        .with_custom_tls(tls_config)
-        .build();
-
-    let endpoint = Endpoint::client(client_config)?;
-    let connection = endpoint.connect(&server_url).await?;
-
-    info!("Connected to audio server via WebTransport");
-    info!("Press Ctrl-C to disconnect");
-
-    // Open bidirectional stream for audio
-    let (mut send_stream, mut recv_stream) = connection.open_bi().await?.await?;
-
-    // Receive our client_id from server
-    let mut client_id_buf = [0u8; 8];
-    recv_stream.read_exact(&mut client_id_buf).await?;
-    let my_client_id = u64::from_le_bytes(client_id_buf);
-    info!("Assigned client ID: {}", my_client_id);
-
-    // Get allow_echoback setting from config
     let allow_echoback = config.allow_echoback;
     info!(
         "Echo back: {}",
@@ -112,58 +58,133 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
         }
     );
 
-    // Create channel for sending audio from capture thread
-    let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<u8>>(100);
+    // Channel to send recorded microphone audio bytes from capture callback to DataChannel task
+    let (tx_audio, mut rx_audio) = mpsc::channel::<Vec<u8>>(100);
 
-    // Set up audio host
+    let dc_open = Arc::clone(&data_channel);
+    data_channel.on_open(Box::new(move || {
+        let dc_inner = Arc::clone(&dc_open);
+        Box::pin(async move {
+            info!("WebRTC DataChannel 'audio' successfully opened");
+
+            // Spawn task to send microphone audio over DataChannel
+            tokio::spawn(async move {
+                while let Some(audio_bytes) = rx_audio.recv().await {
+                    let mut packet = Vec::with_capacity(1 + audio_bytes.len());
+                    packet.push(0x01); // Audio data message type
+                    packet.extend_from_slice(&audio_bytes);
+
+                    if dc_inner.send(&Bytes::from(packet)).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        })
+    }));
+
+    data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
+        Box::pin(async move {
+            if msg.data.is_empty() {
+                return;
+            }
+
+            let msg_type = msg.data[0];
+            if msg_type == 0x00 && msg.data.len() >= 9 {
+                // Client ID assignment message: [0x00, client_id (8 bytes LE)]
+                let client_id = u64::from_le_bytes(msg.data[1..9].try_into().unwrap());
+                MY_CLIENT_ID.store(client_id, Ordering::SeqCst);
+                info!("Assigned client ID from WebRTC server: {}", client_id);
+            } else if msg_type == 0x01 && msg.data.len() >= 9 {
+                // Broadcast audio message: [0x01, sender_id (8 bytes LE), audio_data...]
+                let sender_id = u64::from_le_bytes(msg.data[1..9].try_into().unwrap());
+                let my_id = MY_CLIENT_ID.load(Ordering::SeqCst);
+
+                if !allow_echoback && sender_id == my_id {
+                    return;
+                }
+
+                let samples: Vec<f32> = msg.data[9..]
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|chunk| f32::from_le_bytes(*chunk))
+                    .collect();
+
+                let mut buffer = AUDIO_BUFFER.lock().unwrap();
+                for sample in samples {
+                    buffer.push_back(sample);
+                }
+            }
+        })
+    }));
+
+    // Generate SDP Offer
+    let offer = peer_connection.create_offer(None).await?;
+    peer_connection.set_local_description(offer).await?;
+
+    let mut gather_complete = peer_connection.gathering_complete_promise().await;
+    let _ = gather_complete.recv().await;
+
+    let local_desc = peer_connection
+        .local_description()
+        .await
+        .ok_or_else(|| anyhow!("Failed to generate local SDP offer"))?;
+
+    // Perform HTTP SDP offer/answer exchange
+    let client = reqwest::Client::new();
+    let sdp_endpoint = format!("{}/sdp", server_url);
+
+    info!("Sending SDP offer to {}...", sdp_endpoint);
+    let resp = client.post(&sdp_endpoint).json(&local_desc).send().await?;
+
+    if !resp.status().is_success() {
+        return Err(anyhow!("Server returned error: {}", resp.status()));
+    }
+
+    let answer: RTCSessionDescription = resp.json().await?;
+    peer_connection.set_remote_description(answer).await?;
+
+    info!("Connected to audio server via WebRTC!");
+    info!("Press Ctrl-C to disconnect");
+
+    // Set up cpal audio host and devices
     let host = cpal::default_host();
 
-    // Set up input (microphone)
     let input_device = host
         .default_input_device()
         .ok_or_else(|| anyhow!("No input device available"))?;
     info!("Using input device: {}", input_device.name()?);
 
-    // Set up output (speakers)
     let output_device = host
         .default_output_device()
         .ok_or_else(|| anyhow!("No output device available"))?;
     info!("Using output device: {}", output_device.name()?);
 
-    // Configure audio format - use a common format
     let sample_rate = SampleRate(config.sample_rate);
     let channels = config.channels;
-
     let stream_config = StreamConfig {
         channels,
         sample_rate,
         buffer_size: cpal::BufferSize::Default,
     };
 
-    // Create input stream (capture from microphone)
     let input_stream = input_device.build_input_stream(
         &stream_config,
         move |data: &[f32], _: &cpal::InputCallbackInfo| {
-            // Convert f32 samples to bytes for transmission
             let bytes: Vec<u8> = data
                 .iter()
                 .flat_map(|&sample| sample.to_le_bytes())
                 .collect();
-
-            // Send audio data through channel
-            let _ = audio_tx.blocking_send(bytes);
+            let _ = tx_audio.blocking_send(bytes);
         },
         |err| error!("Input stream error: {}", err),
         None,
     )?;
 
-    // Create output stream (play to speakers)
     let output_stream = output_device.build_output_stream(
         &stream_config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut buffer = AUDIO_BUFFER.lock().unwrap();
-
-            // Fill output buffer with received audio (FIFO) or silence
             for sample in data.iter_mut() {
                 *sample = buffer.pop_front().unwrap_or(0.0);
             }
@@ -172,95 +193,14 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
         None,
     )?;
 
-    // Start streams
     input_stream.play()?;
     output_stream.play()?;
 
-    info!("Audio streams started. Speaking now will transmit audio.");
+    info!("Audio streams started. Speaking now will transmit audio over WebRTC.");
 
-    // Task to send audio to server
-    let send_task = tokio::spawn(async move {
-        while let Some(audio_data) = audio_rx.recv().await {
-            // Send length prefix then data
-            let len = audio_data.len() as u32;
-            if send_stream.write_all(&len.to_le_bytes()).await.is_err() {
-                break;
-            }
-            if send_stream.write_all(&audio_data).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    // Receive audio from server
-    let mut buf = vec![0u8; 65536];
-    loop {
-        // Read sender_id (8 bytes)
-        let mut sender_id_buf = [0u8; 8];
-        match recv_stream.read_exact(&mut sender_id_buf).await {
-            Ok(_) => {}
-            Err(e) => {
-                error!("Connection closed: {}", e);
-                break;
-            }
-        }
-        let sender_id = u64::from_le_bytes(sender_id_buf);
-
-        // Read length prefix
-        let mut len_buf = [0u8; 4];
-        match recv_stream.read_exact(&mut len_buf).await {
-            Ok(_) => {}
-            Err(e) => {
-                error!("Connection closed: {}", e);
-                break;
-            }
-        }
-        let len = u32::from_le_bytes(len_buf) as usize;
-
-        // Validate message size to prevent excessive memory allocation
-        if len > MAX_MESSAGE_SIZE {
-            error!(
-                "Server sent oversized message ({} bytes), disconnecting",
-                len
-            );
-            break;
-        }
-
-        if len > buf.len() {
-            buf.resize(len, 0);
-        }
-
-        // Read audio data
-        match recv_stream.read_exact(&mut buf[..len]).await {
-            Ok(_) => {}
-            Err(e) => {
-                error!("Failed to read audio: {}", e);
-                break;
-            }
-        }
-
-        // Skip our own audio if echoback is disabled
-        if !allow_echoback && sender_id == my_client_id {
-            continue;
-        }
-
-        // Convert bytes back to f32 samples
-        let samples: Vec<f32> = buf[..len]
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|chunk| f32::from_le_bytes(*chunk))
-            .collect();
-
-        // Add to playback buffer (FIFO order for proper audio playback)
-        let mut buffer = AUDIO_BUFFER.lock().unwrap();
-        for sample in samples {
-            buffer.push_back(sample);
-        }
-    }
-
-    send_task.abort();
-    info!("Disconnected from server");
+    // Keep call running until process is interrupted
+    tokio::signal::ctrl_c().await?;
+    info!("Call ended by user signal");
 
     Ok(())
 }
