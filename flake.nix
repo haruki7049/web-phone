@@ -1,7 +1,6 @@
 {
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    systems.url = "github:nix-systems/default";
     crane.url = "github:ipetkov/crane";
     flake-compat.url = "github:edolstra/flake-compat";
     flake-parts = {
@@ -21,7 +20,11 @@
   outputs =
     inputs:
     inputs.flake-parts.lib.mkFlake { inherit inputs; } {
-      systems = import inputs.systems;
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+      ];
 
       imports = [
         inputs.treefmt-nix.flakeModule
@@ -38,53 +41,91 @@
           rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rust;
           overlays = [ inputs.rust-overlay.overlays.default ];
-
           src = lib.cleanSource ./.;
+
+          buildInputs =
+            lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+              pkgs.pkg-config
+              pkgs.udev
+              pkgs.alsa-lib
+              pkgs.vulkan-loader
+              pkgs.libX11
+              pkgs.libXcursor
+              pkgs.libXi
+              pkgs.libXrandr
+              pkgs.libxkbcommon
+              pkgs.wayland
+            ]
+            ++ [
+              pkgs.llvmPackages.libclang.lib
+            ];
           nativeBuildInputs = [
-            # Compiler
-            rust
             pkgs.pkg-config # pkg-config
-
-            # LSP
-            pkgs.nil
-
-            # Debugging tools
-            pkgs.websocat
+            pkgs.makeWrapper # For the Nix packaging
+            pkgs.nil # Nix LSP
+            rust # Rust toolchain
+            pkgs.cargo-llvm-cov
+            pkgs.nushell # Script runner
+            pkgs.cachix # cachix CLI
           ];
-          buildInputs = lib.optionals pkgs.stdenv.isLinux [
-            pkgs.alsa-lib
-          ];
-
           cargoArtifacts = craneLib.buildDepsOnly {
-            inherit src nativeBuildInputs buildInputs;
+            inherit src buildInputs nativeBuildInputs;
+
+            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
+            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
           };
-          app = craneLib.buildPackage {
+          web-phone = craneLib.buildPackage {
             inherit
               src
               cargoArtifacts
-              nativeBuildInputs
               buildInputs
+              nativeBuildInputs
               ;
             strictDeps = true;
-
             doCheck = true;
+
+            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
+            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
+
+            meta = {
+              licenses = [ lib.licenses.mit ];
+              mainProgram = "spr";
+            };
           };
           cargo-clippy = craneLib.cargoClippy {
             inherit
               src
               cargoArtifacts
-              nativeBuildInputs
               buildInputs
+              nativeBuildInputs
               ;
             cargoClippyExtraArgs = "--verbose -- --deny warnings";
+
+            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
+            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
           };
           cargo-doc = craneLib.cargoDoc {
             inherit
               src
               cargoArtifacts
-              nativeBuildInputs
               buildInputs
+              nativeBuildInputs
               ;
+
+            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
+            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
+          };
+          llvm-cov = craneLib.cargoLlvmCov {
+            inherit
+              src
+              cargoArtifacts
+              buildInputs
+              nativeBuildInputs
+              ;
+
+            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
+            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
+            cargoLlvmCovExtraArgs = "test --html --output-dir $out";
           };
         in
         {
@@ -93,7 +134,7 @@
           };
 
           treefmt = {
-            projectRootFile = ".git/config";
+            projectRootFile = "flake.nix";
 
             # Nix
             programs.nixfmt.enable = true;
@@ -117,17 +158,20 @@
           };
 
           packages = {
-            inherit app;
-            default = app;
+            inherit web-phone llvm-cov;
+            default = web-phone;
             doc = cargo-doc;
           };
 
           checks = {
-            inherit app cargo-clippy cargo-doc;
+            inherit cargo-clippy;
           };
 
           devShells.default = pkgs.mkShell {
-            inherit nativeBuildInputs buildInputs;
+            inherit buildInputs nativeBuildInputs;
+
+            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
+            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
 
             shellHook = ''
               export PS1="\n[nix-shell:\w]$ "
