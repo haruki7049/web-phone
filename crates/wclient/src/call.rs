@@ -246,11 +246,10 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
 
         // Convert bytes back to f32 samples
         let samples: Vec<f32> = buf[..len]
-            .chunks_exact(4)
-            .map(|chunk| {
-                let bytes: [u8; 4] = chunk.try_into().unwrap();
-                f32::from_le_bytes(bytes)
-            })
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| f32::from_le_bytes(*chunk))
             .collect();
 
         // Add to playback buffer (FIFO order for proper audio playback)
