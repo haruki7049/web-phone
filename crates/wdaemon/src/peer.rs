@@ -11,6 +11,7 @@ use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 use tracing::info;
+use wclient::UserAddress;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
@@ -52,16 +53,24 @@ pub async fn handle_peer_sdp(
             Box::pin(async move {
                 info!("Inbound peer wdaemon DataChannel opened");
 
-                // Forward broadcast audio to this peer daemon
+                // Forward 1-to-1 targeted audio to this peer daemon
                 tokio::spawn(async move {
                     loop {
                         match audio_rx.recv().await {
                             Ok(audio_msg) => {
-                                // Packet: [0x02, sender_id (8 bytes), origin_node (8 bytes), data...]
-                                let mut packet = Vec::with_capacity(17 + audio_msg.data.len());
-                                packet.push(0x02);
+                                let target_addr = &audio_msg.target_address;
+                                let sender_bytes = audio_msg
+                                    .sender_address
+                                    .map(|a| a.to_bytes())
+                                    .unwrap_or([0u8; 32]);
+
+                                // Packet: [0x04, sender_id (8b), origin_node (8b), target_address (32b), sender_address (32b), data...]
+                                let mut packet = Vec::with_capacity(81 + audio_msg.data.len());
+                                packet.push(0x04);
                                 packet.extend_from_slice(&audio_msg.sender_id.to_le_bytes());
                                 packet.extend_from_slice(&audio_msg.origin_node.to_le_bytes());
+                                packet.extend_from_slice(&target_addr.to_bytes());
+                                packet.extend_from_slice(&sender_bytes);
                                 packet.extend_from_slice(&audio_msg.data);
 
                                 if dc_inner.send(&Bytes::from(packet)).await.is_err() {
@@ -78,21 +87,24 @@ pub async fn handle_peer_sdp(
 
         dc.on_message(Box::new(move |msg: DataChannelMessage| {
             Box::pin(async move {
-                if msg.data.len() < 17 {
+                if msg.data.is_empty() {
                     return;
                 }
 
                 let msg_type = msg.data[0];
-                if msg_type == 0x02 {
-                    // Peer audio packet: [0x02, sender_id (8b), origin_node (8b), audio...]
+                if msg_type == 0x04 && msg.data.len() >= 81 {
+                    // Targeted peer audio packet: [0x04, sender_id (8b), origin_node (8b), target_address (32b), sender_address (32b), audio...]
                     let sender_id = u64::from_le_bytes(msg.data[1..9].try_into().unwrap());
                     let origin_node = u64::from_le_bytes(msg.data[9..17].try_into().unwrap());
-                    let payload = msg.data[17..].to_vec();
+                    let target_bytes: [u8; 32] = msg.data[17..49].try_into().unwrap();
+                    let sender_bytes: [u8; 32] = msg.data[49..81].try_into().unwrap();
+                    let payload = msg.data[81..].to_vec();
 
-                    // Avoid looping back if origin_node is ourselves
                     if origin_node != my_node_id {
                         let _ = AUDIO_BROADCAST.send(AudioMessage {
                             sender_id,
+                            sender_address: Some(UserAddress::from_bytes(sender_bytes)),
+                            target_address: UserAddress::from_bytes(target_bytes),
                             origin_node,
                             data: payload,
                         });
@@ -171,10 +183,18 @@ pub async fn connect_to_peer(
                 loop {
                     match audio_rx.recv().await {
                         Ok(audio_msg) => {
-                            let mut packet = Vec::with_capacity(17 + audio_msg.data.len());
-                            packet.push(0x02);
+                            let target_addr = &audio_msg.target_address;
+                            let sender_bytes = audio_msg
+                                .sender_address
+                                .map(|a| a.to_bytes())
+                                .unwrap_or([0u8; 32]);
+
+                            let mut packet = Vec::with_capacity(81 + audio_msg.data.len());
+                            packet.push(0x04);
                             packet.extend_from_slice(&audio_msg.sender_id.to_le_bytes());
                             packet.extend_from_slice(&audio_msg.origin_node.to_le_bytes());
+                            packet.extend_from_slice(&target_addr.to_bytes());
+                            packet.extend_from_slice(&sender_bytes);
                             packet.extend_from_slice(&audio_msg.data);
 
                             if dc_inner.send(&Bytes::from(packet)).await.is_err() {
@@ -191,19 +211,23 @@ pub async fn connect_to_peer(
 
     data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
         Box::pin(async move {
-            if msg.data.len() < 17 {
+            if msg.data.is_empty() {
                 return;
             }
 
             let msg_type = msg.data[0];
-            if msg_type == 0x02 {
+            if msg_type == 0x04 && msg.data.len() >= 81 {
                 let sender_id = u64::from_le_bytes(msg.data[1..9].try_into().unwrap());
                 let origin_node = u64::from_le_bytes(msg.data[9..17].try_into().unwrap());
-                let payload = msg.data[17..].to_vec();
+                let target_bytes: [u8; 32] = msg.data[17..49].try_into().unwrap();
+                let sender_bytes: [u8; 32] = msg.data[49..81].try_into().unwrap();
+                let payload = msg.data[81..].to_vec();
 
                 if origin_node != my_node_id {
                     let _ = AUDIO_BROADCAST.send(AudioMessage {
                         sender_id,
+                        sender_address: Some(UserAddress::from_bytes(sender_bytes)),
+                        target_address: UserAddress::from_bytes(target_bytes),
                         origin_node,
                         data: payload,
                     });

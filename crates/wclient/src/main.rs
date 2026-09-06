@@ -62,8 +62,39 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Failed to get Configuration"))?;
 
     match args.action {
-        Actions::Call => wclient::call::start_call(config).await?,
+        Actions::Call { to } => wclient::call::start_call(config, to).await?,
+        Actions::ListAddresses => list_registered_addresses(config).await?,
         Actions::ListDevices => wclient::audio::list_devices()?,
+    }
+
+    Ok(())
+}
+
+/// Query and display registered wclient addresses from wdaemon.
+async fn list_registered_addresses(config: &Configuration) -> Result<()> {
+    let server_url = match config.server_ip {
+        std::net::IpAddr::V4(ip) => format!("http://{}:{}", ip, config.server_port),
+        std::net::IpAddr::V6(ip) => format!("http://[{}]:{}", ip, config.server_port),
+    };
+    let endpoint = format!("{}/addresses", server_url);
+    let client = reqwest::Client::new();
+    let resp = client.get(&endpoint).send().await?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("Failed to fetch addresses from server: {}", resp.status());
+    }
+
+    let addresses: Vec<UserAddress> = resp.json().await?;
+    if addresses.is_empty() {
+        println!("No registered wclient temporary user IDs currently connected.");
+    } else {
+        println!(
+            "Registered wclient temporary SHA-256 user IDs ({} total):",
+            addresses.len()
+        );
+        for (idx, addr) in addresses.iter().enumerate() {
+            println!("  {}. {} (Short: {})", idx + 1, addr, addr.short_id());
+        }
     }
 
     Ok(())
@@ -89,7 +120,7 @@ struct CLIArgs {
     #[arg(long)]
     server_port: Option<u16>,
 
-    /// User IPv6 address override for wclient recognition.
+    /// User address override for wclient recognition.
     #[arg(long)]
     user_address: Option<UserAddress>,
 
@@ -101,8 +132,14 @@ struct CLIArgs {
 /// Available client actions.
 #[derive(Debug, Clone, clap::Subcommand)]
 enum Actions {
-    /// Start an audio call with the server via WebRTC.
-    Call,
+    /// Start a 1-to-1 audio call or standby to receive calls via WebRTC.
+    Call {
+        /// Target wclient temporary SHA-256 user ID (or prefix) to call directly (optional).
+        #[arg(long, short = 't')]
+        to: Option<UserAddress>,
+    },
+    /// List all registered wclient temporary user IDs connected to wdaemon.
+    ListAddresses,
     /// List available audio devices.
     ListDevices,
 }

@@ -38,14 +38,21 @@ cargo run -p wdaemon -- --port 15001 --stun-port 3479 --peer http://127.0.0.1:15
 ### Start a Client
 
 ```bash
-# Start an audio phone call via WebRTC
+# Connect to wdaemon, receive an assigned temporary SHA-256 User ID, and stand by for incoming calls
 cargo run -p wclient -- call
 
-# Connect to a specific wdaemon server and STUN server with a custom user IPv6 address
-cargo run -p wclient -- --server-ip 127.0.0.1 --server-port 15000 --user-address 2001:db8::1 call
+# Make a direct 1-to-1 audio call to a specific wclient temporary SHA-256 User ID
+cargo run -p wclient -- call --to <SHA256_USER_ID>
+
+# List all registered wclient temporary user IDs connected to the daemon
+cargo run -p wclient -- list-addresses
 
 # List available audio input and output devices
 cargo run -p wclient -- list-devices
+
+
+
+
 ```
 
 ### Configuration

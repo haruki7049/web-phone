@@ -9,6 +9,7 @@
 //! - Transmitting audio over WebRTC DataChannel
 //! - Receiving and playing back audio through speakers
 
+use crate::address::UserAddress;
 use crate::config::Configuration;
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
@@ -32,15 +33,21 @@ static AUDIO_BUFFER: LazyLock<Mutex<VecDeque<f32>>> = LazyLock::new(|| Mutex::ne
 static MY_CLIENT_ID: AtomicU64 = AtomicU64::new(u64::MAX);
 
 /// Start an audio CLI call to the server using WebRTC.
-pub async fn start_call(config: &Configuration) -> Result<()> {
+/// Optional `target_address` specifies the target registered wclient temporary SHA-256 user ID for a 1-to-1 call.
+/// If `target_address` is None, the client operates in standby mode (ready to receive calls to its own assigned ID).
+pub async fn start_call(config: &Configuration, target_address: Option<UserAddress>) -> Result<()> {
     let server_url = match config.server_ip {
         std::net::IpAddr::V4(ip) => format!("http://{}:{}", ip, config.server_port),
         std::net::IpAddr::V6(ip) => format!("http://[{}]:{}", ip, config.server_port),
     };
-    info!(
-        "Recognized wclient user address (IPv6): {}",
-        config.user_address
-    );
+    if let Some(ref target) = target_address {
+        info!(
+            "Targeting direct 1-to-1 call to wclient user ID: {}",
+            target
+        );
+    } else {
+        info!("No target address specified. Operating in incoming call standby mode...");
+    }
     info!("Connecting to WebRTC audio server at {}...", server_url);
 
     let api = APIBuilder::new().build();
@@ -69,20 +76,26 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
     let (tx_audio, mut rx_audio) = mpsc::channel::<Vec<u8>>(100);
 
     let dc_open = Arc::clone(&data_channel);
+    let target_addr_send = target_address.clone();
     data_channel.on_open(Box::new(move || {
         let dc_inner = Arc::clone(&dc_open);
+        let target_opt = target_addr_send.clone();
         Box::pin(async move {
             info!("WebRTC DataChannel 'audio' successfully opened");
 
-            // Spawn task to send microphone audio over DataChannel
+            // Spawn task to send microphone audio over DataChannel if target address is provided
             tokio::spawn(async move {
                 while let Some(audio_bytes) = rx_audio.recv().await {
-                    let mut packet = Vec::with_capacity(1 + audio_bytes.len());
-                    packet.push(0x01); // Audio data message type
-                    packet.extend_from_slice(&audio_bytes);
+                    if let Some(ref target) = target_opt {
+                        // Targeted 1-to-1 call packet: [0x03, target_address (32 bytes SHA256), audio_bytes...]
+                        let mut packet = Vec::with_capacity(33 + audio_bytes.len());
+                        packet.push(0x03);
+                        packet.extend_from_slice(&target.to_bytes());
+                        packet.extend_from_slice(&audio_bytes);
 
-                    if dc_inner.send(&Bytes::from(packet)).await.is_err() {
-                        break;
+                        if dc_inner.send(&Bytes::from(packet)).await.is_err() {
+                            break;
+                        }
                     }
                 }
             });
@@ -97,10 +110,21 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
 
             let msg_type = msg.data[0];
             if msg_type == 0x00 && msg.data.len() >= 9 {
-                // Client ID assignment message: [0x00, client_id (8 bytes LE)]
+                // Client assignment message: [0x00, client_id (8 bytes LE), user_address (32 bytes SHA256)]
                 let client_id = u64::from_le_bytes(msg.data[1..9].try_into().unwrap());
                 MY_CLIENT_ID.store(client_id, Ordering::SeqCst);
-                info!("Assigned client ID from WebRTC server: {}", client_id);
+
+                if msg.data.len() >= 41 {
+                    let addr_bytes: [u8; 32] = msg.data[9..41].try_into().unwrap();
+                    let registered_addr = UserAddress::from_bytes(addr_bytes);
+                    info!("============================================================");
+                    info!(" Assigned Temporary User ID (SHA-256): {}", registered_addr);
+                    info!(" Short ID: {}", registered_addr.short_id());
+                    info!(" Client ID: {}", client_id);
+                    info!("============================================================");
+                } else {
+                    info!("Assigned client ID from WebRTC server: {}", client_id);
+                }
             } else if msg_type == 0x01 && msg.data.len() >= 9 {
                 // Broadcast audio message: [0x01, sender_id (8 bytes LE), audio_data...]
                 let sender_id = u64::from_le_bytes(msg.data[1..9].try_into().unwrap());
@@ -111,6 +135,33 @@ pub async fn start_call(config: &Configuration) -> Result<()> {
                 }
 
                 let samples: Vec<f32> = msg.data[9..]
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|chunk| f32::from_le_bytes(*chunk))
+                    .collect();
+
+                let mut buffer = AUDIO_BUFFER.lock().unwrap();
+                for sample in samples {
+                    buffer.push_back(sample);
+                }
+            } else if msg_type == 0x03 && msg.data.len() >= 73 {
+                // Targeted audio message: [0x03, target_address (32b), sender_id (8b), sender_address (32b), audio_data...]
+                let sender_id = u64::from_le_bytes(msg.data[33..41].try_into().unwrap());
+                let sender_bytes: [u8; 32] = msg.data[41..73].try_into().unwrap();
+                let sender_addr = UserAddress::from_bytes(sender_bytes);
+                let my_id = MY_CLIENT_ID.load(Ordering::SeqCst);
+
+                if !allow_echoback && sender_id == my_id {
+                    return;
+                }
+
+                tracing::trace!(
+                    "Received targeted audio frame from {}",
+                    sender_addr.short_id()
+                );
+
+                let samples: Vec<f32> = msg.data[73..]
                     .as_chunks::<4>()
                     .0
                     .iter()

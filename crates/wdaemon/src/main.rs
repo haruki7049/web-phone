@@ -66,7 +66,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = Router::new()
         .route("/sdp", post(handle_sdp_offer))
-        .route("/peer/sdp", post(handle_peer_sdp));
+        .route("/peer/sdp", post(handle_peer_sdp))
+        .route("/addresses", axum::routing::get(list_registered_addresses));
 
     let listener = tokio::net::TcpListener::bind(address).await?;
     info!(
@@ -84,6 +85,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Handler to retrieve all registered wclient user addresses.
+async fn list_registered_addresses() -> axum::extract::Json<Vec<wclient::UserAddress>> {
+    axum::extract::Json(wdaemon::connection::get_registered_addresses())
 }
 
 /// Command-line arguments for the audio server daemon.

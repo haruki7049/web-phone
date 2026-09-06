@@ -3442,6 +3442,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "toml",
  "tracing",
@@ -3462,12 +3463,14 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "stun",
  "tokio",
  "toml",
  "tracing",
  "tracing-subscriber",
  "turn",
+ "wclient",
  "webrtc",
 ]
 

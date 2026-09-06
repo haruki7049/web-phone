@@ -67,14 +67,13 @@ impl Default for Configuration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv6Addr;
 
     #[test]
     fn test_configuration_default() {
         let config = Configuration::default();
         assert_eq!(config.server_ip, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
         assert_eq!(config.server_port, 15000);
-        assert_eq!(config.user_address, UserAddress::default());
+        assert_eq!(config.user_address.id.len(), 64);
         assert_eq!(config.sample_rate, 48000);
         assert_eq!(config.channels, 1);
         assert!(!config.allow_echoback);
@@ -97,7 +96,7 @@ mod tests {
         let toml_str = r#"
             server_ip = "192.168.1.1"
             server_port = 16000
-            user_address = "2001:db8::1"
+            user_address = "a1b2c3d4e5f607080900"
             stun_server = "stun:stun.l.google.com:19302"
             sample_rate = 44100
             channels = 2
@@ -108,7 +107,7 @@ mod tests {
         assert_eq!(config.server_port, 16000);
         assert_eq!(
             config.user_address,
-            UserAddress::new(Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1))
+            UserAddress::new("a1b2c3d4e5f607080900")
         );
         assert_eq!(config.stun_server, "stun:stun.l.google.com:19302");
         assert_eq!(config.sample_rate, 44100);
