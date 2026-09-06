@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get()
         .ok_or("Failed to get Configuration from CONFIGURATION")?;
 
-    let address: SocketAddr = format!("{}:{}", &config.ip, &config.port).parse()?;
+    let address: SocketAddr = format!("{}:{}", config.ip, config.port).parse()?;
 
     // Generate self-signed certificate for WebTransport
     let identity = Identity::self_signed(["localhost", "127.0.0.1", &config.ip.to_string()])?;
