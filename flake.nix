@@ -38,8 +38,9 @@
           ...
         }:
         let
-          rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-          craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rust;
+          rustForPkgs = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+          rust = rustForPkgs pkgs;
+          craneLib = (inputs.crane.mkLib pkgs).overrideToolchain (p: rustForPkgs p);
           overlays = [ inputs.rust-overlay.overlays.default ];
           src = lib.cleanSource ./.;
 
