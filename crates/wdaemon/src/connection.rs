@@ -12,12 +12,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use tracing::{error, info, warn};
 use webrtc::api::APIBuilder;
-use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
+use webrtc::data_channel::data_channel_message::DataChannelMessage;
+use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use webrtc::peer_connection::RTCPeerConnection;
 
 /// Counter for connected clients.
 static CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -39,11 +39,12 @@ pub async fn handle_sdp_offer(
     let api = APIBuilder::new().build();
     let config = RTCConfiguration::default();
 
-    let peer_connection = Arc::new(
-        api.new_peer_connection(config)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create PeerConnection: {}", e)))?,
-    );
+    let peer_connection = Arc::new(api.new_peer_connection(config).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create PeerConnection: {}", e),
+        )
+    })?);
 
     let client_id = CLIENT_COUNT.fetch_add(1, Ordering::SeqCst);
     info!("Client {} initiating WebRTC connection", client_id);
@@ -53,17 +54,19 @@ pub async fn handle_sdp_offer(
         .unwrap()
         .insert(client_id, Arc::clone(&peer_connection));
 
-    peer_connection.on_peer_connection_state_change(Box::new(move |state: RTCPeerConnectionState| {
-        info!("Client {} PeerConnection state: {}", client_id, state);
-        if state == RTCPeerConnectionState::Failed
-            || state == RTCPeerConnectionState::Closed
-            || state == RTCPeerConnectionState::Disconnected
-        {
-            info!("Client {} disconnected", client_id);
-            PEER_CONNECTIONS.lock().unwrap().remove(&client_id);
-        }
-        Box::pin(async move {})
-    }));
+    peer_connection.on_peer_connection_state_change(Box::new(
+        move |state: RTCPeerConnectionState| {
+            info!("Client {} PeerConnection state: {}", client_id, state);
+            if state == RTCPeerConnectionState::Failed
+                || state == RTCPeerConnectionState::Closed
+                || state == RTCPeerConnectionState::Disconnected
+            {
+                info!("Client {} disconnected", client_id);
+                PEER_CONNECTIONS.lock().unwrap().remove(&client_id);
+            }
+            Box::pin(async move {})
+        },
+    ));
 
     peer_connection.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
         let dc_label = dc.label().to_string();
@@ -147,23 +150,32 @@ pub async fn handle_sdp_offer(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid offer SDP: {}", e)))?;
 
-    let answer = peer_connection
-        .create_answer(None)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create answer: {}", e)))?;
+    let answer = peer_connection.create_answer(None).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create answer: {}", e),
+        )
+    })?;
 
     peer_connection
         .set_local_description(answer)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to set local description: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to set local description: {}", e),
+            )
+        })?;
 
     let mut gather_complete = peer_connection.gathering_complete_promise().await;
     let _ = gather_complete.recv().await;
 
-    let local_desc = peer_connection
-        .local_description()
-        .await
-        .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "No local description available".to_string()))?;
+    let local_desc = peer_connection.local_description().await.ok_or_else(|| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "No local description available".to_string(),
+        )
+    })?;
 
     Ok(Json(local_desc))
 }

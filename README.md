@@ -41,8 +41,8 @@ cargo run -p wdaemon -- --port 15001 --stun-port 3479 --peer http://127.0.0.1:15
 # Start an audio phone call via WebRTC
 cargo run -p wclient -- call
 
-# Connect to a specific wdaemon server and STUN server
-cargo run -p wclient -- --server-ip 127.0.0.1 --server-port 15000 --stun-server stun:127.0.0.1:3478 call
+# Connect to a specific wdaemon server and STUN server with a custom user IPv6 address
+cargo run -p wclient -- --server-ip 127.0.0.1 --server-port 15000 --user-address 2001:db8::1 call
 
 # List available audio input and output devices
 cargo run -p wclient -- list-devices
@@ -70,6 +70,7 @@ node_id = 1
 ```toml
 server_ip = "127.0.0.1"
 server_port = 15000
+user_address = "::1"
 stun_server = "stun:127.0.0.1:3478"
 sample_rate = 48000
 channels = 1
@@ -86,8 +87,8 @@ allow_echoback = false
 ```
 
 1. **WebRTC Communication**: `wclient` connects to `wdaemon` via HTTP SDP Offer/Answer signaling and exchanges audio frames over WebRTC DataChannels.
-2. **STUN/TURN Service**: `wdaemon` runs a STUN/TURN server on UDP (port 3478 by default) for NAT traversal.
-3. **Daemon Mesh Interconnection**: `wdaemon` instances can connect to peer `wdaemon` nodes over WebRTC. Audio and client metadata are relayed across the daemon mesh, allowing clients connected to different `wdaemon` servers to talk to each other seamlessly.
+1. **STUN/TURN Service**: `wdaemon` runs a STUN/TURN server on UDP (port 3478 by default) for NAT traversal.
+1. **Daemon Mesh Interconnection**: `wdaemon` instances can connect to peer `wdaemon` nodes over WebRTC. Audio and client metadata are relayed across the daemon mesh, allowing clients connected to different `wdaemon` servers to talk to each other seamlessly.
 
 ## License
 

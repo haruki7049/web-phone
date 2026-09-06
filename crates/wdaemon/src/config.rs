@@ -5,7 +5,7 @@
 
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex, OnceLock};
 
@@ -26,8 +26,8 @@ pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 /// Server configuration for the WebRTC audio daemon.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Configuration {
-    /// IP address to bind the server and STUN/TURN services to.
-    pub ip: Ipv4Addr,
+    /// IP address to bind the server and STUN/TURN services to (supports IPv4 or IPv6).
+    pub ip: IpAddr,
     /// Port number for HTTP/WebRTC signaling and peer API.
     pub port: u16,
     /// UDP port for STUN/TURN service.
@@ -50,7 +50,7 @@ fn default_true() -> bool {
 impl Default for Configuration {
     fn default() -> Self {
         Self {
-            ip: Ipv4Addr::new(127, 0, 0, 1),
+            ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             port: 15000,
             stun_port: 3478,
             turn_enabled: true,
@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn test_configuration_default() {
         let config = Configuration::default();
-        assert_eq!(config.ip, Ipv4Addr::new(127, 0, 0, 1));
+        assert_eq!(config.ip, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
         assert_eq!(config.port, 15000);
         assert_eq!(config.stun_port, 3478);
         assert!(config.turn_enabled);
@@ -94,7 +94,7 @@ mod tests {
             node_id = 42
         "#;
         let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
-        assert_eq!(config.ip, Ipv4Addr::new(192, 168, 1, 1));
+        assert_eq!(config.ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
         assert_eq!(config.port, 16000);
         assert_eq!(config.stun_port, 3479);
         assert_eq!(config.peers, vec!["http://192.168.1.2:15000"]);

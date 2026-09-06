@@ -1,13 +1,13 @@
 //! WebRTC audio daemon, STUN/TURN server, and peer mesh entry point.
 
-use axum::{routing::post, Router};
+use axum::{Router, routing::post};
 use clap::Parser;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::{error, info};
 use wdaemon::{
-    connection::handle_sdp_offer, peer::handle_peer_sdp, peer::connect_to_peer, stun::run_stun_server,
-    CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH,
+    CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, connection::handle_sdp_offer,
+    peer::connect_to_peer, peer::handle_peer_sdp, stun::run_stun_server,
 };
 
 /// Main entry point for the audio server daemon.
@@ -18,10 +18,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args: CLIArgs = CLIArgs::parse();
 
-    let mut loaded_config: Configuration = confy::load_path(&args.config_path).unwrap_or_else(|_| {
-        info!("Running wdaemon with default Configuration...");
-        Configuration::default()
-    });
+    let mut loaded_config: Configuration =
+        confy::load_path(&args.config_path).unwrap_or_else(|_| {
+            info!("Running wdaemon with default Configuration...");
+            Configuration::default()
+        });
 
     if let Some(port) = args.port {
         loaded_config.port = port;
@@ -33,9 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loaded_config.peers.extend(args.peer);
     }
 
-    CONFIGURATION
-        .set(loaded_config)
-        .unwrap();
+    CONFIGURATION.set(loaded_config).unwrap();
 
     let config: &Configuration = CONFIGURATION
         .get()
@@ -43,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn STUN/TURN UDP server if enabled
     if config.turn_enabled {
-        let stun_addr: SocketAddr = format!("{}:{}", config.ip, config.stun_port).parse()?;
+        let stun_addr = SocketAddr::new(config.ip, config.stun_port);
         tokio::spawn(async move {
             if let Err(e) = run_stun_server(stun_addr).await {
                 error!("STUN/TURN server error: {}", e);
@@ -63,16 +62,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    let address: SocketAddr = format!("{}:{}", config.ip, config.port).parse()?;
+    let address = SocketAddr::new(config.ip, config.port);
 
     let app = Router::new()
         .route("/sdp", post(handle_sdp_offer))
         .route("/peer/sdp", post(handle_peer_sdp));
 
     let listener = tokio::net::TcpListener::bind(address).await?;
-    info!("WebRTC audio daemon node {} running on http://{}", config.node_id, &address);
+    info!(
+        "WebRTC audio daemon node {} running on http://{}",
+        config.node_id, &address
+    );
     if config.turn_enabled {
-        info!("STUN/TURN server running on UDP {}:{}", config.ip, config.stun_port);
+        info!(
+            "STUN/TURN server running on UDP {}",
+            SocketAddr::new(config.ip, config.stun_port)
+        );
     }
     info!("Waiting for wclient audio calls & peer daemon mesh connections...");
 

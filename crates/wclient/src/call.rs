@@ -33,7 +33,14 @@ static MY_CLIENT_ID: AtomicU64 = AtomicU64::new(u64::MAX);
 
 /// Start an audio CLI call to the server using WebRTC.
 pub async fn start_call(config: &Configuration) -> Result<()> {
-    let server_url = format!("http://{}:{}", config.server_ip, config.server_port);
+    let server_url = match config.server_ip {
+        std::net::IpAddr::V4(ip) => format!("http://{}:{}", ip, config.server_port),
+        std::net::IpAddr::V6(ip) => format!("http://[{}]:{}", ip, config.server_port),
+    };
+    info!(
+        "Recognized wclient user address (IPv6): {}",
+        config.user_address
+    );
     info!("Connecting to WebRTC audio server at {}...", server_url);
 
     let api = APIBuilder::new().build();

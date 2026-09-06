@@ -15,16 +15,19 @@
 //! # Start a call with custom server IP and port
 //! wclient --server-ip 127.0.0.1 --server-port 15000 call
 //!
+//! # Start a call with a custom user IPv6 address for recognition
+//! wclient --user-address 2001:db8::1 call
+//!
 //! # List available audio devices
 //! wclient list-devices
 //! ```
 
 use anyhow::Result;
 use clap::Parser;
-use std::net::Ipv4Addr;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use tracing::info;
-use wclient::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
+use wclient::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, UserAddress};
 
 /// Main entry point for the audio client.
 #[tokio::main]
@@ -33,10 +36,11 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let args: CLIArgs = CLIArgs::parse();
 
-    let mut loaded_config: Configuration = confy::load_path(&args.config_path).unwrap_or_else(|_| {
-        info!("Running wclient with default Configuration...");
-        Configuration::default()
-    });
+    let mut loaded_config: Configuration =
+        confy::load_path(&args.config_path).unwrap_or_else(|_| {
+            info!("Running wclient with default Configuration...");
+            Configuration::default()
+        });
 
     if let Some(server_ip) = args.server_ip {
         loaded_config.server_ip = server_ip;
@@ -44,13 +48,14 @@ async fn main() -> Result<()> {
     if let Some(server_port) = args.server_port {
         loaded_config.server_port = server_port;
     }
+    if let Some(user_address) = args.user_address {
+        loaded_config.user_address = user_address;
+    }
     if let Some(stun_server) = args.stun_server {
         loaded_config.stun_server = stun_server;
     }
 
-    CONFIGURATION
-        .set(loaded_config)
-        .unwrap();
+    CONFIGURATION.set(loaded_config).unwrap();
 
     let config: &Configuration = CONFIGURATION
         .get()
@@ -78,11 +83,15 @@ struct CLIArgs {
 
     /// Server IP address override.
     #[arg(long)]
-    server_ip: Option<Ipv4Addr>,
+    server_ip: Option<IpAddr>,
 
     /// Server port override.
     #[arg(long)]
     server_port: Option<u16>,
+
+    /// User IPv6 address override for wclient recognition.
+    #[arg(long)]
+    user_address: Option<UserAddress>,
 
     /// STUN server URL override.
     #[arg(long)]
