@@ -37,6 +37,9 @@ pub fn list_devices() -> Result<()> {
     for device in host.input_devices()? {
         if let Ok(name) = device.name() {
             info!("  - {}", name);
+            if let Ok(config) = device.default_input_config() {
+                info!("      Default input config: {:?}", config);
+            }
         }
     }
 
@@ -44,6 +47,9 @@ pub fn list_devices() -> Result<()> {
     for device in host.output_devices()? {
         if let Ok(name) = device.name() {
             info!("  - {}", name);
+            if let Ok(config) = device.default_output_config() {
+                info!("      Default output config: {:?}", config);
+            }
         }
     }
 

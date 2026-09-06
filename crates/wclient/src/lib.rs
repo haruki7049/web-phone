@@ -24,6 +24,7 @@ pub mod address;
 pub mod audio;
 pub mod call;
 pub mod config;
+pub mod resample;
 
 // Re-export commonly used types
 pub use address::UserAddress;
