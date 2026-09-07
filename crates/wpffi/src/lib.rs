@@ -6,8 +6,10 @@ pub mod call;
 pub mod config;
 pub mod protocol;
 pub mod resample;
+pub mod webrtc_session;
 
 pub use address::UserAddress;
+pub use audio::AudioEngine;
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 pub use protocol::{ProtocolError, ProtocolPacket};
 

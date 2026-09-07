@@ -1,31 +1,24 @@
 //! Audio call module.
 //!
-//! This module provides the main functionality for establishing and
-//! maintaining an audio call connection over WebRTC.
+//! This module orchestrates WebRTC communication sessions and CPAL Audio Engines.
 
 use crate::address::UserAddress;
+use crate::audio::AudioEngine;
 use crate::config::Configuration;
-use crate::protocol::ProtocolPacket;
-use anyhow::{Result, anyhow};
-use bytes::Bytes;
-use cpal::traits::{DeviceTrait, StreamTrait};
-use cpal::{SampleRate, StreamConfig};
+use crate::webrtc_session::{create_peer_connection, perform_sdp_handshake, setup_data_channel};
+use anyhow::Result;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::atomic::AtomicU64;
+use std::sync::{LazyLock, Mutex};
 use tokio::sync::mpsc;
-use tracing::{error, info};
-use webrtc::api::APIBuilder;
-use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use tracing::info;
 
 /// Audio buffer for receiving audio data from WebRTC DataChannel.
-static AUDIO_BUFFER: LazyLock<Mutex<VecDeque<f32>>> = LazyLock::new(|| Mutex::new(VecDeque::new()));
+pub static AUDIO_BUFFER: LazyLock<Mutex<VecDeque<f32>>> =
+    LazyLock::new(|| Mutex::new(VecDeque::new()));
 
 /// Store assigned client ID received from server.
-static MY_CLIENT_ID: AtomicU64 = AtomicU64::new(u64::MAX);
+pub static MY_CLIENT_ID: AtomicU64 = AtomicU64::new(u64::MAX);
 
 /// Start an audio CLI call to the server using WebRTC.
 pub async fn start_call(config: &Configuration, target_address: Option<UserAddress>) -> Result<()> {
@@ -38,410 +31,34 @@ pub async fn start_call_with_cancel(
     target_address: Option<UserAddress>,
     mut cancel_rx: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> Result<()> {
-    let server_url = match config.server_ip {
-        std::net::IpAddr::V4(ip) => format!("http://{}:{}", ip, config.server_port),
-        std::net::IpAddr::V6(ip) => format!("http://[{}]:{}", ip, config.server_port),
-    };
     if let Some(ref target) = target_address {
-        info!(
-            "Targeting direct 1-to-1 call to wpclient user ID: {}",
-            target
-        );
+        info!("Targeting direct 1-to-1 call to wpclient user ID: {}", target);
     } else {
         info!("No target address specified. Operating in incoming call standby mode...");
     }
-    info!("Connecting to WebRTC audio server at {}...", server_url);
 
-    let api = APIBuilder::new().build();
-    let rtc_config = RTCConfiguration {
-        ice_servers: vec![RTCIceServer {
-            urls: vec![config.stun_server.clone()],
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
+    // 1. Create WebRTC PeerConnection
+    let peer_connection = create_peer_connection(config).await?;
 
-    let peer_connection = Arc::new(api.new_peer_connection(rtc_config).await?);
-    let data_channel = peer_connection.create_data_channel("audio", None).await?;
+    // 2. Setup DataChannel & audio byte sender channel
+    let (tx_audio, rx_audio) = mpsc::channel::<Vec<u8>>(100);
+    let _data_channel = setup_data_channel(
+        &peer_connection,
+        target_address,
+        rx_audio,
+        config,
+        &MY_CLIENT_ID,
+        &AUDIO_BUFFER,
+    )
+    .await?;
 
-    let allow_echoback = config.allow_echoback;
-    info!(
-        "Echo back: {}",
-        if allow_echoback {
-            "enabled"
-        } else {
-            "disabled"
-        }
-    );
+    // 3. Perform SDP Offer / Answer exchange with server
+    perform_sdp_handshake(&peer_connection, config).await?;
 
-    // Channel to send recorded microphone audio bytes from capture callback to DataChannel task
-    let (tx_audio, mut rx_audio) = mpsc::channel::<Vec<u8>>(100);
+    // 4. Start CPAL Audio Engine (Microphone & Speaker Streams)
+    let _audio_engine = AudioEngine::start(config, tx_audio, &AUDIO_BUFFER)?;
 
-    let dc_open = Arc::clone(&data_channel);
-    let target_addr_send = target_address.clone();
-    data_channel.on_open(Box::new(move || {
-        let dc_inner = Arc::clone(&dc_open);
-        let target_opt = target_addr_send.clone();
-        Box::pin(async move {
-            info!("WebRTC DataChannel 'audio' successfully opened");
-
-            // Spawn task to send microphone audio over DataChannel if target address is provided
-            tokio::spawn(async move {
-                while let Some(audio_bytes) = rx_audio.recv().await {
-                    if let Some(ref target) = target_opt {
-                        let packet = ProtocolPacket::ClientTargetedAudio {
-                            target_address: target.clone(),
-                            audio_data: audio_bytes,
-                        };
-                        if dc_inner.send(&Bytes::from(packet.encode())).await.is_err() {
-                            break;
-                        }
-                    }
-                }
-            });
-        })
-    }));
-
-    let auto_accept = config.auto_accept;
-    let dc_msg = Arc::clone(&data_channel);
-    data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
-        let dc_inner = Arc::clone(&dc_msg);
-        Box::pin(async move {
-            let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
-                return;
-            };
-
-            match packet {
-                ProtocolPacket::ClientAssignment {
-                    client_id,
-                    user_address,
-                } => {
-                    MY_CLIENT_ID.store(client_id, Ordering::SeqCst);
-                    info!("============================================================");
-                    info!(" Assigned Temporary User ID (SHA-256): {}", user_address);
-                    info!(" Short ID: {}", user_address.short_id());
-                    info!(" Client ID: {}", client_id);
-                    info!("============================================================");
-                }
-                ProtocolPacket::BroadcastAudio {
-                    sender_id,
-                    audio_data,
-                } => {
-                    let my_id = MY_CLIENT_ID.load(Ordering::SeqCst);
-                    if !allow_echoback && sender_id == my_id {
-                        return;
-                    }
-                    let samples: Vec<f32> = audio_data
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .map(|chunk| f32::from_le_bytes(*chunk))
-                        .collect();
-
-                    let mut buffer = AUDIO_BUFFER.lock().unwrap();
-                    for sample in samples {
-                        buffer.push_back(sample);
-                    }
-                }
-                ProtocolPacket::ServerTargetedAudio {
-                    sender_id,
-                    sender_address,
-                    audio_data,
-                    ..
-                } => {
-                    let my_id = MY_CLIENT_ID.load(Ordering::SeqCst);
-                    if !allow_echoback && sender_id == my_id {
-                        return;
-                    }
-                    tracing::trace!("Received audio frame from {}", sender_address.short_id());
-                    let samples: Vec<f32> = audio_data
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
-                        .collect();
-
-                    let mut buffer = AUDIO_BUFFER.lock().unwrap();
-                    for sample in samples {
-                        buffer.push_back(sample);
-                    }
-                }
-                ProtocolPacket::CallRequest { caller_address, .. } => {
-                    let caller_bytes = caller_address.to_bytes();
-                    if auto_accept {
-                        info!(
-                            "Auto-accepting incoming call request from {} (Short ID: {})",
-                            caller_address,
-                            caller_address.short_id()
-                        );
-                        let resp = ProtocolPacket::CallAcceptResponse { caller_address };
-                        let _ = dc_inner.send(&Bytes::from(resp.encode())).await;
-                    } else {
-                        let dc_reply = Arc::clone(&dc_inner);
-                        let caller_addr_clone = caller_address.clone();
-
-                        tokio::spawn(async move {
-                            use std::io::{self, Write};
-                            println!(
-                                "\n============================================================"
-                            );
-                            println!(" Incoming Call Request!");
-                            println!(" From: {}", caller_addr_clone);
-                            println!(" Short ID: {}", caller_addr_clone.short_id());
-                            print!(" Allow connection? [y/N]: ");
-                            let _ = io::stdout().flush();
-
-                            let mut input = String::new();
-                            let accepted = tokio::task::spawn_blocking(move || {
-                                let stdin = io::stdin();
-                                if stdin.read_line(&mut input).is_ok() {
-                                    let trimmed = input.trim().to_lowercase();
-                                    trimmed == "y" || trimmed == "yes"
-                                } else {
-                                    false
-                                }
-                            })
-                            .await
-                            .unwrap_or_default();
-
-                            if accepted {
-                                info!(
-                                    "Accepted incoming call request from {}",
-                                    caller_addr_clone.short_id()
-                                );
-                                let resp = ProtocolPacket::CallAcceptResponse {
-                                    caller_address: UserAddress::from_bytes(caller_bytes),
-                                };
-                                let _ = dc_reply.send(&Bytes::from(resp.encode())).await;
-                            } else {
-                                info!(
-                                    "Rejected incoming call request from {}",
-                                    caller_addr_clone.short_id()
-                                );
-                                let resp = ProtocolPacket::CallRejectResponse {
-                                    caller_address: UserAddress::from_bytes(caller_bytes),
-                                };
-                                let _ = dc_reply.send(&Bytes::from(resp.encode())).await;
-                            }
-                        });
-                    }
-                }
-                ProtocolPacket::CallRejectedNotification { target_address } => {
-                    error!("============================================================");
-                    error!(
-                        " Call Connection Error: Connection rejected by target user ({})",
-                        target_address.short_id()
-                    );
-                    error!(" Connection rejected.");
-                    error!("============================================================");
-                    std::process::exit(1);
-                }
-                ProtocolPacket::CallAcceptedNotification { target_address } => {
-                    info!("============================================================");
-                    info!(
-                        " Call connection accepted by target user ({})!",
-                        target_address.short_id()
-                    );
-                    info!(" Call connected.");
-                    info!("============================================================");
-                }
-                ProtocolPacket::ConnectionError { target_address } => {
-                    error!("============================================================");
-                    error!(
-                        " Call Connection Error: Target user ({}) is currently in another call.",
-                        target_address.short_id()
-                    );
-                    error!(
-                        " Calls are restricted to 1-to-1 only (Maximum 2 participants allowed)."
-                    );
-                    error!(" Connection rejected.");
-                    error!("============================================================");
-                    std::process::exit(1);
-                }
-                _ => {}
-            }
-        })
-    }));
-
-    // Generate SDP Offer
-    let offer = peer_connection.create_offer(None).await?;
-    peer_connection.set_local_description(offer).await?;
-
-    let mut gather_complete = peer_connection.gathering_complete_promise().await;
-    let _ = gather_complete.recv().await;
-
-    let local_desc = peer_connection
-        .local_description()
-        .await
-        .ok_or_else(|| anyhow!("Failed to generate local SDP offer"))?;
-
-    // Perform HTTP SDP offer/answer exchange
-    let client = reqwest::Client::new();
-    let sdp_endpoint = format!("{}/sdp", server_url);
-
-    info!("Sending SDP offer to {}...", sdp_endpoint);
-    let resp = client.post(&sdp_endpoint).json(&local_desc).send().await?;
-
-    if !resp.status().is_success() {
-        return Err(anyhow!("Server returned error: {}", resp.status()));
-    }
-
-    let answer: RTCSessionDescription = resp.json().await?;
-    peer_connection.set_remote_description(answer).await?;
-
-    info!("Connected to audio server via WebRTC!");
-    info!("Press Ctrl-C to disconnect");
-
-    // Set up cpal audio host and devices
-    let host = cpal::default_host();
-
-    let input_device = crate::audio::find_input_device(&host, config.input_device.as_deref())?;
-    info!("Using input device: {}", input_device.name()?);
-
-    let output_device = crate::audio::find_output_device(&host, config.output_device.as_deref())?;
-    info!("Using output device: {}", output_device.name()?);
-
-    let target_input_config = StreamConfig {
-        channels: config.channels,
-        sample_rate: SampleRate(config.sample_rate),
-        buffer_size: cpal::BufferSize::Default,
-    };
-
-    let net_sample_rate = config.sample_rate;
-
-    let (input_stream, _actual_input_rate, _actual_input_channels) = {
-        let tx_audio_clone = tx_audio.clone();
-        let build = |cfg: &StreamConfig, rate: u32, ch: u16| {
-            let mut resampler = crate::resample::Resampler::new(rate, net_sample_rate);
-            let tx = tx_audio_clone.clone();
-            input_device.build_input_stream(
-                cfg,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let channels = ch as usize;
-                    let num_frames = data.len() / channels;
-                    if num_frames == 0 {
-                        return;
-                    }
-                    let mut mono_samples = Vec::with_capacity(num_frames);
-                    for f in 0..num_frames {
-                        let sum: f32 = (0..channels).map(|c| data[f * channels + c]).sum();
-                        mono_samples.push(sum / channels as f32);
-                    }
-                    let resampled = resampler.process(&mono_samples);
-                    let bytes: Vec<u8> = resampled
-                        .iter()
-                        .flat_map(|&sample| sample.to_le_bytes())
-                        .collect();
-                    let _ = tx.blocking_send(bytes);
-                },
-                |err| error!("Input stream error: {}", err),
-                None,
-            )
-        };
-
-        match build(&target_input_config, config.sample_rate, config.channels) {
-            Ok(stream) => (stream, config.sample_rate, config.channels),
-            Err(err) => {
-                info!(
-                    "Requested input stream config ({:?}) not supported ({}), falling back to device default config...",
-                    target_input_config, err
-                );
-                let def_cfg = input_device.default_input_config()?;
-                let def_stream_config: StreamConfig = def_cfg.config();
-                let rate = def_stream_config.sample_rate.0;
-                let ch = def_stream_config.channels;
-                info!(
-                    "Using input device default config: {} Hz, {} channels",
-                    rate, ch
-                );
-                let stream = build(&def_stream_config, rate, ch)?;
-                (stream, rate, ch)
-            }
-        }
-    };
-
-    let target_output_config = StreamConfig {
-        channels: config.channels,
-        sample_rate: SampleRate(config.sample_rate),
-        buffer_size: cpal::BufferSize::Default,
-    };
-
-    let (output_stream, _actual_output_rate, _actual_output_channels) = {
-        let build = |cfg: &StreamConfig, rate: u32, ch: u16| {
-            let mut output_resampler = crate::resample::Resampler::new(net_sample_rate, rate);
-            let mut leftover: Vec<f32> = Vec::new();
-            let channels = ch as usize;
-
-            output_device.build_output_stream(
-                cfg,
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    let frames_needed = data.len() / channels;
-                    if frames_needed == 0 {
-                        return;
-                    }
-
-                    if leftover.len() < frames_needed {
-                        let needed_resampled = frames_needed - leftover.len();
-                        let net_needed = ((needed_resampled as f64
-                            * (net_sample_rate as f64 / rate as f64))
-                            .ceil() as usize)
-                            + 4;
-                        let mut net_samples = Vec::with_capacity(net_needed);
-                        {
-                            let mut buffer = AUDIO_BUFFER.lock().unwrap();
-                            let drain_count = net_needed.min(buffer.len());
-                            for _ in 0..drain_count {
-                                if let Some(s) = buffer.pop_front() {
-                                    net_samples.push(s);
-                                }
-                            }
-                        }
-                        let mut resampled = output_resampler.process(&net_samples);
-                        leftover.append(&mut resampled);
-                    }
-
-                    for f in 0..frames_needed {
-                        let sample = leftover.get(f).copied().unwrap_or(0.0);
-                        for c in 0..channels {
-                            data[f * channels + c] = sample;
-                        }
-                    }
-
-                    let drain_len = frames_needed.min(leftover.len());
-                    leftover.drain(0..drain_len);
-                },
-                |err| error!("Output stream error: {}", err),
-                None,
-            )
-        };
-
-        match build(&target_output_config, config.sample_rate, config.channels) {
-            Ok(stream) => (stream, config.sample_rate, config.channels),
-            Err(err) => {
-                info!(
-                    "Requested output stream config ({:?}) not supported ({}), falling back to device default config...",
-                    target_output_config, err
-                );
-                let def_cfg = output_device.default_output_config()?;
-                let def_stream_config: StreamConfig = def_cfg.config();
-                let rate = def_stream_config.sample_rate.0;
-                let ch = def_stream_config.channels;
-                info!(
-                    "Using output device default config: {} Hz, {} channels",
-                    rate, ch
-                );
-                let stream = build(&def_stream_config, rate, ch)?;
-                (stream, rate, ch)
-            }
-        }
-    };
-
-    input_stream.play()?;
-    output_stream.play()?;
-
-    info!("Audio streams started. Speaking now will transmit audio over WebRTC.");
-
-    // Keep call running until process is interrupted or cancel signal received
+    // 5. Keep call running until interrupted or cancelled
     if let Some(rx) = cancel_rx.as_mut() {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
@@ -456,5 +73,6 @@ pub async fn start_call_with_cancel(
         info!("Call ended by user signal");
     }
 
+    let _ = peer_connection.close().await;
     Ok(())
 }
