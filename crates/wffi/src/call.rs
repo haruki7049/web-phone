@@ -1,13 +1,7 @@
 //! Audio call module.
 //!
-//! This module provides the main CLI functionality for establishing and
-//! maintaining an audio call connection over WebRTC. It handles:
-//!
-//! - Establishing WebRTC PeerConnection with wdaemon server
-//! - Exchanging SDP offer/answer over HTTP signaling
-//! - Capturing microphone audio with cpal
-//! - Transmitting audio over WebRTC DataChannel
-//! - Receiving and playing back audio through speakers
+//! This module provides the main functionality for establishing and
+//! maintaining an audio call connection over WebRTC.
 
 use crate::address::UserAddress;
 use crate::config::Configuration;
@@ -33,8 +27,6 @@ static AUDIO_BUFFER: LazyLock<Mutex<VecDeque<f32>>> = LazyLock::new(|| Mutex::ne
 static MY_CLIENT_ID: AtomicU64 = AtomicU64::new(u64::MAX);
 
 /// Start an audio CLI call to the server using WebRTC.
-/// Optional `target_address` specifies the target registered wclient temporary SHA-256 user ID for a 1-to-1 call.
-/// If `target_address` is None, the client operates in standby mode (ready to receive calls to its own assigned ID).
 pub async fn start_call(config: &Configuration, target_address: Option<UserAddress>) -> Result<()> {
     start_call_with_cancel(config, target_address, None).await
 }

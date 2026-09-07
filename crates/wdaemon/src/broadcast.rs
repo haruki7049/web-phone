@@ -5,7 +5,7 @@
 
 use std::sync::LazyLock;
 use tokio::sync::broadcast;
-use wclient::UserAddress;
+use wffi::UserAddress;
 
 /// Audio message with sender, target address, and origin node information.
 #[derive(Clone, Debug)]

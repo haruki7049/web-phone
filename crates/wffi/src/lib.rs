@@ -1,4 +1,13 @@
-//! C API bindings for web-phone WebRTC audio client.
+//! C API bindings and core client library for web-phone WebRTC audio system.
+
+pub mod address;
+pub mod audio;
+pub mod call;
+pub mod config;
+pub mod resample;
+
+pub use address::UserAddress;
+pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::cell::RefCell;
@@ -8,7 +17,6 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::str::FromStr;
 use std::thread::{JoinHandle, spawn};
 use tokio::sync::oneshot;
-use wclient::{Configuration, UserAddress};
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
@@ -16,8 +24,7 @@ thread_local! {
 
 fn set_last_error(err: impl std::fmt::Display) {
     let err_str = err.to_string();
-    let c_str = CString::new(err_str)
-        .unwrap_or_else(|_| CString::new("Error containing null bytes").unwrap());
+    let c_str = CString::new(err_str).unwrap_or_else(|_| CString::new("Error containing null bytes").unwrap());
     LAST_ERROR.with(|cell| {
         *cell.borrow_mut() = Some(c_str);
     });
@@ -52,10 +59,8 @@ pub struct WFFIConfig(pub Configuration);
 /// Create a new client configuration handle with default settings.
 #[unsafe(no_mangle)]
 pub extern "C" fn wffi_config_new() -> *mut WFFIConfig {
-    catch_unwind(AssertUnwindSafe(|| {
-        Box::into_raw(Box::new(WFFIConfig(Configuration::default())))
-    }))
-    .unwrap_or(std::ptr::null_mut())
+    catch_unwind(AssertUnwindSafe(|| Box::into_raw(Box::new(WFFIConfig(Configuration::default())))))
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// Free a configuration handle created with `wffi_config_new`.
@@ -366,7 +371,7 @@ pub unsafe extern "C" fn wffi_call_start(
 
             rt.block_on(async move {
                 if let Err(e) =
-                    wclient::call::start_call_with_cancel(&cfg, target_opt, Some(stop_rx)).await
+                    call::start_call_with_cancel(&cfg, target_opt, Some(stop_rx)).await
                 {
                     tracing::error!("Audio call session error: {}", e);
                 }

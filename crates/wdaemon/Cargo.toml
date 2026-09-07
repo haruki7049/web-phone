@@ -22,7 +22,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 turn.workspace = true
 webrtc.workspace = true
-wclient = { path = "../wclient" }
+wffi = { path = "../wffi" }
 
 
 [dev-dependencies]

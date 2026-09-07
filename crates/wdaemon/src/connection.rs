@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::sync::{Arc, LazyLock, Mutex};
 use tracing::{error, info, warn};
-use wclient::UserAddress;
+use wffi::UserAddress;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;

@@ -3490,21 +3490,15 @@ name = "wclient"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bytes",
  "clap",
  "color-eyre",
  "confy",
- "cpal",
- "directories",
  "reqwest",
- "serde",
- "serde_json",
- "sha2",
  "tokio",
  "toml",
  "tracing",
  "tracing-subscriber",
- "webrtc",
+ "wffi",
 ]
 
 [[package]]
@@ -3527,8 +3521,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "turn",
- "wclient",
  "webrtc",
+ "wffi",
 ]
 
 [[package]]
@@ -3784,14 +3778,20 @@ name = "wffi"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "cbindgen",
+ "confy",
  "cpal",
+ "directories",
  "reqwest",
+ "serde",
  "serde_json",
+ "sha2",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
- "wclient",
+ "webrtc",
 ]
 
 [[package]]

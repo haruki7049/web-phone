@@ -93,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Handler to retrieve all registered wclient user addresses.
-async fn list_registered_addresses() -> axum::extract::Json<Vec<wclient::UserAddress>> {
+async fn list_registered_addresses() -> axum::extract::Json<Vec<wffi::UserAddress>> {
     axum::extract::Json(wdaemon::connection::get_registered_addresses())
 }
 

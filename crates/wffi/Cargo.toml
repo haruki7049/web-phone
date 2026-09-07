@@ -10,14 +10,22 @@ name = "wffi"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
-wclient = { path = "../wclient" }
 anyhow.workspace = true
+bytes.workspace = true
+confy.workspace = true
 cpal.workspace = true
+directories.workspace = true
 reqwest.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+webrtc.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
 
 [build-dependencies]
 cbindgen = "0.29"

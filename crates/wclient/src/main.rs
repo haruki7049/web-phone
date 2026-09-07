@@ -27,7 +27,7 @@ use clap::Parser;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use tracing::info;
-use wclient::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, UserAddress};
+use wffi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, UserAddress};
 
 /// Main entry point for the audio client.
 #[tokio::main]

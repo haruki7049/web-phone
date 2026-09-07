@@ -88,7 +88,6 @@ mod tests {
         let mut resampler = Resampler::new(16000, 48000);
         let input = vec![1.0, 2.0];
         let output = resampler.process(&input);
-        // Expect 6 output samples for 2 input samples at 3x sample rate ratio
         assert_eq!(output.len(), 6);
     }
 
@@ -97,7 +96,6 @@ mod tests {
         let mut resampler = Resampler::new(48000, 24000);
         let input = vec![1.0, 2.0, 3.0, 4.0];
         let output = resampler.process(&input);
-        // Expect 2 output samples for 4 input samples at 0.5x sample rate ratio
         assert_eq!(output.len(), 2);
     }
 }
