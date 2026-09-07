@@ -18,8 +18,119 @@ use std::str::FromStr;
 use std::thread::{JoinHandle, spawn};
 use tokio::sync::oneshot;
 
+use std::sync::RwLock;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
+}
+
+/// Log levels for WPFFI log callback.
+/// 0 = DEBUG, 1 = INFO, 2 = WARN, 3 = ERROR
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum WPFFILogLevel {
+    Debug = 0,
+    Info = 1,
+    Warn = 2,
+    Error = 3,
+}
+
+/// Function pointer type for log callbacks.
+/// # Parameters
+/// - `level`: Log level enum (`WPFFILogLevel`).
+/// - `message`: Null-terminated C string containing the log message.
+/// - `user_data`: User-provided opaque pointer passed when registering the callback.
+pub type WPFFILogCallback = Option<
+    unsafe extern "C" fn(
+        level: WPFFILogLevel,
+        message: *const c_char,
+        user_data: *mut std::ffi::c_void,
+    ),
+>;
+
+struct LogCallbackState {
+    callback: WPFFILogCallback,
+    user_data: *mut std::ffi::c_void,
+}
+
+unsafe impl Send for LogCallbackState {}
+unsafe impl Sync for LogCallbackState {}
+
+static LOG_CALLBACK: RwLock<Option<LogCallbackState>> = RwLock::new(None);
+
+#[derive(Default)]
+struct StringVisitor {
+    message: String,
+}
+
+impl tracing::field::Visit for StringVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{:?}", value);
+        } else {
+            if !self.message.is_empty() {
+                self.message.push_str(", ");
+            }
+            self.message
+                .push_str(&format!("{}={:?}", field.name(), value));
+        }
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.message = value.to_string();
+        } else {
+            if !self.message.is_empty() {
+                self.message.push_str(", ");
+            }
+            self.message
+                .push_str(&format!("{}={}", field.name(), value));
+        }
+    }
+}
+
+struct CallbackLayer;
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CallbackLayer {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        if let Ok(guard) = LOG_CALLBACK.read()
+            && let Some(state) = guard.as_ref()
+            && let Some(cb) = state.callback
+        {
+            let level = match *event.metadata().level() {
+                tracing::Level::TRACE | tracing::Level::DEBUG => WPFFILogLevel::Debug,
+                tracing::Level::INFO => WPFFILogLevel::Info,
+                tracing::Level::WARN => WPFFILogLevel::Warn,
+                tracing::Level::ERROR => WPFFILogLevel::Error,
+            };
+
+            let mut visitor = StringVisitor::default();
+            event.record(&mut visitor);
+
+            let c_msg = match CString::new(visitor.message) {
+                Ok(s) => s,
+                Err(_) => CString::new("Log message contained null bytes").unwrap(),
+            };
+
+            unsafe {
+                cb(level, c_msg.as_ptr(), state.user_data);
+            }
+        }
+    }
+}
+
+fn init_tracing_subscriber() {
+    let fmt_layer = tracing_subscriber::fmt::layer();
+    let _ = tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(CallbackLayer)
+        .try_init();
 }
 
 fn set_last_error(err: impl std::fmt::Display) {
@@ -43,12 +154,33 @@ pub extern "C" fn wpffi_last_error_message() -> *const c_char {
     })
 }
 
+/// Register a custom C log callback function to receive log messages.
+/// Pass `None` (or `NULL` in C) as `callback` to disable log callbacks.
+/// # Safety
+/// `user_data` must be valid for the duration of callbacks, or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpffi_set_log_callback(
+    callback: WPFFILogCallback,
+    user_data: *mut std::ffi::c_void,
+) {
+    let mut guard = LOG_CALLBACK.write().unwrap();
+    if callback.is_some() {
+        *guard = Some(LogCallbackState {
+            callback,
+            user_data,
+        });
+    } else {
+        *guard = None;
+    }
+    init_tracing_subscriber();
+}
+
 /// Initialize tracing subscriber for logging output.
 /// Returns 0 on success, or -1 on error.
 #[unsafe(no_mangle)]
 pub extern "C" fn wpffi_init() -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
-        let _ = tracing_subscriber::fmt::try_init();
+        init_tracing_subscriber();
         0
     }))
     .unwrap_or(-1)
@@ -460,5 +592,34 @@ mod tests {
         assert!(json_str.contains("output_devices"));
 
         unsafe { wpffi_string_free(json_ptr) };
+    }
+
+    #[test]
+    fn test_wpffi_log_callback() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static LOG_CALLED: AtomicBool = AtomicBool::new(false);
+
+        unsafe extern "C" fn custom_log_cb(
+            level: WPFFILogLevel,
+            msg: *const c_char,
+            _user_data: *mut std::ffi::c_void,
+        ) {
+            assert!(
+                level == WPFFILogLevel::Info
+                    || level == WPFFILogLevel::Error
+                    || level == WPFFILogLevel::Debug
+                    || level == WPFFILogLevel::Warn
+            );
+            assert!(!msg.is_null());
+            LOG_CALLED.store(true, Ordering::Relaxed);
+        }
+
+        unsafe { wpffi_set_log_callback(Some(custom_log_cb), std::ptr::null_mut()) };
+
+        tracing::info!("Test log message for callback");
+
+        assert!(LOG_CALLED.load(Ordering::Relaxed));
+
+        unsafe { wpffi_set_log_callback(None, std::ptr::null_mut()) };
     }
 }

@@ -14,6 +14,17 @@
 #include <stdlib.h>
 
 /**
+ * Log levels for WPFFI log callback.
+ * 0 = DEBUG, 1 = INFO, 2 = WARN, 3 = ERROR
+ */
+typedef enum WPFFILogLevel {
+  Debug = 0,
+  Info = 1,
+  Warn = 2,
+  Error = 3,
+} WPFFILogLevel;
+
+/**
  * Opaque handle representing an active audio call session.
  */
 typedef struct WPFFICallHandle WPFFICallHandle;
@@ -24,10 +35,27 @@ typedef struct WPFFICallHandle WPFFICallHandle;
 typedef struct WPFFIConfig WPFFIConfig;
 
 /**
+ * Function pointer type for log callbacks.
+ * # Parameters
+ * - `level`: Log level enum (`WPFFILogLevel`).
+ * - `message`: Null-terminated C string containing the log message.
+ * - `user_data`: User-provided opaque pointer passed when registering the callback.
+ */
+typedef void (*WPFFILogCallback)(enum WPFFILogLevel level, const char *message, void *user_data);
+
+/**
  * Retrieve the last thread-local error message string if any C API call returned non-zero error status.
  * The returned pointer is managed internally and must NOT be freed by the caller.
  */
 const char *wpffi_last_error_message(void);
+
+/**
+ * Register a custom C log callback function to receive log messages.
+ * Pass `None` (or `NULL` in C) as `callback` to disable log callbacks.
+ * # Safety
+ * `user_data` must be valid for the duration of callbacks, or NULL.
+ */
+void wpffi_set_log_callback(WPFFILogCallback callback, void *user_data);
 
 /**
  * Initialize tracing subscriber for logging output.
