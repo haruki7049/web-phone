@@ -89,8 +89,9 @@
             LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
 
             postInstall = ''
-              mkdir -p $out/include
+              mkdir -p $out/include $out/lib/pkgconfig
               cp crates/wpffi/include/wpffi.h $out/include/wpffi.h
+              sed "s|^prefix=.*|prefix=$out|" crates/wpffi/include/wpffi.pc > $out/lib/pkgconfig/wpffi.pc
             '';
 
             meta = {
