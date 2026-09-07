@@ -26,6 +26,15 @@ ______________________________________________________________________
 | [WPIP-07](WPIP-07.md) | Call Control & Capacity Constraints | Optional | Interactive call approval, rejection states, and 2-participant limit |
 | [WPIP-08](WPIP-08.md) | Group Call & SFU Extension | Optional | Selective Forwarding Unit (SFU) audio routing, Top-K active speaker selection, and room identity |
 
+### Experimental Specifications
+
+| WPIP | Title | Status | Summary |
+| :--- | :--- | :---: | :--- |
+| [WPIP-09](WPIP-09.md) | Connection Keep-Alive & Session Health Check | Experimental | Ping/Pong heartbeat packets over DataChannel for silent disconnection pruning |
+| [WPIP-10](WPIP-10.md) | STUN/TURN Dynamic HMAC Token Authentication | Experimental | Time-limited HMAC-SHA1 credential allocation for embedded TURN relays |
+| [WPIP-11](WPIP-11.md) | End-to-End Encryption (E2EE) for Group Rooms | Experimental | SFrame AES-256-GCM payload encryption for Zero-Knowledge SFU group calls |
+| [WPIP-12](WPIP-12.md) | Dynamic Codec Negotiation & Capability Handshake | Experimental | Dynamic audio codec selection and capability negotiation during SDP signaling |
+
 ______________________________________________________________________
 
 ## Requirement Levels (RFC 2119)

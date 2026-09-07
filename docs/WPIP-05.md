@@ -37,17 +37,16 @@ sequenceDiagram
 ```
 
 1. **Signed HTTPS Handshake**: Nodes configured with peer URLs (`--peer <URL>`) MUST issue an HTTP `POST /peer/sdp` over **HTTPS (TLS 1.2 / TLS 1.3)** containing an SDP Offer and a valid Ed25519 Authorization header (`Authorization: WP-Ed25519 <NodePubKeyHex>:<Timestamp>:<SignatureHex>`).
-2. **Mutual Node Authentication**:
+1. **Mutual Node Authentication**:
    - The receiving node (Node B) MUST verify Node A's Ed25519 signature `SigA` before generating an SDP Answer.
    - Node B MUST include its own Ed25519 Authorization header (`Authorization: WP-Ed25519 <NodePubKeyB>:<Timestamp>:<SigB>`) in the HTTP `200 OK` response payload/header.
    - Node A MUST verify Node B's signature `SigB` before accepting the SDP Answer, establishing **Mutual Node Authentication**.
-3. **Trusted Node Whitelisting (`trusted_nodes`)**:
+1. **Trusted Node Whitelisting (`trusted_nodes`)**:
    - `wpdaemon` implementations MAY support a `trusted_nodes` whitelist configuration.
    - If `trusted_nodes` is configured, `wpdaemon` MUST reject SDP offers from node public keys not present in the whitelist with `403 Forbidden`.
-4. **Dedicated DataChannel Transport Security**:
+1. **Dedicated DataChannel Transport Security**:
    - Authenticated nodes MUST establish a WebRTC DataChannel labeled `"daemon-peer"` for node-to-node relaying.
    - Transport encryption and packet integrity are guaranteed by the underlying WebRTC DTLS/SCTP layer; daemons MUST NOT re-sign individual audio packets on the wire to prevent CPU overhead.
-
 
 ______________________________________________________________________
 
