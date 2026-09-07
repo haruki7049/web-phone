@@ -30,6 +30,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(stun_port) = args.stun_port {
         loaded_config.stun_port = stun_port;
     }
+    if let Some(node_id) = args.node_id {
+        loaded_config.node_id = node_id;
+    } else if loaded_config.node_id == 0 {
+        loaded_config.node_id = wdaemon::config::generate_node_id();
+    }
     if !args.peer.is_empty() {
         loaded_config.peers.extend(args.peer);
     }
@@ -106,6 +111,10 @@ struct CLIArgs {
     /// STUN/TURN UDP port override.
     #[arg(short, long)]
     stun_port: Option<u16>,
+
+    /// Unique node ID override for this daemon node.
+    #[arg(long)]
+    node_id: Option<u64>,
 
     /// Peer wdaemon URLs to connect to for mesh interconnection.
     #[arg(long)]
