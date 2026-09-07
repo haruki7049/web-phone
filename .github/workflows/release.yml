@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name to release (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build Release (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive_ext: tar.gz
+            shlib_prefix: lib
+            shlib_ext: so
+            bin_ext: ""
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive_ext: tar.gz
+            shlib_prefix: lib
+            shlib_ext: dylib
+            bin_ext: ""
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive_ext: tar.gz
+            shlib_prefix: lib
+            shlib_ext: dylib
+            bin_ext: ""
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive_ext: zip
+            shlib_prefix: ""
+            shlib_ext: dll
+            bin_ext: .exe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libclang-dev pkg-config
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binaries and dynamic libraries
+        run: cargo build --release --workspace --target ${{ matrix.target }}
+
+      - name: Package artifacts
+        shell: bash
+        run: |
+          # Determine version name
+          VERSION="${GITHUB_REF_NAME}"
+          if [ "${VERSION}" = "" ] || [[ "${VERSION}" == *"refs"* ]]; then
+            VERSION="${{ inputs.tag_name }}"
+          fi
+          if [ "${VERSION}" = "" ]; then
+            VERSION="draft"
+          fi
+
+          BIN_DIR="web-phone-${VERSION}-${{ matrix.target }}"
+          FFI_DIR="wpffi-${VERSION}-${{ matrix.target }}"
+
+          mkdir -p "${BIN_DIR}" "${FFI_DIR}"
+
+          BIN_EXT="${{ matrix.bin_ext }}"
+          SHLIB_PREFIX="${{ matrix.shlib_prefix }}"
+          SHLIB_EXT="${{ matrix.shlib_ext }}"
+
+          # 1. Executable binaries
+          cp "target/${{ matrix.target }}/release/wpclient${BIN_EXT}" "${BIN_DIR}/"
+          cp "target/${{ matrix.target }}/release/wpdaemon${BIN_EXT}" "${BIN_DIR}/"
+          [ -f README.md ] && cp README.md "${BIN_DIR}/"
+          [ -f LICENSE ] && cp LICENSE "${BIN_DIR}/"
+
+          # 2. Shared & Static library (wpffi) + C Header
+          cp "target/${{ matrix.target }}/release/${SHLIB_PREFIX}wpffi.${SHLIB_EXT}" "${FFI_DIR}/"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            [ -f "target/${{ matrix.target }}/release/wpffi.dll.lib" ] && cp "target/${{ matrix.target }}/release/wpffi.dll.lib" "${FFI_DIR}/" || true
+            [ -f "target/${{ matrix.target }}/release/wpffi.lib" ] && cp "target/${{ matrix.target }}/release/wpffi.lib" "${FFI_DIR}/" || true
+          else
+            [ -f "target/${{ matrix.target }}/release/libwpffi.a" ] && cp "target/${{ matrix.target }}/release/libwpffi.a" "${FFI_DIR}/" || true
+          fi
+
+          # Include C header file & pkg-config file
+          if [ -d "crates/wpffi/include" ]; then
+            mkdir -p "${FFI_DIR}/include"
+            cp -r crates/wpffi/include/* "${FFI_DIR}/include/"
+          fi
+
+          [ -f README.md ] && cp README.md "${FFI_DIR}/"
+          [ -f LICENSE ] && cp LICENSE "${FFI_DIR}/"
+
+          # Create Archive files (.tar.gz or .zip)
+          if [ "${{ matrix.archive_ext }}" = "tar.gz" ]; then
+            tar -czvf "${BIN_DIR}.tar.gz" "${BIN_DIR}"
+            tar -czvf "${FFI_DIR}.tar.gz" "${FFI_DIR}"
+          else
+            7z a "${BIN_DIR}.zip" "${BIN_DIR}"
+            7z a "${FFI_DIR}.zip" "${FFI_DIR}"
+          fi
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || inputs.tag_name != ''
+        with:
+          files: |
+            web-phone-*.tar.gz
+            web-phone-*.zip
+            wpffi-*.tar.gz
+            wpffi-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
