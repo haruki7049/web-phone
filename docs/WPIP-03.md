@@ -39,5 +39,5 @@ ______________________________________________________________________
 
 Implementations MAY support the following optional extensions defined in separate WPIPs:
 
-- **Call Control & Interactive Prompting**: See [WPIP-08](WPIP-08.md) for handling `CallRequest`, user accept/reject prompts, and `auto_accept` settings.
+- **Call Control & Interactive Prompting**: See [WPIP-07](WPIP-07.md) for handling `CallRequest`, user accept/reject prompts, and `auto_accept` settings.
 - **Audio Device Discovery & Selection**: See [WPIP-06](WPIP-06.md) or client configuration specs for enumerating and selecting input/output audio hardware.

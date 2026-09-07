@@ -80,7 +80,7 @@ sequenceDiagram
 
     %% Phase 2: Call Control & Approval
     rect rgb(255, 250, 240)
-    Note over ClientA,ClientB: Phase 2: Call Initiation & Approval (WPIP-08)
+    Note over ClientA,ClientB: Phase 2: Call Initiation & Approval (WPIP-07)
     ClientA->>Daemon: ClientTargetedAudio (0x02, Target: AddrB, AudioData)
     Note over Daemon: Intercept audio & check approval state
     Daemon->>ClientB: CallRequest (0x05, CallerID: A, Address: AddrA)

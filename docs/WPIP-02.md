@@ -127,6 +127,6 @@ ______________________________________________________________________
 
 Implementations MAY support the following optional extensions defined in separate WPIPs:
 
-- **STUN/TURN Service**: See [WPIP-07](WPIP-07.md) for embedded STUN/TURN server specifications.
-- **Call Control & Capacity Constraints**: See [WPIP-08](WPIP-08.md) for 2-participant limits and call approval/rejection state management.
+- **STUN/TURN Service**: See [WPIP-06](WPIP-06.md) for embedded STUN/TURN server specifications.
+- **Call Control & Capacity Constraints**: See [WPIP-07](WPIP-07.md) for 2-participant limits and call approval/rejection state management.
 - **Inter-Daemon Peer Mesh**: See [WPIP-05](WPIP-05.md) for multi-daemon interconnection.

@@ -2,10 +2,6 @@
 
 `wpffi` is the official core client engine and Foreign Function Interface (FFI) library for the `web-phone` system.
 
-It implements:
-
-- **[WPIP-06](../../docs/WPIP-06.md)**: FFI & Foreign Language Bindings
-
 ______________________________________________________________________
 
 ## Features
@@ -13,6 +9,14 @@ ______________________________________________________________________
 - **Core Audio & WebRTC Engine**: Audio capture, playback, resampling, and WebRTC session management.
 - **C-Compatible ABI**: Panic-safe (`catch_unwind`), thread-local error handling, and C log callbacks.
 - **Header Generation**: Automated C header generation via `cbindgen` (`wpffi.h`, `wpclient.h`, `wpdaemon.h`).
+
+______________________________________________________________________
+
+## Safety & Memory Rules
+
+1. **Panic Boundary**: All FFI functions are wrapped in `catch_unwind` and return `-1` or `NULL` on error. Panic unwinding never crosses the FFI boundary.
+1. **Error Retrieval**: Use `wpffi_last_error_message()` to retrieve thread-local error details upon failure.
+1. **Memory Ownership**: Memory allocated by Rust FFI (`WPFFIConfig`, `WPFFICallHandle`, JSON pointers) MUST be freed by corresponding destructor functions (`wpffi_config_free`, `wpffi_call_stop`, `wpffi_string_free`).
 
 ______________________________________________________________________
 

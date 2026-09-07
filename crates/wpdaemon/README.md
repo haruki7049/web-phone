@@ -7,8 +7,8 @@ It implements the daemon-side specifications defined in WPIPs:
 - **[WPIP-02](../../docs/WPIP-02.md)**: `wpdaemon` Core Specification
 - **[WPIP-04](../../docs/WPIP-04.md)**: DataChannel Wire Protocol
 - **[WPIP-05](../../docs/WPIP-05.md)**: Inter-Daemon Peer Mesh Federation
-- **[WPIP-07](../../docs/WPIP-07.md)**: Embedded STUN/TURN Service
-- **[WPIP-08](../../docs/WPIP-08.md)**: Call Control & Capacity Constraints
+- **[WPIP-06](../../docs/WPIP-06.md)**: Embedded STUN/TURN Service
+- **[WPIP-07](../../docs/WPIP-07.md)**: Call Control & Capacity Constraints
 
 ______________________________________________________________________
 

@@ -6,7 +6,7 @@ It implements the client-side specifications defined in WPIPs:
 
 - **[WPIP-03](../../docs/WPIP-03.md)**: `wpclient` Core Specification
 - **[WPIP-04](../../docs/WPIP-04.md)**: DataChannel Wire Protocol
-- **[WPIP-08](../../docs/WPIP-08.md)**: Call Control & Capacity Constraints
+- **[WPIP-07](../../docs/WPIP-07.md)**: Call Control & Capacity Constraints
 
 ______________________________________________________________________
 
