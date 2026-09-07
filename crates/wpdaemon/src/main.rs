@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Handler to retrieve all registered wpclient user addresses.
-async fn list_registered_addresses() -> axum::extract::Json<Vec<wpffi::UserAddress>> {
+async fn list_registered_addresses() -> axum::extract::Json<Vec<wpapi::UserAddress>> {
     axum::extract::Json(wpdaemon::connection::get_registered_addresses())
 }
 

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, RwLock};
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::peer_connection::RTCPeerConnection;
-use wpffi::UserAddress;
+use wpapi::UserAddress;
 
 /// Global unified client registry protected by a single RwLock.
 pub static CLIENT_REGISTRY: LazyLock<RwLock<ClientRegistry>> =

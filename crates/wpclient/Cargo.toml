@@ -5,7 +5,7 @@ description = "WebRTC client CLI for real-time audio transmission"
 edition.workspace = true
 
 [dependencies]
-wpffi = { path = "../wpffi" }
+wpapi = { path = "../wpapi" }
 anyhow.workspace = true
 clap.workspace = true
 color-eyre.workspace = true

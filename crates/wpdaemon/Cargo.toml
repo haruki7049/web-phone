@@ -22,7 +22,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 turn.workspace = true
 webrtc.workspace = true
-wpffi = { path = "../wpffi" }
+wpapi = { path = "../wpapi" }
 
 
 [dev-dependencies]

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/wpclient", "crates/wpdaemon", "crates/wpffi"]
+members = ["crates/wpclient", "crates/wpdaemon", "crates/wpapi"]
 
 [workspace.package]
 version = "0.1.0-alpha.3"

@@ -93,8 +93,8 @@
 
             postInstall = ''
               mkdir -p $out/include $out/lib/pkgconfig
-              cp crates/wpffi/include/wpffi.h $out/include/wpffi.h
-              sed "s|^prefix=.*|prefix=$out|" crates/wpffi/include/wpffi.pc > $out/lib/pkgconfig/wpffi.pc
+              cp crates/wpapi/include/wpapi.h $out/include/wpapi.h
+              sed "s|^prefix=.*|prefix=$out|" crates/wpapi/include/wpapi.pc > $out/lib/pkgconfig/wpapi.pc
             '';
 
             meta = {

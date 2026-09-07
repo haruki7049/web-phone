@@ -13,7 +13,7 @@ Audio is captured from the microphone, transmitted over WebRTC DataChannels (usi
 
 - **`wpdaemon`**: Reference server daemon implementation for [`WPIP-02`](docs/WPIP-02.md)
 - **`wpclient`**: Reference audio client implementation for [`WPIP-03`](docs/WPIP-03.md)
-- **`wpffi`**: Core engine & C API reference library for [`WPIP-06`](docs/WPIP-06.md)
+- **`wpapi`**: Core engine & C API reference library for [`WPIP-06`](docs/WPIP-06.md)
 
 ## Standards & Specifications (WPIPs)
 
@@ -51,8 +51,10 @@ cargo run -p wpclient -- call
 cargo run -p wpclient -- call --auto-accept # or -y
 
 # Join or start a 1-to-1 call with a specific target SHA-256 User ID (max 2 participants allowed)
-# (Attempts by a 3rd participant to connect will be rejected with a connection error)
 cargo run -p wpclient -- call --to <SHA256_USER_ID>
+
+# Join a group audio room (WPIP-08 SFU group call)
+cargo run -p wpclient -- room --id <ROOM_ID>
 
 # List all registered wpclient temporary user IDs connected to the daemon
 cargo run -p wpclient -- list-addresses

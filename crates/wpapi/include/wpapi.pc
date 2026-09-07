@@ -3,8 +3,8 @@ exec_prefix=${prefix}
 libdir=${exec_prefix}/lib
 includedir=${prefix}/include
 
-Name: wpffi
-Description: C API bindings for web-phone WebRTC audio client
+Name: wpapi
+Description: Core client engine and C API bindings for web-phone WebRTC audio system
 Version: 0.1.0-alpha.3
-Libs: -L${libdir} -lwpffi
+Libs: -L${libdir} -lwpapi
 Cflags: -I${includedir}

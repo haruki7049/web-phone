@@ -24,7 +24,7 @@ graph TD
     ClientC["wpclient (Client C - Ed25519 PubKey C)"] <-->|WebRTC DataChannel / Audio| Daemon2
 
     subgraph FFI Layer
-        FFI["wpffi (C-API / Foreign Bindings)"]
+        FFI["wpapi (C-API / Foreign Bindings)"]
     end
 
     ClientA -.-> FFI
@@ -47,9 +47,9 @@ graph TD
    - Maintains a thread-safe registry (`ClientRegistry`) of active client connections and routes 1-to-1 audio.
    - Interconnects with other `wpdaemon` nodes via peer mesh to relay audio across nodes.
 
-1. **`wpffi` (Core Engine & FFI)**:
+1. **`wpapi` (Core Engine & FFI)**:
 
-   - Provides C-compatible ABI interfaces (`extern "C"` functions, header `wpffi.h`).
+   - Provides C-compatible ABI interfaces (`extern "C"` functions, header `wpapi.h`).
    - Serves as the core library for non-Rust language bindings (Python, Go, Flutter, GUIs, etc.).
 
 ______________________________________________________________________

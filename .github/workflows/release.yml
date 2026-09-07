@@ -83,9 +83,9 @@ jobs:
           fi
 
           BIN_DIR="web-phone-${VERSION}-${{ matrix.target }}"
-          FFI_DIR="wpffi-${VERSION}-${{ matrix.target }}"
+          API_DIR="wpapi-${VERSION}-${{ matrix.target }}"
 
-          mkdir -p "${BIN_DIR}" "${FFI_DIR}"
+          mkdir -p "${BIN_DIR}" "${API_DIR}"
 
           BIN_EXT="${{ matrix.bin_ext }}"
           SHLIB_PREFIX="${{ matrix.shlib_prefix }}"
@@ -97,31 +97,31 @@ jobs:
           [ -f README.md ] && cp README.md "${BIN_DIR}/"
           [ -f LICENSE ] && cp LICENSE "${BIN_DIR}/"
 
-          # 2. Shared & Static library (wpffi) + C Header
-          cp "target/${{ matrix.target }}/release/${SHLIB_PREFIX}wpffi.${SHLIB_EXT}" "${FFI_DIR}/"
+          # 2. Shared & Static library (wpapi) + C Header
+          [ -f "target/${{ matrix.target }}/release/${SHLIB_PREFIX}wpapi.${SHLIB_EXT}" ] && cp "target/${{ matrix.target }}/release/${SHLIB_PREFIX}wpapi.${SHLIB_EXT}" "${API_DIR}/" || true
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            [ -f "target/${{ matrix.target }}/release/wpffi.dll.lib" ] && cp "target/${{ matrix.target }}/release/wpffi.dll.lib" "${FFI_DIR}/" || true
-            [ -f "target/${{ matrix.target }}/release/wpffi.lib" ] && cp "target/${{ matrix.target }}/release/wpffi.lib" "${FFI_DIR}/" || true
+            [ -f "target/${{ matrix.target }}/release/wpapi.dll.lib" ] && cp "target/${{ matrix.target }}/release/wpapi.dll.lib" "${API_DIR}/" || true
+            [ -f "target/${{ matrix.target }}/release/wpapi.lib" ] && cp "target/${{ matrix.target }}/release/wpapi.lib" "${API_DIR}/" || true
           else
-            [ -f "target/${{ matrix.target }}/release/libwpffi.a" ] && cp "target/${{ matrix.target }}/release/libwpffi.a" "${FFI_DIR}/" || true
+            [ -f "target/${{ matrix.target }}/release/libwpapi.a" ] && cp "target/${{ matrix.target }}/release/libwpapi.a" "${API_DIR}/" || true
           fi
 
           # Include C header file & pkg-config file
-          if [ -d "crates/wpffi/include" ]; then
-            mkdir -p "${FFI_DIR}/include"
-            cp -r crates/wpffi/include/* "${FFI_DIR}/include/"
+          if [ -d "crates/wpapi/include" ]; then
+            mkdir -p "${API_DIR}/include"
+            cp -r crates/wpapi/include/* "${API_DIR}/include/"
           fi
 
-          [ -f README.md ] && cp README.md "${FFI_DIR}/"
-          [ -f LICENSE ] && cp LICENSE "${FFI_DIR}/"
+          [ -f README.md ] && cp README.md "${API_DIR}/"
+          [ -f LICENSE ] && cp LICENSE "${API_DIR}/"
 
           # Create Archive files (.tar.gz or .zip)
           if [ "${{ matrix.archive_ext }}" = "tar.gz" ]; then
             tar -czvf "${BIN_DIR}.tar.gz" "${BIN_DIR}"
-            tar -czvf "${FFI_DIR}.tar.gz" "${FFI_DIR}"
+            tar -czvf "${API_DIR}.tar.gz" "${API_DIR}"
           else
             7z a "${BIN_DIR}.zip" "${BIN_DIR}"
-            7z a "${FFI_DIR}.zip" "${FFI_DIR}"
+            7z a "${API_DIR}.zip" "${API_DIR}"
           fi
 
       - name: Upload Release Assets
@@ -131,7 +131,7 @@ jobs:
           files: |
             web-phone-*.tar.gz
             web-phone-*.zip
-            wpffi-*.tar.gz
-            wpffi-*.zip
+            wpapi-*.tar.gz
+            wpapi-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

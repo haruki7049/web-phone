@@ -3972,6 +3972,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "wpapi"
+version = "0.1.0-alpha.3"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "cbindgen",
+ "confy",
+ "cpal",
+ "directories",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "webrtc",
+]
+
+[[package]]
 name = "wpclient"
 version = "0.1.0-alpha.3"
 dependencies = [
@@ -3984,7 +4005,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
- "wpffi",
+ "wpapi",
 ]
 
 [[package]]
@@ -4008,28 +4029,7 @@ dependencies = [
  "tracing-subscriber",
  "turn",
  "webrtc",
- "wpffi",
-]
-
-[[package]]
-name = "wpffi"
-version = "0.1.0-alpha.3"
-dependencies = [
- "anyhow",
- "bytes",
- "cbindgen",
- "confy",
- "cpal",
- "directories",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "webrtc",
+ "wpapi",
 ]
 
 [[package]]

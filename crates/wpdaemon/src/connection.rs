@@ -21,7 +21,7 @@ use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use wpffi::{ProtocolPacket, UserAddress};
+use wpapi::{ProtocolPacket, UserAddress};
 
 /// Counter for connected clients.
 static CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -299,7 +299,7 @@ pub async fn handle_sdp_offer(
                                         sender_address: audio_msg
                                             .sender_address
                                             .unwrap_or_default(),
-                                        codec_id: wpffi::protocol::CODEC_OPUS,
+                                        codec_id: wpapi::protocol::CODEC_OPUS,
                                         audio_data: audio_msg.data,
                                     };
 

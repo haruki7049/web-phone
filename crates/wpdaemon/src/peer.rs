@@ -17,7 +17,7 @@ use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use wpffi::UserAddress;
+use wpapi::UserAddress;
 
 /// Active inter-daemon peer connections.
 static PEER_DAEMONS: LazyLock<Mutex<HashMap<String, Arc<RTCPeerConnection>>>> =

@@ -1,7 +1,7 @@
-//! WebRTC audio client entry point re-exporting core modules from `wpffi`.
+//! WebRTC audio client entry point re-exporting core modules from `wpapi`.
 
-pub use wpffi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, UserAddress};
-pub use wpffi::{address, audio, call, config, resample};
+pub use wpapi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, UserAddress};
+pub use wpapi::{address, audio, call, config, resample};
 
 #[cfg(test)]
 mod tests {
