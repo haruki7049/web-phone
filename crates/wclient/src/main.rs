@@ -54,6 +54,12 @@ async fn main() -> Result<()> {
     if let Some(stun_server) = args.stun_server {
         loaded_config.stun_server = stun_server;
     }
+    if let Some(input_device) = args.input_device {
+        loaded_config.input_device = Some(input_device);
+    }
+    if let Some(output_device) = args.output_device {
+        loaded_config.output_device = Some(output_device);
+    }
 
     CONFIGURATION.set(loaded_config).unwrap();
 
@@ -127,6 +133,14 @@ struct CLIArgs {
     /// STUN server URL override.
     #[arg(long)]
     stun_server: Option<String>,
+
+    /// Input device (microphone) name or substring override.
+    #[arg(long, short = 'i')]
+    input_device: Option<String>,
+
+    /// Output device (speaker) name or substring override.
+    #[arg(long, short = 'o')]
+    output_device: Option<String>,
 }
 
 /// Available client actions.

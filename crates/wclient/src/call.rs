@@ -13,7 +13,7 @@ use crate::address::UserAddress;
 use crate::config::Configuration;
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{SampleRate, StreamConfig};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -222,14 +222,10 @@ pub async fn start_call(config: &Configuration, target_address: Option<UserAddre
     // Set up cpal audio host and devices
     let host = cpal::default_host();
 
-    let input_device = host
-        .default_input_device()
-        .ok_or_else(|| anyhow!("No input device available"))?;
+    let input_device = crate::audio::find_input_device(&host, config.input_device.as_deref())?;
     info!("Using input device: {}", input_device.name()?);
 
-    let output_device = host
-        .default_output_device()
-        .ok_or_else(|| anyhow!("No output device available"))?;
+    let output_device = crate::audio::find_output_device(&host, config.output_device.as_deref())?;
     info!("Using output device: {}", output_device.name()?);
 
     let target_input_config = StreamConfig {
@@ -281,7 +277,10 @@ pub async fn start_call(config: &Configuration, target_address: Option<UserAddre
                 let def_stream_config: StreamConfig = def_cfg.config();
                 let rate = def_stream_config.sample_rate.0;
                 let ch = def_stream_config.channels;
-                info!("Using input device default config: {} Hz, {} channels", rate, ch);
+                info!(
+                    "Using input device default config: {} Hz, {} channels",
+                    rate, ch
+                );
                 let stream = build(&def_stream_config, rate, ch)?;
                 (stream, rate, ch)
             }
@@ -310,7 +309,10 @@ pub async fn start_call(config: &Configuration, target_address: Option<UserAddre
 
                     if leftover.len() < frames_needed {
                         let needed_resampled = frames_needed - leftover.len();
-                        let net_needed = ((needed_resampled as f64 * (net_sample_rate as f64 / rate as f64)).ceil() as usize) + 4;
+                        let net_needed = ((needed_resampled as f64
+                            * (net_sample_rate as f64 / rate as f64))
+                            .ceil() as usize)
+                            + 4;
                         let mut net_samples = Vec::with_capacity(net_needed);
                         {
                             let mut buffer = AUDIO_BUFFER.lock().unwrap();
@@ -351,7 +353,10 @@ pub async fn start_call(config: &Configuration, target_address: Option<UserAddre
                 let def_stream_config: StreamConfig = def_cfg.config();
                 let rate = def_stream_config.sample_rate.0;
                 let ch = def_stream_config.channels;
-                info!("Using output device default config: {} Hz, {} channels", rate, ch);
+                info!(
+                    "Using output device default config: {} Hz, {} channels",
+                    rate, ch
+                );
                 let stream = build(&def_stream_config, rate, ch)?;
                 (stream, rate, ch)
             }

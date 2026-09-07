@@ -55,3 +55,41 @@ pub fn list_devices() -> Result<()> {
 
     Ok(())
 }
+
+/// Find an input audio device by name or substring, or return default input device if None.
+pub fn find_input_device(host: &cpal::Host, name_opt: Option<&str>) -> Result<cpal::Device> {
+    if let Some(name) = name_opt {
+        let name_lower = name.to_lowercase();
+        let devices = host.input_devices()?;
+        for device in devices {
+            if let Ok(dev_name) = device.name()
+                && dev_name.to_lowercase().contains(&name_lower)
+            {
+                return Ok(device);
+            }
+        }
+        anyhow::bail!("Input audio device containing '{}' not found", name);
+    } else {
+        host.default_input_device()
+            .ok_or_else(|| anyhow::anyhow!("No default input audio device available"))
+    }
+}
+
+/// Find an output audio device by name or substring, or return default output device if None.
+pub fn find_output_device(host: &cpal::Host, name_opt: Option<&str>) -> Result<cpal::Device> {
+    if let Some(name) = name_opt {
+        let name_lower = name.to_lowercase();
+        let devices = host.output_devices()?;
+        for device in devices {
+            if let Ok(dev_name) = device.name()
+                && dev_name.to_lowercase().contains(&name_lower)
+            {
+                return Ok(device);
+            }
+        }
+        anyhow::bail!("Output audio device containing '{}' not found", name);
+    } else {
+        host.default_output_device()
+            .ok_or_else(|| anyhow::anyhow!("No default output audio device available"))
+    }
+}

@@ -44,6 +44,12 @@ pub struct Configuration {
     /// Allow echo back (hear your own voice).
     #[serde(default)]
     pub allow_echoback: bool,
+    /// Name (or substring) of input audio device (microphone) to use.
+    #[serde(default)]
+    pub input_device: Option<String>,
+    /// Name (or substring) of output audio device (speaker) to use.
+    #[serde(default)]
+    pub output_device: Option<String>,
 }
 
 fn default_stun_server() -> String {
@@ -60,6 +66,8 @@ impl Default for Configuration {
             sample_rate: 48000,
             channels: 1,
             allow_echoback: false,
+            input_device: None,
+            output_device: None,
         }
     }
 }
@@ -101,6 +109,8 @@ mod tests {
             sample_rate = 44100
             channels = 2
             allow_echoback = true
+            input_device = "Shokz"
+            output_device = "MacBook"
         "#;
         let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
         assert_eq!(config.server_ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
@@ -113,5 +123,7 @@ mod tests {
         assert_eq!(config.sample_rate, 44100);
         assert_eq!(config.channels, 2);
         assert!(config.allow_echoback);
+        assert_eq!(config.input_device.as_deref(), Some("Shokz"));
+        assert_eq!(config.output_device.as_deref(), Some("MacBook"));
     }
 }
