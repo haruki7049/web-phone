@@ -2,7 +2,7 @@
 
 `draft` `mandatory` `author:haruki7049`
 
----
+______________________________________________________________________
 
 ## Abstract
 
@@ -10,7 +10,7 @@ This specification defines the minimal **Core Specification** for a compliant **
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
 
----
+______________________________________________________________________
 
 ## 1. Minimal Core Responsibilities
 
@@ -18,15 +18,15 @@ A compliant core `wpdaemon` implementation MUST satisfy only the following minim
 
 1. **HTTP/WebRTC Signaling (`POST /sdp`)**:
    - MUST accept WebRTC SDP Offers from clients and respond with a valid SDP Answer.
-2. **Client Assignment (`ClientAssignment`)**:
+1. **Client Assignment (`ClientAssignment`)**:
    - MUST assign a unique 64-bit integer `client_id` and a 32-byte `UserAddress` to each connecting client.
    - MUST send `ProtocolPacket::ClientAssignment` (`0x01`) to the client immediately over DataChannel upon connection.
-3. **Basic DataChannel Relay**:
+1. **Basic DataChannel Relay**:
    - MUST accept audio packets (`ClientTargetedAudio` - `0x02`) from clients and relay them to target clients (`ServerTargetedAudio` - `0x03`).
-4. **Connection Cleanup**:
+1. **Connection Cleanup**:
    - MUST unregister disconnected clients when their WebRTC PeerConnection terminates.
 
----
+______________________________________________________________________
 
 ## 2. Detailed HTTP API & Concrete Payload Examples
 
@@ -64,7 +64,7 @@ A core `wpdaemon` MUST expose HTTP REST signaling endpoints.
 }
 ```
 
----
+______________________________________________________________________
 
 ### 2.2 `GET /addresses` (Optional Directory Endpoint)
 
@@ -85,7 +85,7 @@ A core `wpdaemon` MUST expose HTTP REST signaling endpoints.
 ]
 ```
 
----
+______________________________________________________________________
 
 ## 3. Handshake & Signaling Sequence Diagram
 
@@ -106,20 +106,22 @@ sequenceDiagram
     Note over Client: Store client_id & UserAddress
 ```
 
----
+______________________________________________________________________
 
 ## 4. Client State & Connection Registry (`ClientRegistry`)
 
 A compliant `wpdaemon` MUST track active clients in a thread-safe registry (`ClientRegistry`) associating:
+
 - `client_id` (64-bit uint)
 - `user_address` (`UserAddress` - 32-byte hash)
 - `peer_connection` (Arc/Pointer to WebRTC PeerConnection)
 - `data_channel` (Arc/Pointer to WebRTC DataChannel)
 
 ### Unregistration Rules
+
 When a PeerConnection's state changes to `Failed`, `Closed`, or `Disconnected`, `wpdaemon` MUST remove the associated `client_id` and all routing state from `ClientRegistry` to prevent stale data routing.
 
----
+______________________________________________________________________
 
 ## 5. Optional Daemon Extensions
 
