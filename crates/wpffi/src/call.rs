@@ -49,7 +49,7 @@ pub async fn start_call_with_session(
     // 2. Setup DataChannel & audio byte sender channel
     let (tx_audio, rx_audio) = mpsc::channel::<Vec<u8>>(100);
     let _data_channel =
-        setup_data_channel(&peer_connection, target_address, rx_audio, config, session).await?;
+        setup_data_channel(&peer_connection, target_address.clone(), rx_audio, config, session).await?;
 
     // 3. Perform SDP Offer / Answer exchange with server
     perform_sdp_handshake(&peer_connection, config).await?;
@@ -70,6 +70,16 @@ pub async fn start_call_with_session(
     } else {
         tokio::signal::ctrl_c().await?;
         info!("Call ended by user signal");
+    }
+
+    // Send WPIP-07 CallHangup (0x0B) notification if targeting a specific client
+    if let Some(ref target) = target_address {
+        let hangup_packet = crate::protocol::ProtocolPacket::CallHangup {
+            target_address: target.clone(),
+        };
+        let _ = _data_channel
+            .send(&bytes::Bytes::from(hangup_packet.encode()))
+            .await;
     }
 
     let _ = peer_connection.close().await;
