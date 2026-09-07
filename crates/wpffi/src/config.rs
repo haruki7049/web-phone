@@ -31,7 +31,7 @@ pub struct Configuration {
     pub server_ip: IpAddr,
     /// Port number of the audio server.
     pub server_port: u16,
-    /// Address information to recognize this wclient user (IPv6).
+    /// Address information to recognize this wpclient user (IPv6).
     #[serde(default)]
     pub user_address: UserAddress,
     /// STUN server URL for NAT traversal.

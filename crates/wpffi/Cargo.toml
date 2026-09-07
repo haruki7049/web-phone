@@ -1,12 +1,12 @@
 [package]
-name = "wffi"
+name = "wpffi"
 version.workspace = true
 edition.workspace = true
 description = "C API bindings for web-phone WebRTC audio client"
 build = "build.rs"
 
 [lib]
-name = "wffi"
+name = "wpffi"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]

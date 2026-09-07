@@ -5,7 +5,7 @@ use clap::Parser;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::{error, info};
-use wdaemon::{
+use wpdaemon::{
     CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, connection::handle_sdp_offer,
     peer::connect_to_peer, peer::handle_peer_sdp, stun::run_stun_server,
 };
@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut loaded_config: Configuration =
         confy::load_path(&args.config_path).unwrap_or_else(|_| {
-            info!("Running wdaemon with default Configuration...");
+            info!("Running wpdaemon with default Configuration...");
             Configuration::default()
         });
 
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(node_id) = args.node_id {
         loaded_config.node_id = node_id;
     } else if loaded_config.node_id == 0 {
-        loaded_config.node_id = wdaemon::config::generate_node_id();
+        loaded_config.node_id = wpdaemon::config::generate_node_id();
     }
     if !args.peer.is_empty() {
         loaded_config.peers.extend(args.peer);
@@ -55,14 +55,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // Connect to peer wdaemon instances if specified
+    // Connect to peer wpdaemon instances if specified
     for peer_url in config.peers.clone() {
         let url = peer_url.clone();
         tokio::spawn(async move {
             // Small delay to allow peer servers to start if launched simultaneously
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             if let Err(e) = connect_to_peer(url.clone()).await {
-                error!("Failed to connect to peer wdaemon at {}: {}", url, e);
+                error!("Failed to connect to peer wpdaemon at {}: {}", url, e);
             }
         });
     }
@@ -85,16 +85,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SocketAddr::new(config.ip, config.stun_port)
         );
     }
-    info!("Waiting for wclient audio calls & peer daemon mesh connections...");
+    info!("Waiting for wpclient audio calls & peer daemon mesh connections...");
 
     axum::serve(listener, app).await?;
 
     Ok(())
 }
 
-/// Handler to retrieve all registered wclient user addresses.
-async fn list_registered_addresses() -> axum::extract::Json<Vec<wffi::UserAddress>> {
-    axum::extract::Json(wdaemon::connection::get_registered_addresses())
+/// Handler to retrieve all registered wpclient user addresses.
+async fn list_registered_addresses() -> axum::extract::Json<Vec<wpffi::UserAddress>> {
+    axum::extract::Json(wpdaemon::connection::get_registered_addresses())
 }
 
 /// Command-line arguments for the audio server daemon.
@@ -116,7 +116,7 @@ struct CLIArgs {
     #[arg(long)]
     node_id: Option<u64>,
 
-    /// Peer wdaemon URLs to connect to for mesh interconnection.
+    /// Peer wpdaemon URLs to connect to for mesh interconnection.
     #[arg(long)]
     peer: Vec<String>,
 }

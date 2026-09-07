@@ -10,16 +10,16 @@
 //!
 //! ```bash
 //! # Start a call with default configuration
-//! wclient call
+//! wpclient call
 //!
 //! # Start a call with custom server IP and port
-//! wclient --server-ip 127.0.0.1 --server-port 15000 call
+//! wpclient --server-ip 127.0.0.1 --server-port 15000 call
 //!
 //! # Start a call with a custom user IPv6 address for recognition
-//! wclient --user-address 2001:db8::1 call
+//! wpclient --user-address 2001:db8::1 call
 //!
 //! # List available audio devices
-//! wclient list-devices
+//! wpclient list-devices
 //! ```
 
 use anyhow::Result;
@@ -27,7 +27,7 @@ use clap::Parser;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use tracing::info;
-use wffi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, UserAddress};
+use wpffi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, UserAddress};
 
 /// Main entry point for the audio client.
 #[tokio::main]
@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
 
     let mut loaded_config: Configuration =
         confy::load_path(&args.config_path).unwrap_or_else(|_| {
-            info!("Running wclient with default Configuration...");
+            info!("Running wpclient with default Configuration...");
             Configuration::default()
         });
 
@@ -75,15 +75,15 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Failed to get Configuration"))?;
 
     match args.action {
-        Actions::Call { to, .. } => wclient::call::start_call(config, to).await?,
+        Actions::Call { to, .. } => wpclient::call::start_call(config, to).await?,
         Actions::ListAddresses => list_registered_addresses(config).await?,
-        Actions::ListDevices => wclient::audio::list_devices()?,
+        Actions::ListDevices => wpclient::audio::list_devices()?,
     }
 
     Ok(())
 }
 
-/// Query and display registered wclient addresses from wdaemon.
+/// Query and display registered wpclient addresses from wpdaemon.
 async fn list_registered_addresses(config: &Configuration) -> Result<()> {
     let server_url = match config.server_ip {
         std::net::IpAddr::V4(ip) => format!("http://{}:{}", ip, config.server_port),
@@ -99,10 +99,10 @@ async fn list_registered_addresses(config: &Configuration) -> Result<()> {
 
     let addresses: Vec<UserAddress> = resp.json().await?;
     if addresses.is_empty() {
-        println!("No registered wclient temporary user IDs currently connected.");
+        println!("No registered wpclient temporary user IDs currently connected.");
     } else {
         println!(
-            "Registered wclient temporary SHA-256 user IDs ({} total):",
+            "Registered wpclient temporary SHA-256 user IDs ({} total):",
             addresses.len()
         );
         for (idx, addr) in addresses.iter().enumerate() {
@@ -133,7 +133,7 @@ struct CLIArgs {
     #[arg(long)]
     server_port: Option<u16>,
 
-    /// User address override for wclient recognition.
+    /// User address override for wpclient recognition.
     #[arg(long)]
     user_address: Option<UserAddress>,
 
@@ -155,7 +155,7 @@ struct CLIArgs {
 enum Actions {
     /// Start a 1-to-1 audio call or standby to receive calls via WebRTC.
     Call {
-        /// Target wclient temporary SHA-256 user ID (or prefix) to call directly (optional).
+        /// Target wpclient temporary SHA-256 user ID (or prefix) to call directly (optional).
         #[arg(long, short = 't')]
         to: Option<UserAddress>,
 
@@ -163,7 +163,7 @@ enum Actions {
         #[arg(long, short = 'y', default_value_t = false)]
         auto_accept: bool,
     },
-    /// List all registered wclient temporary user IDs connected to wdaemon.
+    /// List all registered wpclient temporary user IDs connected to wpdaemon.
     ListAddresses,
     /// List available audio devices.
     ListDevices,

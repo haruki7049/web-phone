@@ -33,7 +33,7 @@ fn set_last_error(err: impl std::fmt::Display) {
 /// Retrieve the last thread-local error message string if any C API call returned non-zero error status.
 /// The returned pointer is managed internally and must NOT be freed by the caller.
 #[unsafe(no_mangle)]
-pub extern "C" fn wffi_last_error_message() -> *const c_char {
+pub extern "C" fn wpffi_last_error_message() -> *const c_char {
     LAST_ERROR.with(|cell| {
         cell.borrow()
             .as_ref()
@@ -45,7 +45,7 @@ pub extern "C" fn wffi_last_error_message() -> *const c_char {
 /// Initialize tracing subscriber for logging output.
 /// Returns 0 on success, or -1 on error.
 #[unsafe(no_mangle)]
-pub extern "C" fn wffi_init() -> c_int {
+pub extern "C" fn wpffi_init() -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
         let _ = tracing_subscriber::fmt::try_init();
         0
@@ -53,21 +53,21 @@ pub extern "C" fn wffi_init() -> c_int {
     .unwrap_or(-1)
 }
 
-/// Opaque configuration handle for wclient.
-pub struct WFFIConfig(pub Configuration);
+/// Opaque configuration handle for wpclient.
+pub struct WPFFIConfig(pub Configuration);
 
 /// Create a new client configuration handle with default settings.
 #[unsafe(no_mangle)]
-pub extern "C" fn wffi_config_new() -> *mut WFFIConfig {
-    catch_unwind(AssertUnwindSafe(|| Box::into_raw(Box::new(WFFIConfig(Configuration::default())))))
+pub extern "C" fn wpffi_config_new() -> *mut WPFFIConfig {
+    catch_unwind(AssertUnwindSafe(|| Box::into_raw(Box::new(WPFFIConfig(Configuration::default())))))
         .unwrap_or(std::ptr::null_mut())
 }
 
-/// Free a configuration handle created with `wffi_config_new`.
+/// Free a configuration handle created with `wpffi_config_new`.
 /// # Safety
-/// `config` must be a valid pointer created by `wffi_config_new`, or NULL.
+/// `config` must be a valid pointer created by `wpffi_config_new`, or NULL.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wffi_config_free(config: *mut WFFIConfig) {
+pub unsafe extern "C" fn wpffi_config_free(config: *mut WPFFIConfig) {
     if !config.is_null() {
         let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
             let _ = Box::from_raw(config);
@@ -80,8 +80,8 @@ pub unsafe extern "C" fn wffi_config_free(config: *mut WFFIConfig) {
 /// # Safety
 /// `config` and `server_ip` must be valid non-null pointers.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wffi_config_set_server(
-    config: *mut WFFIConfig,
+pub unsafe extern "C" fn wpffi_config_set_server(
+    config: *mut WPFFIConfig,
     server_ip: *const c_char,
     server_port: u16,
 ) -> c_int {
@@ -118,8 +118,8 @@ pub unsafe extern "C" fn wffi_config_set_server(
 /// # Safety
 /// `config` and `stun_server` must be valid non-null pointers.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wffi_config_set_stun_server(
-    config: *mut WFFIConfig,
+pub unsafe extern "C" fn wpffi_config_set_stun_server(
+    config: *mut WPFFIConfig,
     stun_server: *const c_char,
 ) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -147,8 +147,8 @@ pub unsafe extern "C" fn wffi_config_set_stun_server(
 /// # Safety
 /// `config` must be a valid non-null pointer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wffi_config_set_auto_accept(
-    config: *mut WFFIConfig,
+pub unsafe extern "C" fn wpffi_config_set_auto_accept(
+    config: *mut WPFFIConfig,
     auto_accept: bool,
 ) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -168,8 +168,8 @@ pub unsafe extern "C" fn wffi_config_set_auto_accept(
 /// # Safety
 /// `config` must be a valid non-null pointer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wffi_config_set_allow_echoback(
-    config: *mut WFFIConfig,
+pub unsafe extern "C" fn wpffi_config_set_allow_echoback(
+    config: *mut WPFFIConfig,
     allow_echoback: bool,
 ) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -189,8 +189,8 @@ pub unsafe extern "C" fn wffi_config_set_allow_echoback(
 /// # Safety
 /// `config` must be a valid non-null pointer. `input_device` and `output_device` must be valid C strings or NULL.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wffi_config_set_audio_devices(
-    config: *mut WFFIConfig,
+pub unsafe extern "C" fn wpffi_config_set_audio_devices(
+    config: *mut WPFFIConfig,
     input_device: *const c_char,
     output_device: *const c_char,
 ) -> c_int {
@@ -215,14 +215,14 @@ pub unsafe extern "C" fn wffi_config_set_audio_devices(
     .unwrap_or(-1)
 }
 
-/// Query registered user addresses from wdaemon server as a JSON string array.
-/// Caller must free `*out_json` using `wffi_string_free`.
+/// Query registered user addresses from wpdaemon server as a JSON string array.
+/// Caller must free `*out_json` using `wpffi_string_free`.
 /// Returns 0 on success, or -1 on error.
 /// # Safety
 /// `config` and `out_json` must be valid non-null pointers.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wffi_list_addresses(
-    config: *const WFFIConfig,
+pub unsafe extern "C" fn wpffi_list_addresses(
+    config: *const WPFFIConfig,
     out_json: *mut *mut c_char,
 ) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
@@ -280,12 +280,12 @@ pub unsafe extern "C" fn wffi_list_addresses(
 }
 
 /// Query available audio input and output devices as a JSON object.
-/// Caller must free `*out_json` using `wffi_string_free`.
+/// Caller must free `*out_json` using `wpffi_string_free`.
 /// Returns 0 on success, or -1 on error.
 /// # Safety
 /// `out_json` must be a valid non-null pointer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wffi_list_audio_devices(out_json: *mut *mut c_char) -> c_int {
+pub unsafe extern "C" fn wpffi_list_audio_devices(out_json: *mut *mut c_char) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
         if out_json.is_null() {
             set_last_error("Null pointer argument");
@@ -319,21 +319,21 @@ pub unsafe extern "C" fn wffi_list_audio_devices(out_json: *mut *mut c_char) -> 
 }
 
 /// Opaque handle representing an active audio call session.
-pub struct WFFICallHandle {
+pub struct WPFFICallHandle {
     stop_tx: Option<oneshot::Sender<()>>,
     thread_handle: Option<JoinHandle<()>>,
 }
 
 /// Start an audio call session in a background worker thread.
 /// `target_address` can be NULL to operate in standby mode, or a valid UserAddress SHA-256 string.
-/// Returns pointer to `WFFICallHandle` on success, or NULL on error.
+/// Returns pointer to `WPFFICallHandle` on success, or NULL on error.
 /// # Safety
 /// `config` must be a valid non-null pointer. `target_address` must be a valid C string or NULL.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wffi_call_start(
-    config: *const WFFIConfig,
+pub unsafe extern "C" fn wpffi_call_start(
+    config: *const WPFFIConfig,
     target_address: *const c_char,
-) -> *mut WFFICallHandle {
+) -> *mut WPFFICallHandle {
     catch_unwind(AssertUnwindSafe(|| {
         if config.is_null() {
             set_last_error("Null pointer config argument");
@@ -378,7 +378,7 @@ pub unsafe extern "C" fn wffi_call_start(
             });
         });
 
-        let handle = Box::new(WFFICallHandle {
+        let handle = Box::new(WPFFICallHandle {
             stop_tx: Some(stop_tx),
             thread_handle: Some(thread_handle),
         });
@@ -391,9 +391,9 @@ pub unsafe extern "C" fn wffi_call_start(
 /// Stop and terminate an active call session, freeing its handle.
 /// Returns 0 on success, or -1 on error.
 /// # Safety
-/// `handle` must be a valid pointer returned by `wffi_call_start`.
+/// `handle` must be a valid pointer returned by `wpffi_call_start`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wffi_call_stop(handle: *mut WFFICallHandle) -> c_int {
+pub unsafe extern "C" fn wpffi_call_stop(handle: *mut WPFFICallHandle) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
         if handle.is_null() {
             set_last_error("Null handle argument");
@@ -411,11 +411,11 @@ pub unsafe extern "C" fn wffi_call_stop(handle: *mut WFFICallHandle) -> c_int {
     .unwrap_or(-1)
 }
 
-/// Free a C string allocated by `wffi_list_addresses` or `wffi_list_audio_devices`.
+/// Free a C string allocated by `wpffi_list_addresses` or `wpffi_list_audio_devices`.
 /// # Safety
-/// `ptr` must be a pointer allocated by `wffi_list_addresses` or `wffi_list_audio_devices`, or NULL.
+/// `ptr` must be a pointer allocated by `wpffi_list_addresses` or `wpffi_list_audio_devices`, or NULL.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wffi_string_free(ptr: *mut c_char) {
+pub unsafe extern "C" fn wpffi_string_free(ptr: *mut c_char) {
     if !ptr.is_null() {
         let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
             let _ = CString::from_raw(ptr);
@@ -428,27 +428,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_wffi_config_lifecycle() {
-        let config = wffi_config_new();
+    fn test_wpffi_config_lifecycle() {
+        let config = wpffi_config_new();
         assert!(!config.is_null());
 
         let server = CString::new("127.0.0.1").unwrap();
-        let res = unsafe { wffi_config_set_server(config, server.as_ptr(), 15000) };
+        let res = unsafe { wpffi_config_set_server(config, server.as_ptr(), 15000) };
         assert_eq!(res, 0);
 
-        let res = unsafe { wffi_config_set_auto_accept(config, true) };
+        let res = unsafe { wpffi_config_set_auto_accept(config, true) };
         assert_eq!(res, 0);
 
-        let res = unsafe { wffi_config_set_allow_echoback(config, false) };
+        let res = unsafe { wpffi_config_set_allow_echoback(config, false) };
         assert_eq!(res, 0);
 
-        unsafe { wffi_config_free(config) };
+        unsafe { wpffi_config_free(config) };
     }
 
     #[test]
-    fn test_wffi_list_audio_devices() {
+    fn test_wpffi_list_audio_devices() {
         let mut json_ptr: *mut c_char = std::ptr::null_mut();
-        let res = unsafe { wffi_list_audio_devices(&mut json_ptr) };
+        let res = unsafe { wpffi_list_audio_devices(&mut json_ptr) };
         assert_eq!(res, 0);
         assert!(!json_ptr.is_null());
 
@@ -457,6 +457,6 @@ mod tests {
         assert!(json_str.contains("input_devices"));
         assert!(json_str.contains("output_devices"));
 
-        unsafe { wffi_string_free(json_ptr) };
+        unsafe { wpffi_string_free(json_ptr) };
     }
 }

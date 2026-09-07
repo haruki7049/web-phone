@@ -43,7 +43,7 @@ pub async fn start_call_with_cancel(
     };
     if let Some(ref target) = target_address {
         info!(
-            "Targeting direct 1-to-1 call to wclient user ID: {}",
+            "Targeting direct 1-to-1 call to wpclient user ID: {}",
             target
         );
     } else {

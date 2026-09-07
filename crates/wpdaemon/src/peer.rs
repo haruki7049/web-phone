@@ -1,6 +1,6 @@
 //! Inter-daemon peer mesh module.
 //!
-//! This module allows a `wdaemon` instance to connect to other `wdaemon` instances,
+//! This module allows a `wpdaemon` instance to connect to other `wpdaemon` instances,
 //! forming an interconnected daemon mesh that relays audio and client information
 //! across multiple daemon servers.
 
@@ -11,7 +11,7 @@ use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 use tracing::info;
-use wffi::UserAddress;
+use wpffi::UserAddress;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
@@ -23,7 +23,7 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 static PEER_DAEMONS: LazyLock<Mutex<HashMap<String, Arc<RTCPeerConnection>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Handle incoming SDP offer from another peer wdaemon node.
+/// Handle incoming SDP offer from another peer wpdaemon node.
 pub async fn handle_peer_sdp(
     Json(offer): Json<RTCSessionDescription>,
 ) -> Result<Json<RTCSessionDescription>, (StatusCode, String)> {
@@ -40,7 +40,7 @@ pub async fn handle_peer_sdp(
         )
     })?);
 
-    info!("Received inbound peer wdaemon connection request");
+    info!("Received inbound peer wpdaemon connection request");
 
     // Handle inbound DataChannel from peer daemon
     peer_connection.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
@@ -51,7 +51,7 @@ pub async fn handle_peer_sdp(
             let mut audio_rx = AUDIO_BROADCAST.subscribe();
 
             Box::pin(async move {
-                info!("Inbound peer wdaemon DataChannel opened");
+                info!("Inbound peer wpdaemon DataChannel opened");
 
                 // Forward 1-to-1 targeted audio to this peer daemon
                 tokio::spawn(async move {
@@ -151,14 +151,14 @@ pub async fn handle_peer_sdp(
     Ok(Json(local_desc))
 }
 
-/// Initiate connection to a target peer wdaemon.
+/// Initiate connection to a target peer wpdaemon.
 pub async fn connect_to_peer(
     peer_url: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = CONFIGURATION.get().cloned().unwrap_or_default();
     let my_node_id = config.node_id;
 
-    info!("Connecting to peer wdaemon at {}...", peer_url);
+    info!("Connecting to peer wpdaemon at {}...", peer_url);
 
     let api = APIBuilder::new().build();
     let rtc_config = RTCConfiguration::default();
@@ -264,7 +264,7 @@ pub async fn connect_to_peer(
         .unwrap()
         .insert(peer_url, peer_connection);
 
-    info!("Successfully interconnected with peer wdaemon");
+    info!("Successfully interconnected with peer wpdaemon");
 
     Ok(())
 }

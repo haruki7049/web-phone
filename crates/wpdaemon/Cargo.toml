@@ -1,5 +1,5 @@
 [package]
-name = "wdaemon"
+name = "wpdaemon"
 version = "0.1.0"
 description = "WebRTC server daemon, STUN/TURN server, and peer mesh daemon"
 edition = "2024"
@@ -22,7 +22,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 turn.workspace = true
 webrtc.workspace = true
-wffi = { path = "../wffi" }
+wpffi = { path = "../wpffi" }
 
 
 [dev-dependencies]

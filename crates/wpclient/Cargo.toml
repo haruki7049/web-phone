@@ -1,11 +1,11 @@
 [package]
-name = "wclient"
+name = "wpclient"
 version = "0.1.0"
 description = "WebRTC client CLI for real-time audio transmission"
 edition = "2024"
 
 [dependencies]
-wffi = { path = "../wffi" }
+wpffi = { path = "../wpffi" }
 anyhow.workspace = true
 clap.workspace = true
 color-eyre.workspace = true

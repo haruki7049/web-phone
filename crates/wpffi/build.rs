@@ -17,7 +17,7 @@ fn main() {
         .with_config(config)
         .generate()
         .expect("Unable to generate C bindings with cbindgen")
-        .write_to_file(out_dir.join("wffi.h"));
+        .write_to_file(out_dir.join("wpffi.h"));
 
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=cbindgen.toml");

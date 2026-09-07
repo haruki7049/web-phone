@@ -58,7 +58,7 @@ pub struct Configuration {
     /// Whether STUN/TURN service is enabled.
     #[serde(default = "default_true")]
     pub turn_enabled: bool,
-    /// List of peer wdaemon signaling addresses to connect to for mesh federation.
+    /// List of peer wpdaemon signaling addresses to connect to for mesh federation.
     #[serde(default)]
     pub peers: Vec<String>,
     /// Unique identifier for this daemon node.

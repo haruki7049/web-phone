@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::sync::{Arc, LazyLock, Mutex};
 use tracing::{error, info, warn};
-use wffi::UserAddress;
+use wpffi::UserAddress;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
@@ -216,7 +216,7 @@ fn is_room_or_target_full(target_key: &UserAddress) -> bool {
     false
 }
 
-/// Get currently registered wclient addresses across active connections.
+/// Get currently registered wpclient addresses across active connections.
 pub fn get_registered_addresses() -> Vec<UserAddress> {
     let mut addrs: Vec<UserAddress> = CLIENT_ADDRESSES.lock().unwrap().values().cloned().collect();
     addrs.sort_by(|a, b| a.id.cmp(&b.id));

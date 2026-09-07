@@ -4,16 +4,16 @@ A real-time audio transmission system over WebRTC with built-in STUN/TURN server
 
 ## Overview
 
-`web-phone` enables real-time voice communication between clients (`wclient`) and server nodes (`wdaemon`).
+`web-phone` enables real-time voice communication between clients (`wpclient`) and server nodes (`wpdaemon`).
 Audio is captured from the microphone, transmitted over WebRTC DataChannels (using STUN/TURN NAT traversal), and played back on connected clients' speakers.
 
-`wdaemon` acts as a WebRTC audio server, STUN/TURN server, and peer mesh node that interconnects with other `wdaemon` instances to bridge audio and client information across multiple daemon nodes.
+`wpdaemon` acts as a WebRTC audio server, STUN/TURN server, and peer mesh node that interconnects with other `wpdaemon` instances to bridge audio and client information across multiple daemon nodes.
 
 ## Components
 
-- **`wdaemon`**: WebRTC audio server, STUN/TURN server, and peer mesh daemon
-- **`wclient`**: WebRTC audio client CLI for making calls and listing audio devices
-- **`wffi`**: C API library (`cdylib`, `staticlib`, `rlib`) and C header (`wffi.h`) for embedding `wclient` into C/C++ applications
+- **`wpdaemon`**: WebRTC audio server, STUN/TURN server, and peer mesh daemon
+- **`wpclient`**: WebRTC audio client CLI for making calls and listing audio devices
+- **`wpffi`**: C API library (`cdylib`, `staticlib`, `rlib`) and C header (`wpffi.h`) for embedding `wpclient` into C/C++ applications
 
 ## Requirements
 
@@ -27,34 +27,34 @@ Audio is captured from the microphone, transmitted over WebRTC DataChannels (usi
 
 ```bash
 # Start server with default settings (HTTP port 15000, STUN UDP port 3478)
-cargo run -p wdaemon
+cargo run -p wpdaemon
 
 # Start server with custom ports
-cargo run -p wdaemon -- --port 15000 --stun-port 3478
+cargo run -p wpdaemon -- --port 15000 --stun-port 3478
 
-# Connect to another peer wdaemon node to form a daemon mesh
-cargo run -p wdaemon -- --port 15001 --stun-port 3479 --peer http://127.0.0.1:15000
+# Connect to another peer wpdaemon node to form a daemon mesh
+cargo run -p wpdaemon -- --port 15001 --stun-port 3479 --peer http://127.0.0.1:15000
 ```
 
 ### Start a Client
 
 ```bash
-# Connect to wdaemon, receive an assigned temporary SHA-256 User ID, and stand by for incoming calls
+# Connect to wpdaemon, receive an assigned temporary SHA-256 User ID, and stand by for incoming calls
 # (Prompts "Allow connection? [y/N]" when an incoming call request arrives)
-cargo run -p wclient -- call
+cargo run -p wpclient -- call
 
 # Automatically accept incoming call requests without interactive terminal prompt
-cargo run -p wclient -- call --auto-accept # or -y
+cargo run -p wpclient -- call --auto-accept # or -y
 
 # Join or start a 1-to-1 call with a specific target SHA-256 User ID (max 2 participants allowed)
 # (Attempts by a 3rd participant to connect will be rejected with a connection error)
-cargo run -p wclient -- call --to <SHA256_USER_ID>
+cargo run -p wpclient -- call --to <SHA256_USER_ID>
 
-# List all registered wclient temporary user IDs connected to the daemon
-cargo run -p wclient -- list-addresses
+# List all registered wpclient temporary user IDs connected to the daemon
+cargo run -p wpclient -- list-addresses
 
 # List available audio input and output devices
-cargo run -p wclient -- list-devices
+cargo run -p wpclient -- list-devices
 ```
 
 ### Configuration
@@ -91,13 +91,13 @@ allow_echoback = false
 ```
 ┌───────────┐     WebRTC DataChannel     ┌───────────┐     Peer Mesh     ┌───────────┐     WebRTC DataChannel     ┌───────────┐
 │  Client A │ ◄────────────────────────► │ Daemon 1  │ ◄───────────────► │ Daemon 2  │ ◄────────────────────────► │  Client B │
-│   (mic)   │    (HTTP SDP + UDP STUN)   │ (node 1)  │    (wdaemon)    │ (node 2)  │    (HTTP SDP + UDP STUN)   │ (speaker) │
+│   (mic)   │    (HTTP SDP + UDP STUN)   │ (node 1)  │    (wpdaemon)   │ (node 2)  │    (HTTP SDP + UDP STUN)   │ (speaker) │
 └───────────┘                            └───────────┘                   └───────────┘                            └───────────┘
 ```
 
-1. **WebRTC Communication**: `wclient` connects to `wdaemon` via HTTP SDP Offer/Answer signaling and exchanges audio frames over WebRTC DataChannels.
-1. **STUN/TURN Service**: `wdaemon` runs a STUN/TURN server on UDP (port 3478 by default) for NAT traversal.
-1. **Daemon Mesh Interconnection**: `wdaemon` instances can connect to peer `wdaemon` nodes over WebRTC. Audio and client metadata are relayed across the daemon mesh, allowing clients connected to different `wdaemon` servers to talk to each other seamlessly.
+1. **WebRTC Communication**: `wpclient` connects to `wpdaemon` via HTTP SDP Offer/Answer signaling and exchanges audio frames over WebRTC DataChannels.
+1. **STUN/TURN Service**: `wpdaemon` runs a STUN/TURN server on UDP (port 3478 by default) for NAT traversal.
+1. **Daemon Mesh Interconnection**: `wpdaemon` instances can connect to peer `wpdaemon` nodes over WebRTC. Audio and client metadata are relayed across the daemon mesh, allowing clients connected to different `wpdaemon` servers to talk to each other seamlessly.
 
 ## License
 
