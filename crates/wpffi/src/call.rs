@@ -48,8 +48,14 @@ pub async fn start_call_with_session(
 
     // 2. Setup DataChannel & audio byte sender channel
     let (tx_audio, rx_audio) = mpsc::channel::<Vec<u8>>(100);
-    let _data_channel =
-        setup_data_channel(&peer_connection, target_address.clone(), rx_audio, config, session).await?;
+    let _data_channel = setup_data_channel(
+        &peer_connection,
+        target_address.clone(),
+        rx_audio,
+        config,
+        session,
+    )
+    .await?;
 
     // 3. Perform SDP Offer / Answer exchange with server
     perform_sdp_handshake(&peer_connection, config).await?;
