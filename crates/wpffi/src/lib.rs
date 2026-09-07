@@ -24,7 +24,8 @@ thread_local! {
 
 fn set_last_error(err: impl std::fmt::Display) {
     let err_str = err.to_string();
-    let c_str = CString::new(err_str).unwrap_or_else(|_| CString::new("Error containing null bytes").unwrap());
+    let c_str = CString::new(err_str)
+        .unwrap_or_else(|_| CString::new("Error containing null bytes").unwrap());
     LAST_ERROR.with(|cell| {
         *cell.borrow_mut() = Some(c_str);
     });
@@ -59,8 +60,10 @@ pub struct WPFFIConfig(pub Configuration);
 /// Create a new client configuration handle with default settings.
 #[unsafe(no_mangle)]
 pub extern "C" fn wpffi_config_new() -> *mut WPFFIConfig {
-    catch_unwind(AssertUnwindSafe(|| Box::into_raw(Box::new(WPFFIConfig(Configuration::default())))))
-        .unwrap_or(std::ptr::null_mut())
+    catch_unwind(AssertUnwindSafe(|| {
+        Box::into_raw(Box::new(WPFFIConfig(Configuration::default())))
+    }))
+    .unwrap_or(std::ptr::null_mut())
 }
 
 /// Free a configuration handle created with `wpffi_config_new`.
@@ -370,8 +373,7 @@ pub unsafe extern "C" fn wpffi_call_start(
             };
 
             rt.block_on(async move {
-                if let Err(e) =
-                    call::start_call_with_cancel(&cfg, target_opt, Some(stop_rx)).await
+                if let Err(e) = call::start_call_with_cancel(&cfg, target_opt, Some(stop_rx)).await
                 {
                     tracing::error!("Audio call session error: {}", e);
                 }

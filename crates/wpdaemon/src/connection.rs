@@ -15,7 +15,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::sync::{Arc, LazyLock, Mutex};
 use tracing::{error, info, warn};
-use wpffi::UserAddress;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
@@ -23,6 +22,7 @@ use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use wpffi::UserAddress;
 
 /// Counter for connected clients.
 static CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
