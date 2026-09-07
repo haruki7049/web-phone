@@ -53,7 +53,61 @@ graph TD
 
 ______________________________________________________________________
 
-## 2. Address Identification (UserAddress)
+## 2. End-to-End Connection & Streaming Sequence Diagram
+
+The following sequence diagram details the complete end-to-end workflow from initial HTTP signaling and WebRTC DataChannel setup to interactive call control approval and bidirectional audio streaming between Client A and Client B through a `wpdaemon` node:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant ClientA as wpclient (Client A)
+    participant Daemon as wpdaemon
+    participant ClientB as wpclient (Client B)
+
+    %% Phase 1: Client Registration
+    rect rgb(240, 248, 255)
+    Note over ClientA,Daemon: Phase 1: Client Registration & DataChannel Setup
+    ClientA->>Daemon: POST /sdp (SDP Offer)
+    Daemon-->>ClientA: 200 OK (SDP Answer)
+    Note over ClientA,Daemon: DataChannel Opened
+    Daemon->>ClientA: ClientAssignment (0x01, Client ID: A, Address: AddrA)
+
+    ClientB->>Daemon: POST /sdp (SDP Offer)
+    Daemon-->>ClientB: 200 OK (SDP Answer)
+    Note over ClientB,Daemon: DataChannel Opened
+    Daemon->>ClientB: ClientAssignment (0x01, Client ID: B, Address: AddrB)
+    end
+
+    %% Phase 2: Call Control & Approval
+    rect rgb(255, 250, 240)
+    Note over ClientA,ClientB: Phase 2: Call Initiation & Approval (WPIP-08)
+    ClientA->>Daemon: ClientTargetedAudio (0x02, Target: AddrB, AudioData)
+    Note over Daemon: Intercept audio & check approval state
+    Daemon->>ClientB: CallRequest (0x05, CallerID: A, Address: AddrA)
+    Note over ClientB: Prompt User or Auto-Accept
+    ClientB->>Daemon: CallAcceptResponse (0x06, CallerAddress: AddrA)
+    Note over Daemon: Mark Call Approved for AddrA <-> AddrB
+    Daemon->>ClientA: CallAcceptedNotification (0x08, Target: AddrB)
+    end
+
+    %% Phase 3: Bidirectional Streaming
+    rect rgb(240, 255, 240)
+    Note over ClientA,ClientB: Phase 3: Active Bidirectional Audio Streaming
+    loop Real-time Audio Frame Transfer (PCM f32 LE 48kHz)
+        ClientA->>Daemon: ClientTargetedAudio (0x02, Target: AddrB, Data)
+        Daemon->>ClientB: ServerTargetedAudio (0x03, Target: AddrB, Sender: AddrA, Data)
+        Note over ClientB: Play audio on Speakers
+
+        ClientB->>Daemon: ClientTargetedAudio (0x02, Target: AddrA, Data)
+        Daemon->>ClientA: ServerTargetedAudio (0x03, Target: AddrA, Sender: AddrB, Data)
+        Note over ClientA: Play audio on Speakers
+    end
+    end
+```
+
+______________________________________________________________________
+
+## 3. Address Identification (UserAddress)
 
 Client identity in `web-phone` is represented by `UserAddress`:
 
@@ -63,7 +117,7 @@ Client identity in `web-phone` is represented by `UserAddress`:
 
 ______________________________________________________________________
 
-## 3. Design Principles
+## 4. Design Principles
 
 1. **Simplicity**:
 
