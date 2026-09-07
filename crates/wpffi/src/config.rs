@@ -11,8 +11,8 @@ use std::sync::{LazyLock, Mutex, OnceLock};
 
 /// Default path to the configuration file.
 pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
-    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "web-phone-client")
-        .expect("Failed to search ProjectDirs for dev.haruki7049.web-phone-client");
+    let proj_dirs = ProjectDirs::from("dev", "haruki7049", "wpclient")
+        .expect("Failed to search ProjectDirs for dev.haruki7049.wpclient");
     let mut result: PathBuf = proj_dirs.config_dir().to_path_buf();
     let filename: &str = "config.toml";
 

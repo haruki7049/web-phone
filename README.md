@@ -61,7 +61,7 @@ cargo run -p wpclient -- list-devices
 
 Configuration files are stored in platform-specific directories:
 
-- Linux: `~/.config/web-phone-daemon/config.toml` (server), `~/.config/web-phone-client/config.toml` (client)
+- Linux: `~/.config/wpdaemon/config.toml` (server), `~/.config/wpclient/config.toml` (client)
 
 #### Server Configuration (`config.toml`)
 
