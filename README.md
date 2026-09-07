@@ -11,9 +11,13 @@ Audio is captured from the microphone, transmitted over WebRTC DataChannels (usi
 
 ## Components
 
-- **`wpdaemon`**: WebRTC audio server, STUN/TURN server, and peer mesh daemon
-- **`wpclient`**: WebRTC audio client CLI for making calls and listing audio devices
-- **`wpffi`**: C API library (`cdylib`, `staticlib`, `rlib`) and C header (`wpffi.h`) for embedding `wpclient` into C/C++ applications
+- **`wpdaemon`**: Reference server daemon implementation for [`WPIP-02`](docs/WPIP-02.md)
+- **`wpclient`**: Reference audio client implementation for [`WPIP-03`](docs/WPIP-03.md)
+- **`wpffi`**: Core engine & C API reference library for [`WPIP-06`](docs/WPIP-06.md)
+
+## Standards & Specifications (WPIPs)
+
+Protocol specifications and reference behaviors are standardized in [WPIPs (web-phone Implementation Possibilities)](docs/README.md).
 
 ## Requirements
 
