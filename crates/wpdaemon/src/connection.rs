@@ -29,6 +29,78 @@ static CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 /// Maximum audio message size in bytes (1MB).
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 
+/// Helper to calculate audio energy (RMS) of audio frame payload.
+pub fn calculate_audio_energy(audio_data: &[u8]) -> f64 {
+    if audio_data.is_empty() {
+        return 0.0;
+    }
+    if audio_data.len() >= 4 && audio_data.len().is_multiple_of(4) {
+        let (chunks, _) = audio_data.as_chunks::<4>();
+        let sum_sq: f64 = chunks
+            .iter()
+            .map(|c| {
+                let sample = f32::from_le_bytes(*c) as f64;
+                sample * sample
+            })
+            .sum();
+        (sum_sq / chunks.len() as f64).sqrt()
+    } else {
+        let sum_sq: f64 = audio_data
+            .iter()
+            .map(|&b| {
+                let val = (b as f64) - 128.0;
+                val * val
+            })
+            .sum();
+        (sum_sq / audio_data.len() as f64).sqrt()
+    }
+}
+
+/// Start background keep-alive heartbeat task (WPIP-09).
+pub fn start_keepalive_task() {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+        loop {
+            interval.tick().await;
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+
+            let ping_bytes = Bytes::from(ProtocolPacket::Ping { timestamp: now_ms }.encode());
+
+            let channels = {
+                let reg = CLIENT_REGISTRY.read().unwrap();
+                reg.data_channels.clone()
+            };
+
+            for (_cid, dc) in channels {
+                let _ = dc.send(&ping_bytes).await;
+            }
+
+            let stale_cids = {
+                let reg = CLIENT_REGISTRY.read().unwrap();
+                reg.get_stale_clients(30)
+            };
+
+            for cid in stale_cids {
+                warn!(
+                    "Client {} failed keep-alive pong response for >30s, terminating connection",
+                    cid
+                );
+                let pc = {
+                    let reg = CLIENT_REGISTRY.read().unwrap();
+                    reg.peer_connections.get(&cid).cloned()
+                };
+                if let Some(pc) = pc {
+                    let _ = pc.close().await;
+                }
+                CLIENT_REGISTRY.write().unwrap().unregister_client(cid);
+            }
+        }
+    });
+}
+
 /// Find client ID matching a given UserAddress (exact or prefix match).
 fn find_client_by_address(target_key: &UserAddress) -> Option<u64> {
     CLIENT_REGISTRY
@@ -458,6 +530,145 @@ pub async fn handle_sdp_offer(
                         let pong = ProtocolPacket::Pong { timestamp };
                         let _ = dc_inner.send(&Bytes::from(pong.encode())).await;
                     }
+                    ProtocolPacket::Pong { .. } => {
+                        CLIENT_REGISTRY.write().unwrap().update_last_pong(client_id);
+                    }
+                    ProtocolPacket::RoomJoinRequest { room_address } => {
+                        let (member_count, member_cids) = {
+                            let mut reg = CLIENT_REGISTRY.write().unwrap();
+                            let count = reg.join_room(client_id, room_address.clone());
+                            let members = reg.get_room_member_ids(&room_address);
+                            (count, members)
+                        };
+
+                        info!(
+                            "Client {} joined room {} (Total participants: {})",
+                            client_id,
+                            room_address.short_id(),
+                            member_count
+                        );
+
+                        let state_pkt = ProtocolPacket::RoomStateNotification {
+                            room_address: room_address.clone(),
+                            participant_count: member_count,
+                        };
+                        let bytes = Bytes::from(state_pkt.encode());
+
+                        for member_cid in member_cids {
+                            let dc = CLIENT_REGISTRY
+                                .read()
+                                .unwrap()
+                                .data_channels
+                                .get(&member_cid)
+                                .cloned();
+                            if let Some(dc) = dc {
+                                let _ = dc.send(&bytes).await;
+                            }
+                        }
+                    }
+                    ProtocolPacket::RoomLeaveRequest { room_address } => {
+                        let (remaining_count, member_cids) = {
+                            let mut reg = CLIENT_REGISTRY.write().unwrap();
+                            let count = reg.leave_room(client_id, &room_address);
+                            let members = reg.get_room_member_ids(&room_address);
+                            (count, members)
+                        };
+
+                        info!(
+                            "Client {} left room {} (Remaining participants: {})",
+                            client_id,
+                            room_address.short_id(),
+                            remaining_count
+                        );
+
+                        let state_pkt = ProtocolPacket::RoomStateNotification {
+                            room_address: room_address.clone(),
+                            participant_count: remaining_count,
+                        };
+                        let bytes = Bytes::from(state_pkt.encode());
+
+                        for member_cid in member_cids {
+                            let dc = CLIENT_REGISTRY
+                                .read()
+                                .unwrap()
+                                .data_channels
+                                .get(&member_cid)
+                                .cloned();
+                            if let Some(dc) = dc {
+                                let _ = dc.send(&bytes).await;
+                            }
+                        }
+                    }
+                    ProtocolPacket::RoomGroupAudio {
+                        room_address,
+                        codec_id,
+                        audio_data: payload,
+                    } => {
+                        if payload.len() > MAX_MESSAGE_SIZE {
+                            warn!(
+                                "Client {} sent oversized group audio packet ({} bytes), ignoring",
+                                client_id,
+                                payload.len()
+                            );
+                            return;
+                        }
+
+                        let energy = calculate_audio_energy(&payload);
+                        let (is_top_k, top_speakers, _) = {
+                            let mut reg = CLIENT_REGISTRY.write().unwrap();
+                            reg.update_speaker_energy(&room_address, client_id, energy)
+                        };
+
+                        if !is_top_k {
+                            return;
+                        }
+
+                        let member_cids = CLIENT_REGISTRY
+                            .read()
+                            .unwrap()
+                            .get_room_member_ids(&room_address);
+
+                        let server_audio_pkt = ProtocolPacket::RoomGroupAudio {
+                            room_address: room_address.clone(),
+                            codec_id,
+                            audio_data: payload,
+                        };
+                        let bytes = Bytes::from(server_audio_pkt.encode());
+
+                        for member_cid in &member_cids {
+                            if *member_cid == client_id {
+                                continue;
+                            }
+                            let dc = CLIENT_REGISTRY
+                                .read()
+                                .unwrap()
+                                .data_channels
+                                .get(member_cid)
+                                .cloned();
+                            if let Some(dc) = dc {
+                                let _ = dc.send(&bytes).await;
+                            }
+                        }
+
+                        if !top_speakers.is_empty() {
+                            let notice_pkt = ProtocolPacket::ActiveSpeakerNotice {
+                                room_address: room_address.clone(),
+                                speaker_addresses: top_speakers,
+                            };
+                            let notice_bytes = Bytes::from(notice_pkt.encode());
+                            for member_cid in member_cids {
+                                let dc = CLIENT_REGISTRY
+                                    .read()
+                                    .unwrap()
+                                    .data_channels
+                                    .get(&member_cid)
+                                    .cloned();
+                                if let Some(dc) = dc {
+                                    let _ = dc.send(&notice_bytes).await;
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
             })
@@ -604,7 +815,8 @@ mod tests {
     fn test_matches_address() {
         let full_addr = UserAddress::new("a1b2c3d4e5f607080900112233445566");
         let short_key = UserAddress::new("a1b2c3d4e5f6");
-        let zero_padded_short = UserAddress::new("a1b2c3d4e5f60000000000000000000000000000000000000000000000000000");
+        let zero_padded_short =
+            UserAddress::new("a1b2c3d4e5f60000000000000000000000000000000000000000000000000000");
         let different = UserAddress::new("fffffffff");
 
         assert!(matches_address(&full_addr, &full_addr));

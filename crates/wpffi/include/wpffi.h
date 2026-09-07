@@ -163,6 +163,16 @@ struct WPFFICallHandle *wpffi_call_start(const struct WPFFIConfig *config,
                                          const char *target_address);
 
 /**
+ * Start an audio group room call (WPIP-08) in a background worker thread.
+ * `room_address` must be a valid UserAddress SHA-256 string for the target room.
+ * Returns pointer to `WPFFICallHandle` on success, or NULL on error.
+ * # Safety
+ * `config` must be a valid non-null pointer. `room_address` must be a valid C string pointer.
+ */
+struct WPFFICallHandle *wpffi_room_call_start(const struct WPFFIConfig *config,
+                                              const char *room_address);
+
+/**
  * Stop and terminate an active call session, freeing its handle.
  * Returns 0 on success, or -1 on error.
  * # Safety

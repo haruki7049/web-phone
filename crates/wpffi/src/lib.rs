@@ -528,6 +528,70 @@ pub unsafe extern "C" fn wpffi_call_start(
     .unwrap_or(std::ptr::null_mut())
 }
 
+/// Start an audio group room call (WPIP-08) in a background worker thread.
+/// `room_address` must be a valid UserAddress SHA-256 string for the target room.
+/// Returns pointer to `WPFFICallHandle` on success, or NULL on error.
+/// # Safety
+/// `config` must be a valid non-null pointer. `room_address` must be a valid C string pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpffi_room_call_start(
+    config: *const WPFFIConfig,
+    room_address: *const c_char,
+) -> *mut WPFFICallHandle {
+    catch_unwind(AssertUnwindSafe(|| {
+        if config.is_null() || room_address.is_null() {
+            set_last_error("Null pointer argument");
+            return std::ptr::null_mut();
+        }
+        let cfg = unsafe { (*config).0.clone() };
+        let r_str = match unsafe { CStr::from_ptr(room_address) }.to_str() {
+            Ok(s) => s,
+            Err(e) => {
+                set_last_error(e);
+                return std::ptr::null_mut();
+            }
+        };
+        let room_addr = match UserAddress::from_str(r_str) {
+            Ok(addr) => addr,
+            Err(e) => {
+                set_last_error(format!("Invalid room address '{}': {}", r_str, e));
+                return std::ptr::null_mut();
+            }
+        };
+
+        let (stop_tx, stop_rx) = oneshot::channel::<()>();
+
+        let thread_handle = spawn(move || {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    tracing::error!("Failed to create tokio runtime for FFI room call: {}", e);
+                    return;
+                }
+            };
+
+            rt.block_on(async move {
+                if let Err(e) =
+                    call::start_room_call_with_cancel(&cfg, room_addr, Some(stop_rx)).await
+                {
+                    tracing::error!("Audio room call session error: {}", e);
+                }
+            });
+        });
+
+        let handle = Box::new(WPFFICallHandle {
+            stop_tx: Some(stop_tx),
+            thread_handle: Some(thread_handle),
+        });
+
+        Box::into_raw(handle)
+    }))
+    .unwrap_or(std::ptr::null_mut())
+}
+
 /// Stop and terminate an active call session, freeing its handle.
 /// Returns 0 on success, or -1 on error.
 /// # Safety

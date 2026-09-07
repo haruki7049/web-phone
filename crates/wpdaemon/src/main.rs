@@ -67,6 +67,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // Spawn background keep-alive heartbeat task (WPIP-09)
+    wpdaemon::connection::start_keepalive_task();
+
     let address = SocketAddr::new(config.ip, config.port);
 
     let app = Router::new()

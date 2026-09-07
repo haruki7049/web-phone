@@ -262,6 +262,162 @@ pub async fn setup_data_channel(
                     let _ = dc_inner.send(&Bytes::from(pong.encode())).await;
                 }
                 ProtocolPacket::Pong { .. } => {}
+                ProtocolPacket::RoomStateNotification {
+                    room_address,
+                    participant_count,
+                } => {
+                    info!("============================================================");
+                    info!(
+                        " Room State Update for {}: {} active participant(s)",
+                        room_address.short_id(),
+                        participant_count
+                    );
+                    info!("============================================================");
+                }
+                ProtocolPacket::ActiveSpeakerNotice {
+                    room_address,
+                    speaker_addresses,
+                } => {
+                    let short_ids: Vec<&str> =
+                        speaker_addresses.iter().map(|a| a.short_id()).collect();
+                    info!(
+                        "Active speaker update in room {}: {:?}",
+                        room_address.short_id(),
+                        short_ids
+                    );
+                }
+                ProtocolPacket::RoomGroupAudio { audio_data, .. } => {
+                    let samples: Vec<f32> = audio_data
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
+                        .collect();
+
+                    let mut buffer = audio_buffer.lock().unwrap();
+                    for sample in samples {
+                        buffer.push_back(sample);
+                    }
+                }
+                _ => {}
+            }
+        })
+    }));
+
+    Ok(data_channel)
+}
+
+/// Create and attach 'audio' DataChannel for group room session (WPIP-08).
+pub async fn setup_room_data_channel(
+    peer_connection: &Arc<RTCPeerConnection>,
+    room_address: UserAddress,
+    mut rx_audio: mpsc::Receiver<Vec<u8>>,
+    config: &Configuration,
+    session: &ClientSession,
+) -> Result<Arc<RTCDataChannel>> {
+    let my_client_id = Arc::clone(&session.client_id);
+    let audio_buffer = Arc::clone(&session.audio_buffer);
+    let data_channel = peer_connection.create_data_channel("audio", None).await?;
+
+    let dc_clone = Arc::clone(&data_channel);
+    let r_addr_clone = room_address.clone();
+    data_channel.on_open(Box::new(move || {
+        let dc_inner = Arc::clone(&dc_clone);
+        let room_addr = r_addr_clone.clone();
+        Box::pin(async move {
+            info!(
+                "WebRTC DataChannel 'audio' successfully opened for Room {}",
+                room_addr.short_id()
+            );
+
+            // 1. Send RoomJoinRequest (0x0D)
+            let join_packet = ProtocolPacket::RoomJoinRequest {
+                room_address: room_addr.clone(),
+            };
+            let _ = dc_inner.send(&Bytes::from(join_packet.encode())).await;
+
+            // 2. Forward microphone audio as RoomGroupAudio (0x10)
+            tokio::spawn(async move {
+                while let Some(audio_bytes) = rx_audio.recv().await {
+                    let packet = ProtocolPacket::RoomGroupAudio {
+                        room_address: room_addr.clone(),
+                        codec_id: crate::protocol::CODEC_OPUS,
+                        audio_data: audio_bytes,
+                    };
+                    if dc_inner.send(&Bytes::from(packet.encode())).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        })
+    }));
+
+    let _allow_echoback = config.allow_echoback;
+    let dc_msg = Arc::clone(&data_channel);
+
+    data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
+        let dc_inner = Arc::clone(&dc_msg);
+        let my_client_id = Arc::clone(&my_client_id);
+        let audio_buffer = Arc::clone(&audio_buffer);
+        Box::pin(async move {
+            let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
+                return;
+            };
+
+            match packet {
+                ProtocolPacket::ClientAssignment {
+                    client_id,
+                    user_address,
+                } => {
+                    my_client_id.store(client_id, Ordering::SeqCst);
+                    info!("============================================================");
+                    info!(" Assigned Temporary User ID (SHA-256): {}", user_address);
+                    info!(" Short ID: {}", user_address.short_id());
+                    info!(" Client ID: {}", client_id);
+                    info!("============================================================");
+                }
+                ProtocolPacket::RoomStateNotification {
+                    room_address,
+                    participant_count,
+                } => {
+                    info!("============================================================");
+                    info!(
+                        " Room State Update for {}: {} active participant(s)",
+                        room_address.short_id(),
+                        participant_count
+                    );
+                    info!("============================================================");
+                }
+                ProtocolPacket::ActiveSpeakerNotice {
+                    room_address,
+                    speaker_addresses,
+                } => {
+                    let short_ids: Vec<&str> =
+                        speaker_addresses.iter().map(|a| a.short_id()).collect();
+                    info!(
+                        "Active speaker update in room {}: {:?}",
+                        room_address.short_id(),
+                        short_ids
+                    );
+                }
+                ProtocolPacket::RoomGroupAudio { audio_data, .. } => {
+                    let samples: Vec<f32> = audio_data
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
+                        .collect();
+
+                    let mut buffer = audio_buffer.lock().unwrap();
+                    for sample in samples {
+                        buffer.push_back(sample);
+                    }
+                }
+                ProtocolPacket::Ping { timestamp } => {
+                    let pong = ProtocolPacket::Pong { timestamp };
+                    let _ = dc_inner.send(&Bytes::from(pong.encode())).await;
+                }
+                ProtocolPacket::Pong { .. } => {}
                 _ => {}
             }
         })

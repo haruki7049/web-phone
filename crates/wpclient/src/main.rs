@@ -70,6 +70,7 @@ async fn main() -> Result<()> {
 
     match args.action {
         Actions::Call { to, .. } => wpclient::call::start_call(config, to).await?,
+        Actions::Room { id } => wpclient::call::start_room_call(config, id).await?,
         Actions::ListAddresses => list_registered_addresses(config).await?,
         Actions::ListDevices => wpclient::audio::list_devices()?,
     }
@@ -152,6 +153,12 @@ enum Actions {
         /// Automatically accept incoming call requests without prompting.
         #[arg(long, short = 'y', default_value_t = false)]
         auto_accept: bool,
+    },
+    /// Join a group audio room (WPIP-08).
+    Room {
+        /// Target room SHA-256 ID (or room key string) to join.
+        #[arg(long, short = 'r')]
+        id: UserAddress,
     },
     /// List all registered wpclient temporary user IDs connected to wpdaemon.
     ListAddresses,

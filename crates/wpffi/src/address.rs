@@ -80,8 +80,12 @@ impl UserAddress {
         let self_clean = self.id.trim_end_matches('0');
         let other_clean = other.id.trim_end_matches('0');
 
-        (!other_clean.is_empty() && other_clean.len() <= self.id.len() && self.id.starts_with(other_clean))
-            || (!self_clean.is_empty() && self_clean.len() <= other.id.len() && other.id.starts_with(self_clean))
+        (!other_clean.is_empty()
+            && other_clean.len() <= self.id.len()
+            && self.id.starts_with(other_clean))
+            || (!self_clean.is_empty()
+                && self_clean.len() <= other.id.len()
+                && other.id.starts_with(self_clean))
     }
 }
 
