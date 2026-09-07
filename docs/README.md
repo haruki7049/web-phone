@@ -15,15 +15,16 @@ ______________________________________________________________________
 | [WPIP-01](WPIP-01.md) | WPIP Architecture & Process | Standard | WPIP definitions, process, and system architecture overview |
 | [WPIP-02](WPIP-02.md) | `wpdaemon` Core Specification | Standard | Minimal `wpdaemon` signaling, client registry, and basic audio routing |
 | [WPIP-03](WPIP-03.md) | `wpclient` Core Specification | Standard | Minimal `wpclient` connection lifecycle and audio streaming |
-| [WPIP-04](WPIP-04.md) | DataChannel Wire Protocol | Standard | Binary wire encoding and `ProtocolPacket` format specification |
+| [WPIP-04](WPIP-04.md) | DataChannel Wire Protocol & Audio Codecs | Standard | Binary wire encoding, `ProtocolPacket` format, and Opus/PCM codec IDs |
 
 ### Extension & Feature Specifications
 
 | WPIP | Title | Status | Summary |
 | :--- | :--- | :---: | :--- |
-| [WPIP-05](WPIP-05.md) | Inter-Daemon Peer Mesh | Optional | Multi-node daemon mesh interconnection and audio relaying |
+| [WPIP-05](WPIP-05.md) | Inter-Daemon Peer Mesh | Optional | Multi-node daemon mesh interconnection, TTL hop limits, and audio relaying |
 | [WPIP-06](WPIP-06.md) | Embedded STUN/TURN Service | Optional | Built-in UDP STUN/TURN responder for NAT traversal in `wpdaemon` |
 | [WPIP-07](WPIP-07.md) | Call Control & Capacity Constraints | Optional | Interactive call approval, rejection states, and 2-participant limit |
+| [WPIP-08](WPIP-08.md) | Group Call & SFU Extension | Optional | Selective Forwarding Unit (SFU) audio routing, Top-K active speaker selection, and room identity |
 
 ______________________________________________________________________
 

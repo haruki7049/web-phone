@@ -106,16 +106,25 @@ sequenceDiagram
 
     %% Phase 3: Bidirectional Streaming
     rect rgb(240, 255, 240)
-    Note over ClientA,ClientB: Phase 3: Active Bidirectional Audio Streaming
-    loop Real-time Audio Frame Transfer (PCM f32 LE 48kHz)
-        ClientA->>Daemon: ClientTargetedAudio (0x02, Target: PubKeyB, Data)
-        Daemon->>ClientB: ServerTargetedAudio (0x03, Target: PubKeyB, Sender: PubKeyA, Data)
-        Note over ClientB: Play audio on Speakers
+    Note over ClientA,ClientB: Phase 3: Active Bidirectional Audio Streaming (Opus / PCM)
+    loop Real-time Audio Frame Transfer (Opus 16-64kbps / PCM f32 LE 48kHz)
+        ClientA->>Daemon: ClientTargetedAudio (0x02, Target: PubKeyB, CodecID: OPUS, Data)
+        Daemon->>ClientB: ServerTargetedAudio (0x03, Target: PubKeyB, Sender: PubKeyA, CodecID: OPUS, Data)
+        Note over ClientB: Decode & Play audio on Speakers
 
-        ClientB->>Daemon: ClientTargetedAudio (0x02, Target: PubKeyA, Data)
-        Daemon->>ClientA: ServerTargetedAudio (0x03, Target: PubKeyA, Sender: PubKeyB, Data)
-        Note over ClientA: Play audio on Speakers
+        ClientB->>Daemon: ClientTargetedAudio (0x02, Target: PubKeyA, CodecID: OPUS, Data)
+        Daemon->>ClientA: ServerTargetedAudio (0x03, Target: PubKeyA, Sender: PubKeyB, CodecID: OPUS, Data)
+        Note over ClientA: Decode & Play audio on Speakers
     end
+    end
+
+    %% Phase 4: Call Hangup & Session Reset
+    rect rgb(255, 240, 240)
+    Note over ClientA,ClientB: Phase 4: Call Hangup & Session Reset (WPIP-07)
+    ClientA->>Daemon: CallHangup (0x0B, Target: PubKeyB)
+    Note over Daemon: Clear session state & approved pair (PubKeyA <-> PubKeyB)
+    Daemon->>ClientB: CallEndedNotification (0x0C, Target: PubKeyA)
+    Note over ClientA,ClientB: Transition both clients to Standby Mode (DataChannel stays open)
     end
 ```
 

@@ -39,3 +39,13 @@ ______________________________________________________________________
 
 - If `auto_accept = true`: `wpclient` MUST automatically transmit `CallAcceptResponse` upon receiving `CallRequest`.
 - If `auto_accept = false`: `wpclient` MUST prompt the user interactively before responding.
+
+### 2.4 Call Hangup & Session Termination Protocols (`CallHangup` - `0x0B` & `CallEndedNotification` - `0x0C`)
+
+- **Call Hangup Execution**: Either participant (`wpclient`) MAY initiate call termination at any time by sending a `CallHangup` (`0x0B`) packet containing the target's 32-byte raw Ed25519 `UserAddress` to `wpdaemon`.
+- **Daemon Session Cleanup**: Upon receipt of `CallHangup` (`0x0B`), `wpdaemon` MUST:
+  1. Immediately revoke the active call approval state for the pair (`Caller` \<-> `Target`).
+  1. Reset internal notification flags (including `mark_notified`).
+  1. Relay a `CallEndedNotification` (`0x0C`) packet (containing the hangup initiator's 32-byte raw Ed25519 `UserAddress`) to the remote client.
+- **Immediate State Transition**: Upon transmitting `CallHangup` or receiving `CallEndedNotification`, both `wpclient` instances MUST immediately halt audio capture, encoding, and transmission for the session, returning to **Standby Mode**.
+- **DataChannel Persistence**: The WebRTC DataChannel connection between `wpclient` and `wpdaemon` MUST remain open during and after call termination, allowing clients to return to Standby Mode instantly (0ms setup latency for subsequent calls).
