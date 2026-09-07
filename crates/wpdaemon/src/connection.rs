@@ -648,9 +648,18 @@ mod tests {
             let mut reg = CLIENT_REGISTRY.write().unwrap();
             reg.addresses.insert(client_a, addr_a.clone());
             reg.addresses.insert(client_b, addr_b.clone());
-            reg.approved_calls.entry(client_a).or_default().push(addr_b.clone());
-            reg.approved_calls.entry(client_b).or_default().push(addr_a.clone());
-            reg.notified_requests.entry(client_b).or_default().push(client_a);
+            reg.approved_calls
+                .entry(client_a)
+                .or_default()
+                .push(addr_b.clone());
+            reg.approved_calls
+                .entry(client_b)
+                .or_default()
+                .push(addr_a.clone());
+            reg.notified_requests
+                .entry(client_b)
+                .or_default()
+                .push(client_a);
         }
 
         assert!(is_call_approved(client_a, &addr_b));
