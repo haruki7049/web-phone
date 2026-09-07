@@ -135,6 +135,17 @@ int wpapi_config_set_audio_devices(struct WPAPIConfig *config,
                                    const char *output_device);
 
 /**
+ * Enable or disable DSP audio processing features (AEC, NS, AGC) complying with WPIP-03.
+ * Returns 0 on success, or -1 on error.
+ * # Safety
+ * `config` must be a valid non-null pointer.
+ */
+int wpapi_config_set_dsp(struct WPAPIConfig *config,
+                         bool enable_aec,
+                         bool enable_ns,
+                         bool enable_agc);
+
+/**
  * Query registered user addresses from wpdaemon server as a JSON string array.
  * Caller must free `*out_json` using `wpapi_string_free`.
  * Returns 0 on success, or -1 on error.

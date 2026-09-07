@@ -49,6 +49,19 @@ pub struct Configuration {
     /// Name (or substring) of output audio device (speaker) to use.
     #[serde(default)]
     pub output_device: Option<String>,
+    /// Enable Acoustic Echo Cancellation (AEC).
+    #[serde(default = "default_true")]
+    pub enable_aec: bool,
+    /// Enable Noise Suppression (NS).
+    #[serde(default = "default_true")]
+    pub enable_ns: bool,
+    /// Enable Automatic Gain Control (AGC).
+    #[serde(default = "default_true")]
+    pub enable_agc: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_stun_server() -> String {
@@ -67,6 +80,9 @@ impl Default for Configuration {
             auto_accept: false,
             input_device: None,
             output_device: None,
+            enable_aec: true,
+            enable_ns: true,
+            enable_agc: true,
         }
     }
 }
