@@ -13,6 +13,7 @@ Audio is captured from the microphone, transmitted over WebRTC DataChannels (usi
 
 - **`wdaemon`**: WebRTC audio server, STUN/TURN server, and peer mesh daemon
 - **`wclient`**: WebRTC audio client CLI for making calls and listing audio devices
+- **`wffi`**: C API library (`cdylib`, `staticlib`, `rlib`) and C header (`wffi.h`) for embedding `wclient` into C/C++ applications
 
 ## Requirements
 

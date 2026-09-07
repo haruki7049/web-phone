@@ -1,0 +1,457 @@
+//! C API bindings for web-phone WebRTC audio client.
+
+use cpal::traits::{DeviceTrait, HostTrait};
+use std::cell::RefCell;
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_int};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::str::FromStr;
+use std::thread::{JoinHandle, spawn};
+use tokio::sync::oneshot;
+use wclient::{Configuration, UserAddress};
+
+thread_local! {
+    static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
+}
+
+fn set_last_error(err: impl std::fmt::Display) {
+    let err_str = err.to_string();
+    let c_str = CString::new(err_str)
+        .unwrap_or_else(|_| CString::new("Error containing null bytes").unwrap());
+    LAST_ERROR.with(|cell| {
+        *cell.borrow_mut() = Some(c_str);
+    });
+}
+
+/// Retrieve the last thread-local error message string if any C API call returned non-zero error status.
+/// The returned pointer is managed internally and must NOT be freed by the caller.
+#[unsafe(no_mangle)]
+pub extern "C" fn wffi_last_error_message() -> *const c_char {
+    LAST_ERROR.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .map(|s| s.as_ptr())
+            .unwrap_or(std::ptr::null())
+    })
+}
+
+/// Initialize tracing subscriber for logging output.
+/// Returns 0 on success, or -1 on error.
+#[unsafe(no_mangle)]
+pub extern "C" fn wffi_init() -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        let _ = tracing_subscriber::fmt::try_init();
+        0
+    }))
+    .unwrap_or(-1)
+}
+
+/// Opaque configuration handle for wclient.
+pub struct WFFIConfig(pub Configuration);
+
+/// Create a new client configuration handle with default settings.
+#[unsafe(no_mangle)]
+pub extern "C" fn wffi_config_new() -> *mut WFFIConfig {
+    catch_unwind(AssertUnwindSafe(|| {
+        Box::into_raw(Box::new(WFFIConfig(Configuration::default())))
+    }))
+    .unwrap_or(std::ptr::null_mut())
+}
+
+/// Free a configuration handle created with `wffi_config_new`.
+/// # Safety
+/// `config` must be a valid pointer created by `wffi_config_new`, or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wffi_config_free(config: *mut WFFIConfig) {
+    if !config.is_null() {
+        let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+            let _ = Box::from_raw(config);
+        }));
+    }
+}
+
+/// Set server IP address (IPv4 or IPv6 string) and port.
+/// Returns 0 on success, or -1 on error.
+/// # Safety
+/// `config` and `server_ip` must be valid non-null pointers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wffi_config_set_server(
+    config: *mut WFFIConfig,
+    server_ip: *const c_char,
+    server_port: u16,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if config.is_null() || server_ip.is_null() {
+            set_last_error("Null pointer argument");
+            return -1;
+        }
+        let c_str = unsafe { CStr::from_ptr(server_ip) };
+        let ip_str = match c_str.to_str() {
+            Ok(s) => s,
+            Err(e) => {
+                set_last_error(e);
+                return -1;
+            }
+        };
+        let ip_addr = match ip_str.parse() {
+            Ok(ip) => ip,
+            Err(e) => {
+                set_last_error(format!("Invalid IP address '{}': {}", ip_str, e));
+                return -1;
+            }
+        };
+        let cfg = unsafe { &mut (*config).0 };
+        cfg.server_ip = ip_addr;
+        cfg.server_port = server_port;
+        0
+    }))
+    .unwrap_or(-1)
+}
+
+/// Set STUN server URL (e.g., "stun:127.0.0.1:3478").
+/// Returns 0 on success, or -1 on error.
+/// # Safety
+/// `config` and `stun_server` must be valid non-null pointers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wffi_config_set_stun_server(
+    config: *mut WFFIConfig,
+    stun_server: *const c_char,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if config.is_null() || stun_server.is_null() {
+            set_last_error("Null pointer argument");
+            return -1;
+        }
+        let c_str = unsafe { CStr::from_ptr(stun_server) };
+        let stun_str = match c_str.to_str() {
+            Ok(s) => s.to_string(),
+            Err(e) => {
+                set_last_error(e);
+                return -1;
+            }
+        };
+        let cfg = unsafe { &mut (*config).0 };
+        cfg.stun_server = stun_str;
+        0
+    }))
+    .unwrap_or(-1)
+}
+
+/// Set auto-accept flag for incoming call requests without CLI prompts.
+/// Returns 0 on success, or -1 on error.
+/// # Safety
+/// `config` must be a valid non-null pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wffi_config_set_auto_accept(
+    config: *mut WFFIConfig,
+    auto_accept: bool,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if config.is_null() {
+            set_last_error("Null pointer argument");
+            return -1;
+        }
+        let cfg = unsafe { &mut (*config).0 };
+        cfg.auto_accept = auto_accept;
+        0
+    }))
+    .unwrap_or(-1)
+}
+
+/// Set allow-echoback flag (hear own voice).
+/// Returns 0 on success, or -1 on error.
+/// # Safety
+/// `config` must be a valid non-null pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wffi_config_set_allow_echoback(
+    config: *mut WFFIConfig,
+    allow_echoback: bool,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if config.is_null() {
+            set_last_error("Null pointer argument");
+            return -1;
+        }
+        let cfg = unsafe { &mut (*config).0 };
+        cfg.allow_echoback = allow_echoback;
+        0
+    }))
+    .unwrap_or(-1)
+}
+
+/// Set input/output audio device substring overrides (pass NULL to leave unchanged or use default).
+/// Returns 0 on success, or -1 on error.
+/// # Safety
+/// `config` must be a valid non-null pointer. `input_device` and `output_device` must be valid C strings or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wffi_config_set_audio_devices(
+    config: *mut WFFIConfig,
+    input_device: *const c_char,
+    output_device: *const c_char,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if config.is_null() {
+            set_last_error("Null pointer argument");
+            return -1;
+        }
+        let cfg = unsafe { &mut (*config).0 };
+        if !input_device.is_null()
+            && let Ok(s) = unsafe { CStr::from_ptr(input_device) }.to_str()
+        {
+            cfg.input_device = Some(s.to_string());
+        }
+        if !output_device.is_null()
+            && let Ok(s) = unsafe { CStr::from_ptr(output_device) }.to_str()
+        {
+            cfg.output_device = Some(s.to_string());
+        }
+        0
+    }))
+    .unwrap_or(-1)
+}
+
+/// Query registered user addresses from wdaemon server as a JSON string array.
+/// Caller must free `*out_json` using `wffi_string_free`.
+/// Returns 0 on success, or -1 on error.
+/// # Safety
+/// `config` and `out_json` must be valid non-null pointers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wffi_list_addresses(
+    config: *const WFFIConfig,
+    out_json: *mut *mut c_char,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if config.is_null() || out_json.is_null() {
+            set_last_error("Null pointer argument");
+            return -1;
+        }
+        let cfg = unsafe { &(*config).0 };
+        let server_url = match cfg.server_ip {
+            std::net::IpAddr::V4(ip) => format!("http://{}:{}", ip, cfg.server_port),
+            std::net::IpAddr::V6(ip) => format!("http://[{}]:{}", ip, cfg.server_port),
+        };
+        let endpoint = format!("{}/addresses", server_url);
+
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                set_last_error(e);
+                return -1;
+            }
+        };
+
+        let res: Result<String, anyhow::Error> = rt.block_on(async {
+            let client = reqwest::Client::new();
+            let resp = client.get(&endpoint).send().await?;
+            if !resp.status().is_success() {
+                anyhow::bail!("Server returned HTTP status {}", resp.status());
+            }
+            let addresses: Vec<UserAddress> = resp.json().await?;
+            let json_str = serde_json::to_string(&addresses)?;
+            Ok(json_str)
+        });
+
+        match res {
+            Ok(json_str) => match CString::new(json_str) {
+                Ok(c_str) => {
+                    unsafe { *out_json = c_str.into_raw() };
+                    0
+                }
+                Err(e) => {
+                    set_last_error(e);
+                    -1
+                }
+            },
+            Err(e) => {
+                set_last_error(e);
+                -1
+            }
+        }
+    }))
+    .unwrap_or(-1)
+}
+
+/// Query available audio input and output devices as a JSON object.
+/// Caller must free `*out_json` using `wffi_string_free`.
+/// Returns 0 on success, or -1 on error.
+/// # Safety
+/// `out_json` must be a valid non-null pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wffi_list_audio_devices(out_json: *mut *mut c_char) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if out_json.is_null() {
+            set_last_error("Null pointer argument");
+            return -1;
+        }
+        let host = cpal::default_host();
+        let input_devices: Vec<String> = match host.input_devices() {
+            Ok(devs) => devs.filter_map(|d| d.name().ok()).collect(),
+            Err(_) => Vec::new(),
+        };
+        let output_devices: Vec<String> = match host.output_devices() {
+            Ok(devs) => devs.filter_map(|d| d.name().ok()).collect(),
+            Err(_) => Vec::new(),
+        };
+        let val = serde_json::json!({
+            "input_devices": input_devices,
+            "output_devices": output_devices,
+        });
+        match CString::new(val.to_string()) {
+            Ok(c_str) => {
+                unsafe { *out_json = c_str.into_raw() };
+                0
+            }
+            Err(e) => {
+                set_last_error(e);
+                -1
+            }
+        }
+    }))
+    .unwrap_or(-1)
+}
+
+/// Opaque handle representing an active audio call session.
+pub struct WFFICallHandle {
+    stop_tx: Option<oneshot::Sender<()>>,
+    thread_handle: Option<JoinHandle<()>>,
+}
+
+/// Start an audio call session in a background worker thread.
+/// `target_address` can be NULL to operate in standby mode, or a valid UserAddress SHA-256 string.
+/// Returns pointer to `WFFICallHandle` on success, or NULL on error.
+/// # Safety
+/// `config` must be a valid non-null pointer. `target_address` must be a valid C string or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wffi_call_start(
+    config: *const WFFIConfig,
+    target_address: *const c_char,
+) -> *mut WFFICallHandle {
+    catch_unwind(AssertUnwindSafe(|| {
+        if config.is_null() {
+            set_last_error("Null pointer config argument");
+            return std::ptr::null_mut();
+        }
+        let cfg = unsafe { (*config).0.clone() };
+        let target_opt = if !target_address.is_null() {
+            match unsafe { CStr::from_ptr(target_address) }.to_str() {
+                Ok(s) if !s.trim().is_empty() => match UserAddress::from_str(s) {
+                    Ok(addr) => Some(addr),
+                    Err(e) => {
+                        set_last_error(format!("Invalid target address: {}", e));
+                        return std::ptr::null_mut();
+                    }
+                },
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        let (stop_tx, stop_rx) = oneshot::channel::<()>();
+
+        let thread_handle = spawn(move || {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    tracing::error!("Failed to create tokio runtime for FFI call: {}", e);
+                    return;
+                }
+            };
+
+            rt.block_on(async move {
+                if let Err(e) =
+                    wclient::call::start_call_with_cancel(&cfg, target_opt, Some(stop_rx)).await
+                {
+                    tracing::error!("Audio call session error: {}", e);
+                }
+            });
+        });
+
+        let handle = Box::new(WFFICallHandle {
+            stop_tx: Some(stop_tx),
+            thread_handle: Some(thread_handle),
+        });
+
+        Box::into_raw(handle)
+    }))
+    .unwrap_or(std::ptr::null_mut())
+}
+
+/// Stop and terminate an active call session, freeing its handle.
+/// Returns 0 on success, or -1 on error.
+/// # Safety
+/// `handle` must be a valid pointer returned by `wffi_call_start`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wffi_call_stop(handle: *mut WFFICallHandle) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if handle.is_null() {
+            set_last_error("Null handle argument");
+            return -1;
+        }
+        let mut call_handle = unsafe { Box::from_raw(handle) };
+        if let Some(stop_tx) = call_handle.stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+        if let Some(th) = call_handle.thread_handle.take() {
+            let _ = th.join();
+        }
+        0
+    }))
+    .unwrap_or(-1)
+}
+
+/// Free a C string allocated by `wffi_list_addresses` or `wffi_list_audio_devices`.
+/// # Safety
+/// `ptr` must be a pointer allocated by `wffi_list_addresses` or `wffi_list_audio_devices`, or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wffi_string_free(ptr: *mut c_char) {
+    if !ptr.is_null() {
+        let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+            let _ = CString::from_raw(ptr);
+        }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wffi_config_lifecycle() {
+        let config = wffi_config_new();
+        assert!(!config.is_null());
+
+        let server = CString::new("127.0.0.1").unwrap();
+        let res = unsafe { wffi_config_set_server(config, server.as_ptr(), 15000) };
+        assert_eq!(res, 0);
+
+        let res = unsafe { wffi_config_set_auto_accept(config, true) };
+        assert_eq!(res, 0);
+
+        let res = unsafe { wffi_config_set_allow_echoback(config, false) };
+        assert_eq!(res, 0);
+
+        unsafe { wffi_config_free(config) };
+    }
+
+    #[test]
+    fn test_wffi_list_audio_devices() {
+        let mut json_ptr: *mut c_char = std::ptr::null_mut();
+        let res = unsafe { wffi_list_audio_devices(&mut json_ptr) };
+        assert_eq!(res, 0);
+        assert!(!json_ptr.is_null());
+
+        let json_cstr = unsafe { CStr::from_ptr(json_ptr) };
+        let json_str = json_cstr.to_str().unwrap();
+        assert!(json_str.contains("input_devices"));
+        assert!(json_str.contains("output_devices"));
+
+        unsafe { wffi_string_free(json_ptr) };
+    }
+}

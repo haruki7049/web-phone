@@ -36,6 +36,15 @@ static MY_CLIENT_ID: AtomicU64 = AtomicU64::new(u64::MAX);
 /// Optional `target_address` specifies the target registered wclient temporary SHA-256 user ID for a 1-to-1 call.
 /// If `target_address` is None, the client operates in standby mode (ready to receive calls to its own assigned ID).
 pub async fn start_call(config: &Configuration, target_address: Option<UserAddress>) -> Result<()> {
+    start_call_with_cancel(config, target_address, None).await
+}
+
+/// Start an audio CLI call with optional cancellation receiver.
+pub async fn start_call_with_cancel(
+    config: &Configuration,
+    target_address: Option<UserAddress>,
+    mut cancel_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+) -> Result<()> {
     let server_url = match config.server_ip {
         std::net::IpAddr::V4(ip) => format!("http://{}:{}", ip, config.server_port),
         std::net::IpAddr::V6(ip) => format!("http://[{}]:{}", ip, config.server_port),
@@ -461,9 +470,20 @@ pub async fn start_call(config: &Configuration, target_address: Option<UserAddre
 
     info!("Audio streams started. Speaking now will transmit audio over WebRTC.");
 
-    // Keep call running until process is interrupted
-    tokio::signal::ctrl_c().await?;
-    info!("Call ended by user signal");
+    // Keep call running until process is interrupted or cancel signal received
+    if let Some(rx) = cancel_rx.as_mut() {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                info!("Call ended by user signal");
+            }
+            _ = rx => {
+                info!("Call ended by cancel signal");
+            }
+        }
+    } else {
+        tokio::signal::ctrl_c().await?;
+        info!("Call ended by user signal");
+    }
 
     Ok(())
 }
