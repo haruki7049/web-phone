@@ -133,4 +133,18 @@ mod tests {
 
         assert_eq!(addr, deserialized);
     }
+
+    #[test]
+    fn test_user_address_short_id_short_length() {
+        let addr = UserAddress::new("short");
+        assert_eq!(addr.short_id(), "short");
+    }
+
+    #[test]
+    fn test_user_address_from_str_and_display() {
+        let addr_str = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let parsed: UserAddress = addr_str.parse().unwrap();
+        assert_eq!(parsed.to_string(), addr_str);
+        assert_eq!(parsed.id, addr_str);
+    }
 }

@@ -668,4 +668,36 @@ mod tests {
         // Cleanup
         NOTIFIED_REQUESTS.lock().unwrap().remove(&target_id);
     }
+
+    #[test]
+    fn test_matches_address() {
+        let full_addr = UserAddress::new("a1b2c3d4e5f607080900112233445566");
+        let short_key = UserAddress::new("a1b2c3d4e5f6");
+        let different = UserAddress::new("fffffffff");
+
+        assert!(matches_address(&full_addr, &full_addr));
+        assert!(matches_address(&full_addr, &short_key));
+        assert!(matches_address(&short_key, &full_addr));
+        assert!(!matches_address(&full_addr, &different));
+    }
+
+    #[test]
+    fn test_find_client_by_address() {
+        let client_id = 888u64;
+        let addr = UserAddress::new("11223344556677889900aabbccddeeff");
+        CLIENT_ADDRESSES
+            .lock()
+            .unwrap()
+            .insert(client_id, addr.clone());
+
+        let short_search = UserAddress::new("112233445566");
+        assert_eq!(find_client_by_address(&addr), Some(client_id));
+        assert_eq!(find_client_by_address(&short_search), Some(client_id));
+
+        let not_found = UserAddress::new("999999");
+        assert_eq!(find_client_by_address(&not_found), None);
+
+        // Cleanup
+        CLIENT_ADDRESSES.lock().unwrap().remove(&client_id);
+    }
 }

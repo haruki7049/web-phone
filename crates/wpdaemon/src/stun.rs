@@ -150,4 +150,12 @@ mod tests {
         // Verify family byte for IPv6
         assert_eq!(resp[25], 0x02);
     }
+
+    #[test]
+    fn test_build_stun_binding_response_invalid_transaction_id() {
+        let src = SocketAddr::V4(SocketAddrV4::new("127.0.0.1".parse().unwrap(), 12345));
+        let short_id = [1u8; 10]; // 10 bytes instead of 12
+        let result = build_stun_binding_response(src, &short_id);
+        assert!(result.is_err());
+    }
 }

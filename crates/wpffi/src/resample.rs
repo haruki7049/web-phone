@@ -98,4 +98,25 @@ mod tests {
         let output = resampler.process(&input);
         assert_eq!(output.len(), 2);
     }
+
+    #[test]
+    fn test_resampler_empty_input() {
+        let mut resampler = Resampler::new(44100, 48000);
+        let output = resampler.process(&[]);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_resampler_streaming_continuity() {
+        let mut resampler = Resampler::new(16000, 48000);
+        let chunk1 = vec![0.5, 1.0];
+        let chunk2 = vec![1.5, 2.0];
+
+        let out1 = resampler.process(&chunk1);
+        let out2 = resampler.process(&chunk2);
+
+        assert_eq!(out1.len(), 6);
+        assert_eq!(out2.len(), 6);
+        assert!(out2[0] > 0.0);
+    }
 }
