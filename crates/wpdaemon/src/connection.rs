@@ -22,7 +22,7 @@ use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use wpffi::UserAddress;
+use wpffi::{ProtocolPacket, UserAddress};
 
 /// Counter for connected clients.
 static CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -312,13 +312,12 @@ pub async fn handle_sdp_offer(
                     .unwrap_or_default();
 
                 // Send client ID and registered SHA-256 address assignment message:
-                // [0x00, client_id (8 bytes LE), user_address (32 bytes SHA256)]
-                let mut init_msg = Vec::with_capacity(41);
-                init_msg.push(0x00);
-                init_msg.extend_from_slice(&client_id.to_le_bytes());
-                init_msg.extend_from_slice(&my_addr.to_bytes());
+                let init_packet = ProtocolPacket::ClientAssignment {
+                    client_id,
+                    user_address: my_addr,
+                };
 
-                if let Err(e) = dc_inner.send(&Bytes::from(init_msg)).await {
+                if let Err(e) = dc_inner.send(&Bytes::from(init_packet.encode())).await {
                     error!("Failed to send client info to client {}: {}", client_id, e);
                     return;
                 }
@@ -335,20 +334,16 @@ pub async fn handle_sdp_offer(
 
                                 let target_room = &audio_msg.target_address;
                                 if is_client_in_room(client_id, target_room) {
-                                    let sender_addr_bytes = audio_msg
-                                        .sender_address
-                                        .map(|a| a.to_bytes())
-                                        .unwrap_or([0u8; 32]);
+                                    let packet = ProtocolPacket::ServerTargetedAudio {
+                                        target_address: target_room.clone(),
+                                        sender_id: audio_msg.sender_id,
+                                        sender_address: audio_msg
+                                            .sender_address
+                                            .unwrap_or_default(),
+                                        audio_data: audio_msg.data,
+                                    };
 
-                                    // Packet: [0x03, target_address (32b), sender_id (8b LE), sender_address (32b), audio_data...]
-                                    let mut packet = Vec::with_capacity(73 + audio_msg.data.len());
-                                    packet.push(0x03);
-                                    packet.extend_from_slice(&target_room.to_bytes());
-                                    packet.extend_from_slice(&audio_msg.sender_id.to_le_bytes());
-                                    packet.extend_from_slice(&sender_addr_bytes);
-                                    packet.extend_from_slice(&audio_msg.data);
-
-                                    if dc_inner.send(&Bytes::from(packet)).await.is_err() {
+                                    if dc_inner.send(&Bytes::from(packet.encode())).await.is_err() {
                                         break;
                                     }
                                 }
@@ -365,47 +360,46 @@ pub async fn handle_sdp_offer(
         dc.on_message(Box::new(move |msg: DataChannelMessage| {
             let dc_inner = Arc::clone(&dc_msg);
             Box::pin(async move {
-                if msg.data.is_empty() {
+                let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
                     return;
-                }
+                };
 
-                let msg_type = msg.data[0];
                 let sender_addr = CLIENT_ADDRESSES.lock().unwrap().get(&client_id).cloned();
 
-                if msg_type == 0x03 && msg.data.len() >= 33 {
-                    // Targeted / Room audio message: [0x03, target_address (32 bytes SHA256), audio_data...]
-                    let target_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
-                    let target_address = UserAddress::from_bytes(target_bytes);
-                    let payload = msg.data[33..].to_vec();
+                match packet {
+                    ProtocolPacket::ClientTargetedAudio {
+                        target_address,
+                        audio_data: payload,
+                    } => {
+                        if payload.len() > MAX_MESSAGE_SIZE {
+                            warn!(
+                                "Client {} sent oversized audio packet ({} bytes), ignoring",
+                                client_id,
+                                payload.len()
+                            );
+                            return;
+                        }
 
-                    if payload.len() > MAX_MESSAGE_SIZE {
-                        warn!(
-                            "Client {} sent oversized audio packet ({} bytes), ignoring",
-                            client_id,
-                            payload.len()
-                        );
-                        return;
-                    }
+                        // Enforce maximum 2 participants per call. Reject 3rd-party connection attempts.
+                        if !is_client_in_same_call(client_id, &target_address)
+                            && is_room_or_target_full(&target_address)
+                        {
+                            warn!(
+                                "Rejecting Client {} connection to target {}: call already has maximum 2 participants",
+                                client_id,
+                                target_address.short_id()
+                            );
+                            let err_packet = ProtocolPacket::ConnectionError {
+                                target_address: target_address.clone(),
+                            };
+                            let _ = dc_inner.send(&Bytes::from(err_packet.encode())).await;
+                            return;
+                        }
 
-                    // Enforce maximum 2 participants per call. Reject 3rd-party connection attempts.
-                    if !is_client_in_same_call(client_id, &target_address)
-                        && is_room_or_target_full(&target_address)
-                    {
-                        warn!(
-                            "Rejecting Client {} connection to target {}: call already has maximum 2 participants",
-                            client_id,
-                            target_address.short_id()
-                        );
-                        let mut err_packet = Vec::with_capacity(33);
-                        err_packet.push(0xFF);
-                        err_packet.extend_from_slice(&target_address.to_bytes());
-                        let _ = dc_inner.send(&Bytes::from(err_packet)).await;
-                        return;
-                    }
-
-                    // Check approval status with target client if target client is connected
-                    if let Some(target_cid) = find_client_by_address(&target_address) &&
-                        target_cid != client_id {
+                        // Check approval status with target client if target client is connected
+                        if let Some(target_cid) = find_client_by_address(&target_address)
+                            && target_cid != client_id
+                        {
                             let caller_user_addr = sender_addr.clone().unwrap_or_default();
 
                             let target_explicit_target =
@@ -415,10 +409,10 @@ pub async fn handle_sdp_offer(
                                 .is_some_and(|t| matches_address(t, &caller_user_addr));
 
                             if is_call_rejected(target_cid, &caller_user_addr) {
-                                let mut err_packet = Vec::with_capacity(33);
-                                err_packet.push(0x07);
-                                err_packet.extend_from_slice(&target_address.to_bytes());
-                                let _ = dc_inner.send(&Bytes::from(err_packet)).await;
+                                let err_packet = ProtocolPacket::CallRejectedNotification {
+                                    target_address: target_address.clone(),
+                                };
+                                let _ = dc_inner.send(&Bytes::from(err_packet.encode())).await;
                                 return;
                             }
 
@@ -431,105 +425,105 @@ pub async fn handle_sdp_offer(
                                         .get(&target_cid)
                                         .cloned();
                                     if let Some(target_dc) = target_dc {
-                                        let mut req_packet = Vec::with_capacity(41);
-                                        req_packet.push(0x04);
-                                        req_packet.extend_from_slice(&client_id.to_le_bytes());
-                                        req_packet.extend_from_slice(&caller_user_addr.to_bytes());
-                                        let _ = target_dc.send(&Bytes::from(req_packet)).await;
+                                        let req_packet = ProtocolPacket::CallRequest {
+                                            caller_id: client_id,
+                                            caller_address: caller_user_addr.clone(),
+                                        };
+                                        let _ = target_dc
+                                            .send(&Bytes::from(req_packet.encode()))
+                                            .await;
                                         info!(
-                                            "Sent call request notification (0x04) to Client {} for caller Client {} ({})",
+                                            "Sent call request notification to Client {} for caller Client {} ({})",
                                             target_cid, client_id, caller_user_addr.short_id()
                                         );
                                     }
                                 }
                                 return;
                             }
+                        }
+
+                        // Register/update client's target address for call routing
+                        CLIENT_TARGETS
+                            .lock()
+                            .unwrap()
+                            .insert(client_id, target_address.clone());
+
+                        let _ = AUDIO_BROADCAST.send(AudioMessage {
+                            sender_id: client_id,
+                            sender_address: sender_addr,
+                            target_address,
+                            origin_node: my_node_id,
+                            data: payload,
+                        });
                     }
+                    ProtocolPacket::CallAcceptResponse { caller_address } => {
+                        info!(
+                            "Client {} accepted call request from caller {}",
+                            client_id,
+                            caller_address.short_id()
+                        );
+                        mark_call_approved(client_id, caller_address.clone());
 
-                    // Register/update client's target address for call routing
-                    CLIENT_TARGETS
-                        .lock()
-                        .unwrap()
-                        .insert(client_id, target_address.clone());
+                        {
+                            let mut targets = CLIENT_TARGETS.lock().unwrap();
+                            if targets.get(&client_id).is_none() {
+                                targets.insert(client_id, caller_address.clone());
+                            }
+                        }
 
-                    let _ = AUDIO_BROADCAST.send(AudioMessage {
-                        sender_id: client_id,
-                        sender_address: sender_addr,
-                        target_address,
-                        origin_node: my_node_id,
-                        data: payload,
-                    });
-                } else if msg_type == 0x05 && msg.data.len() >= 33 {
-                    // Call Accept Response from target client: [0x05, caller_address (32 bytes SHA256)]
-                    let caller_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
-                    let caller_addr = UserAddress::from_bytes(caller_bytes);
+                        let caller_dc =
+                            find_client_by_address(&caller_address).and_then(|caller_cid| {
+                                CLIENT_DATA_CHANNELS
+                                    .lock()
+                                    .unwrap()
+                                    .get(&caller_cid)
+                                    .cloned()
+                            });
 
-                    info!(
-                        "Client {} accepted call request from caller {}",
-                        client_id,
-                        caller_addr.short_id()
-                    );
-                    mark_call_approved(client_id, caller_addr.clone());
-
-                    {
-                        let mut targets = CLIENT_TARGETS.lock().unwrap();
-                        if targets.get(&client_id).is_none() {
-                            targets.insert(client_id, caller_addr.clone());
+                        if let Some(caller_dc) = caller_dc {
+                            let my_addr = CLIENT_ADDRESSES
+                                .lock()
+                                .unwrap()
+                                .get(&client_id)
+                                .cloned()
+                                .unwrap_or_default();
+                            let accept_packet = ProtocolPacket::CallAcceptedNotification {
+                                target_address: my_addr,
+                            };
+                            let _ = caller_dc.send(&Bytes::from(accept_packet.encode())).await;
                         }
                     }
+                    ProtocolPacket::CallRejectResponse { caller_address } => {
+                        info!(
+                            "Client {} rejected call request from caller {}",
+                            client_id,
+                            caller_address.short_id()
+                        );
+                        mark_call_rejected(client_id, caller_address.clone());
 
-                    let caller_dc = find_client_by_address(&caller_addr).and_then(|caller_cid| {
-                        CLIENT_DATA_CHANNELS
-                            .lock()
-                            .unwrap()
-                            .get(&caller_cid)
-                            .cloned()
-                    });
+                        let caller_dc =
+                            find_client_by_address(&caller_address).and_then(|caller_cid| {
+                                CLIENT_DATA_CHANNELS
+                                    .lock()
+                                    .unwrap()
+                                    .get(&caller_cid)
+                                    .cloned()
+                            });
 
-                    if let Some(caller_dc) = caller_dc {
-                        let my_addr = CLIENT_ADDRESSES
-                            .lock()
-                            .unwrap()
-                            .get(&client_id)
-                            .cloned()
-                            .unwrap_or_default();
-                        let mut accept_packet = Vec::with_capacity(33);
-                        accept_packet.push(0x08);
-                        accept_packet.extend_from_slice(&my_addr.to_bytes());
-                        let _ = caller_dc.send(&Bytes::from(accept_packet)).await;
+                        if let Some(caller_dc) = caller_dc {
+                            let my_addr = CLIENT_ADDRESSES
+                                .lock()
+                                .unwrap()
+                                .get(&client_id)
+                                .cloned()
+                                .unwrap_or_default();
+                            let reject_packet = ProtocolPacket::CallRejectedNotification {
+                                target_address: my_addr,
+                            };
+                            let _ = caller_dc.send(&Bytes::from(reject_packet.encode())).await;
+                        }
                     }
-                } else if msg_type == 0x06 && msg.data.len() >= 33 {
-                    // Call Reject Response from target client: [0x06, caller_address (32 bytes SHA256)]
-                    let caller_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
-                    let caller_addr = UserAddress::from_bytes(caller_bytes);
-
-                    info!(
-                        "Client {} rejected call request from caller {}",
-                        client_id,
-                        caller_addr.short_id()
-                    );
-                    mark_call_rejected(client_id, caller_addr.clone());
-
-                    let caller_dc = find_client_by_address(&caller_addr).and_then(|caller_cid| {
-                        CLIENT_DATA_CHANNELS
-                            .lock()
-                            .unwrap()
-                            .get(&caller_cid)
-                            .cloned()
-                    });
-
-                    if let Some(caller_dc) = caller_dc {
-                        let my_addr = CLIENT_ADDRESSES
-                            .lock()
-                            .unwrap()
-                            .get(&client_id)
-                            .cloned()
-                            .unwrap_or_default();
-                        let mut reject_packet = Vec::with_capacity(33);
-                        reject_packet.push(0x07);
-                        reject_packet.extend_from_slice(&my_addr.to_bytes());
-                        let _ = caller_dc.send(&Bytes::from(reject_packet)).await;
-                    }
+                    _ => {}
                 }
             })
         }));

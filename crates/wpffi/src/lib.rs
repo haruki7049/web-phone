@@ -4,10 +4,12 @@ pub mod address;
 pub mod audio;
 pub mod call;
 pub mod config;
+pub mod protocol;
 pub mod resample;
 
 pub use address::UserAddress;
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
+pub use protocol::{ProtocolError, ProtocolPacket};
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::cell::RefCell;

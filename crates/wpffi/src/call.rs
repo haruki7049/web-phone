@@ -5,6 +5,7 @@
 
 use crate::address::UserAddress;
 use crate::config::Configuration;
+use crate::protocol::ProtocolPacket;
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
 use cpal::traits::{DeviceTrait, StreamTrait};
@@ -88,13 +89,11 @@ pub async fn start_call_with_cancel(
             tokio::spawn(async move {
                 while let Some(audio_bytes) = rx_audio.recv().await {
                     if let Some(ref target) = target_opt {
-                        // Targeted 1-to-1 call packet: [0x03, target_address (32 bytes SHA256), audio_bytes...]
-                        let mut packet = Vec::with_capacity(33 + audio_bytes.len());
-                        packet.push(0x03);
-                        packet.extend_from_slice(&target.to_bytes());
-                        packet.extend_from_slice(&audio_bytes);
-
-                        if dc_inner.send(&Bytes::from(packet)).await.is_err() {
+                        let packet = ProtocolPacket::ClientTargetedAudio {
+                            target_address: target.clone(),
+                            audio_data: audio_bytes,
+                        };
+                        if dc_inner.send(&Bytes::from(packet.encode())).await.is_err() {
                             break;
                         }
                     }
@@ -108,178 +107,158 @@ pub async fn start_call_with_cancel(
     data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
         let dc_inner = Arc::clone(&dc_msg);
         Box::pin(async move {
-            if msg.data.is_empty() {
+            let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
                 return;
-            }
+            };
 
-            let msg_type = msg.data[0];
-            if msg_type == 0x00 && msg.data.len() >= 9 {
-                // Client assignment message: [0x00, client_id (8 bytes LE), user_address (32 bytes SHA256)]
-                let client_id = u64::from_le_bytes(msg.data[1..9].try_into().unwrap());
-                MY_CLIENT_ID.store(client_id, Ordering::SeqCst);
-
-                if msg.data.len() >= 41 {
-                    let addr_bytes: [u8; 32] = msg.data[9..41].try_into().unwrap();
-                    let registered_addr = UserAddress::from_bytes(addr_bytes);
+            match packet {
+                ProtocolPacket::ClientAssignment {
+                    client_id,
+                    user_address,
+                } => {
+                    MY_CLIENT_ID.store(client_id, Ordering::SeqCst);
                     info!("============================================================");
-                    info!(" Assigned Temporary User ID (SHA-256): {}", registered_addr);
-                    info!(" Short ID: {}", registered_addr.short_id());
+                    info!(" Assigned Temporary User ID (SHA-256): {}", user_address);
+                    info!(" Short ID: {}", user_address.short_id());
                     info!(" Client ID: {}", client_id);
                     info!("============================================================");
-                } else {
-                    info!("Assigned client ID from WebRTC server: {}", client_id);
                 }
-            } else if msg_type == 0x01 && msg.data.len() >= 9 {
-                // Broadcast audio message: [0x01, sender_id (8 bytes LE), audio_data...]
-                let sender_id = u64::from_le_bytes(msg.data[1..9].try_into().unwrap());
-                let my_id = MY_CLIENT_ID.load(Ordering::SeqCst);
+                ProtocolPacket::BroadcastAudio {
+                    sender_id,
+                    audio_data,
+                } => {
+                    let my_id = MY_CLIENT_ID.load(Ordering::SeqCst);
+                    if !allow_echoback && sender_id == my_id {
+                        return;
+                    }
+                    let samples: Vec<f32> = audio_data
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|chunk| f32::from_le_bytes(*chunk))
+                        .collect();
 
-                if !allow_echoback && sender_id == my_id {
-                    return;
+                    let mut buffer = AUDIO_BUFFER.lock().unwrap();
+                    for sample in samples {
+                        buffer.push_back(sample);
+                    }
                 }
+                ProtocolPacket::ServerTargetedAudio {
+                    sender_id,
+                    sender_address,
+                    audio_data,
+                    ..
+                } => {
+                    let my_id = MY_CLIENT_ID.load(Ordering::SeqCst);
+                    if !allow_echoback && sender_id == my_id {
+                        return;
+                    }
+                    tracing::trace!("Received audio frame from {}", sender_address.short_id());
+                    let samples: Vec<f32> = audio_data
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
+                        .collect();
 
-                let samples: Vec<f32> = msg.data[9..]
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|chunk| f32::from_le_bytes(*chunk))
-                    .collect();
-
-                let mut buffer = AUDIO_BUFFER.lock().unwrap();
-                for sample in samples {
-                    buffer.push_back(sample);
+                    let mut buffer = AUDIO_BUFFER.lock().unwrap();
+                    for sample in samples {
+                        buffer.push_back(sample);
+                    }
                 }
-            } else if msg_type == 0x03 && msg.data.len() >= 73 {
-                // Targeted audio message: [0x03, target_address (32b), sender_id (8b), sender_address (32b), audio_data...]
-                let sender_id = u64::from_le_bytes(msg.data[33..41].try_into().unwrap());
-                let sender_bytes: [u8; 32] = msg.data[41..73].try_into().unwrap();
-                let sender_addr = UserAddress::from_bytes(sender_bytes);
-                let my_id = MY_CLIENT_ID.load(Ordering::SeqCst);
+                ProtocolPacket::CallRequest { caller_address, .. } => {
+                    let caller_bytes = caller_address.to_bytes();
+                    if auto_accept {
+                        info!(
+                            "Auto-accepting incoming call request from {} (Short ID: {})",
+                            caller_address,
+                            caller_address.short_id()
+                        );
+                        let resp = ProtocolPacket::CallAcceptResponse { caller_address };
+                        let _ = dc_inner.send(&Bytes::from(resp.encode())).await;
+                    } else {
+                        let dc_reply = Arc::clone(&dc_inner);
+                        let caller_addr_clone = caller_address.clone();
 
-                if !allow_echoback && sender_id == my_id {
-                    return;
-                }
+                        tokio::spawn(async move {
+                            use std::io::{self, Write};
+                            println!(
+                                "\n============================================================"
+                            );
+                            println!(" Incoming Call Request!");
+                            println!(" From: {}", caller_addr_clone);
+                            println!(" Short ID: {}", caller_addr_clone.short_id());
+                            print!(" Allow connection? [y/N]: ");
+                            let _ = io::stdout().flush();
 
-                tracing::trace!("Received audio frame from {}", sender_addr.short_id());
+                            let mut input = String::new();
+                            let accepted = tokio::task::spawn_blocking(move || {
+                                let stdin = io::stdin();
+                                if stdin.read_line(&mut input).is_ok() {
+                                    let trimmed = input.trim().to_lowercase();
+                                    trimmed == "y" || trimmed == "yes"
+                                } else {
+                                    false
+                                }
+                            })
+                            .await
+                            .unwrap_or_default();
 
-                let samples: Vec<f32> = msg.data[73..]
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
-                    .collect();
-
-                let mut buffer = AUDIO_BUFFER.lock().unwrap();
-                for sample in samples {
-                    buffer.push_back(sample);
-                }
-            } else if msg_type == 0x04 && msg.data.len() >= 41 {
-                // Call Request Notification from server: [0x04, caller_id (8b LE), caller_address (32b SHA256)]
-                let caller_bytes: [u8; 32] = msg.data[9..41].try_into().unwrap();
-                let caller_addr = UserAddress::from_bytes(caller_bytes);
-
-                if auto_accept {
-                    info!(
-                        "Auto-accepting incoming call request from {} (Short ID: {})",
-                        caller_addr,
-                        caller_addr.short_id()
-                    );
-                    let mut resp = Vec::with_capacity(33);
-                    resp.push(0x05); // Call Accept
-                    resp.extend_from_slice(&caller_bytes);
-                    let _ = dc_inner.send(&Bytes::from(resp)).await;
-                } else {
-                    let dc_reply = Arc::clone(&dc_inner);
-                    let caller_addr_clone = caller_addr.clone();
-
-                    tokio::spawn(async move {
-                        use std::io::{self, Write};
-                        println!("\n============================================================");
-                        println!(" Incoming Call Request!");
-                        println!(" From: {}", caller_addr_clone);
-                        println!(" Short ID: {}", caller_addr_clone.short_id());
-                        print!(" Allow connection? [y/N]: ");
-                        let _ = io::stdout().flush();
-
-                        let mut input = String::new();
-                        let accepted = tokio::task::spawn_blocking(move || {
-                            let stdin = io::stdin();
-                            if stdin.read_line(&mut input).is_ok() {
-                                let trimmed = input.trim().to_lowercase();
-                                trimmed == "y" || trimmed == "yes"
+                            if accepted {
+                                info!(
+                                    "Accepted incoming call request from {}",
+                                    caller_addr_clone.short_id()
+                                );
+                                let resp = ProtocolPacket::CallAcceptResponse {
+                                    caller_address: UserAddress::from_bytes(caller_bytes),
+                                };
+                                let _ = dc_reply.send(&Bytes::from(resp.encode())).await;
                             } else {
-                                false
+                                info!(
+                                    "Rejected incoming call request from {}",
+                                    caller_addr_clone.short_id()
+                                );
+                                let resp = ProtocolPacket::CallRejectResponse {
+                                    caller_address: UserAddress::from_bytes(caller_bytes),
+                                };
+                                let _ = dc_reply.send(&Bytes::from(resp.encode())).await;
                             }
-                        })
-                        .await
-                        .unwrap_or_default();
-
-                        if accepted {
-                            info!(
-                                "Accepted incoming call request from {}",
-                                caller_addr_clone.short_id()
-                            );
-                            let mut resp = Vec::with_capacity(33);
-                            resp.push(0x05); // Call Accept
-                            resp.extend_from_slice(&caller_bytes);
-                            let _ = dc_reply.send(&Bytes::from(resp)).await;
-                        } else {
-                            info!(
-                                "Rejected incoming call request from {}",
-                                caller_addr_clone.short_id()
-                            );
-                            let mut resp = Vec::with_capacity(33);
-                            resp.push(0x06); // Call Reject
-                            resp.extend_from_slice(&caller_bytes);
-                            let _ = dc_reply.send(&Bytes::from(resp)).await;
-                        }
-                    });
+                        });
+                    }
                 }
-            } else if msg_type == 0x07 {
-                // Call Rejected notification: [0x07, target_address (32b)]
-                let target_str = if msg.data.len() >= 33 {
-                    let addr_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
-                    UserAddress::from_bytes(addr_bytes).short_id().to_string()
-                } else {
-                    "target".to_string()
-                };
-                error!("============================================================");
-                error!(
-                    " Call Connection Error: Connection rejected by target user ({})",
-                    target_str
-                );
-                error!(" Connection rejected.");
-                error!("============================================================");
-                std::process::exit(1);
-            } else if msg_type == 0x08 {
-                // Call Accepted notification: [0x08, target_address (32b)]
-                let target_str = if msg.data.len() >= 33 {
-                    let addr_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
-                    UserAddress::from_bytes(addr_bytes).short_id().to_string()
-                } else {
-                    "target".to_string()
-                };
-                info!("============================================================");
-                info!(" Call connection accepted by target user ({})!", target_str);
-                info!(" Call connected.");
-                info!("============================================================");
-            } else if msg_type == 0xFF {
-                // Connection rejection message: [0xFF, target_address (32b)]
-                let target_str = if msg.data.len() >= 33 {
-                    let addr_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
-                    UserAddress::from_bytes(addr_bytes).short_id().to_string()
-                } else {
-                    "target".to_string()
-                };
-                error!("============================================================");
-                error!(
-                    " Call Connection Error: Target user ({}) is currently in another call.",
-                    target_str
-                );
-                error!(" Calls are restricted to 1-to-1 only (Maximum 2 participants allowed).");
-                error!(" Connection rejected.");
-                error!("============================================================");
-                std::process::exit(1);
+                ProtocolPacket::CallRejectedNotification { target_address } => {
+                    error!("============================================================");
+                    error!(
+                        " Call Connection Error: Connection rejected by target user ({})",
+                        target_address.short_id()
+                    );
+                    error!(" Connection rejected.");
+                    error!("============================================================");
+                    std::process::exit(1);
+                }
+                ProtocolPacket::CallAcceptedNotification { target_address } => {
+                    info!("============================================================");
+                    info!(
+                        " Call connection accepted by target user ({})!",
+                        target_address.short_id()
+                    );
+                    info!(" Call connected.");
+                    info!("============================================================");
+                }
+                ProtocolPacket::ConnectionError { target_address } => {
+                    error!("============================================================");
+                    error!(
+                        " Call Connection Error: Target user ({}) is currently in another call.",
+                        target_address.short_id()
+                    );
+                    error!(
+                        " Calls are restricted to 1-to-1 only (Maximum 2 participants allowed)."
+                    );
+                    error!(" Connection rejected.");
+                    error!("============================================================");
+                    std::process::exit(1);
+                }
+                _ => {}
             }
         })
     }));
