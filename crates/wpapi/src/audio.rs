@@ -109,20 +109,12 @@ impl AudioEngine {
 
         let net_sample_rate = config.sample_rate;
 
-        let dsp = crate::dsp::SharedAudioDspProcessor::new(
-            config.enable_aec,
-            config.enable_ns,
-            config.enable_agc,
-        );
-
-        // Build Input Stream (Microphone -> DSP (AEC/NS/AGC) -> Resampler -> tx_audio)
+        // Build Input Stream (Microphone -> Resampler -> tx_audio)
         let (input_stream, _actual_input_rate, _actual_input_channels) = {
             let tx_audio_clone = tx_audio.clone();
-            let dsp_input = dsp.clone();
             let build = |cfg: &StreamConfig, rate: u32, ch: u16| {
                 let mut resampler = crate::resample::Resampler::new(rate, net_sample_rate);
                 let tx = tx_audio_clone.clone();
-                let dsp_proc = dsp_input.clone();
                 input_device.build_input_stream(
                     cfg,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
@@ -136,12 +128,6 @@ impl AudioEngine {
                             let sum: f32 = (0..channels).map(|c| data[f * channels + c]).sum();
                             mono_samples.push(sum / channels as f32);
                         }
-
-                        // Apply DSP processing pipeline (AEC -> NS -> AGC) complying with WPIP-03
-                        if let Ok(mut proc) = dsp_proc.0.lock() {
-                            proc.process_input(&mut mono_samples);
-                        }
-
                         let resampled = resampler.process(&mono_samples);
                         let bytes: Vec<u8> = resampled
                             .iter()
@@ -175,7 +161,7 @@ impl AudioEngine {
             }
         };
 
-        // Build Output Stream (audio_buffer -> Resampler -> Speaker -> AEC Reference)
+        // Build Output Stream (audio_buffer -> Resampler -> Speaker)
         let target_output_config = StreamConfig {
             channels: config.channels,
             sample_rate: SampleRate(config.sample_rate),
@@ -183,13 +169,11 @@ impl AudioEngine {
         };
 
         let (output_stream, _actual_output_rate, _actual_output_channels) = {
-            let dsp_output = dsp.clone();
             let build = |cfg: &StreamConfig, rate: u32, ch: u16| {
                 let mut output_resampler = crate::resample::Resampler::new(net_sample_rate, rate);
                 let mut leftover: Vec<f32> = Vec::new();
                 let channels = ch as usize;
                 let audio_buf = Arc::clone(&audio_buffer);
-                let dsp_proc = dsp_output.clone();
 
                 output_device.build_output_stream(
                     cfg,
@@ -217,15 +201,6 @@ impl AudioEngine {
                             }
                             let mut resampled = output_resampler.process(&net_samples);
                             leftover.append(&mut resampled);
-                        }
-
-                        let ref_samples: Vec<f32> = (0..frames_needed)
-                            .map(|f| leftover.get(f).copied().unwrap_or(0.0))
-                            .collect();
-
-                        // Record speaker reference for AEC estimation
-                        if let Ok(mut proc) = dsp_proc.0.lock() {
-                            proc.record_speaker_reference(&ref_samples);
                         }
 
                         for f in 0..frames_needed {

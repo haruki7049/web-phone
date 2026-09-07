@@ -4,7 +4,6 @@ pub mod address;
 pub mod audio;
 pub mod call;
 pub mod config;
-pub mod dsp;
 pub mod protocol;
 pub mod resample;
 pub mod session;
@@ -13,7 +12,6 @@ pub mod webrtc_session;
 pub use address::UserAddress;
 pub use audio::AudioEngine;
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
-pub use dsp::AudioDspProcessor;
 pub use protocol::{ProtocolError, ProtocolPacket};
 pub use session::ClientSession;
 
@@ -353,31 +351,6 @@ pub unsafe extern "C" fn wpapi_config_set_audio_devices(
         {
             cfg.output_device = Some(s.to_string());
         }
-        0
-    }))
-    .unwrap_or(-1)
-}
-
-/// Enable or disable DSP audio processing features (AEC, NS, AGC) complying with WPIP-03.
-/// Returns 0 on success, or -1 on error.
-/// # Safety
-/// `config` must be a valid non-null pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn wpapi_config_set_dsp(
-    config: *mut WPAPIConfig,
-    enable_aec: bool,
-    enable_ns: bool,
-    enable_agc: bool,
-) -> c_int {
-    catch_unwind(AssertUnwindSafe(|| {
-        if config.is_null() {
-            set_last_error("Null pointer argument");
-            return -1;
-        }
-        let cfg = unsafe { &mut (*config).0 };
-        cfg.enable_aec = enable_aec;
-        cfg.enable_ns = enable_ns;
-        cfg.enable_agc = enable_agc;
         0
     }))
     .unwrap_or(-1)
