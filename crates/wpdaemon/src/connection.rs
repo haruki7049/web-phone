@@ -227,6 +227,7 @@ pub async fn handle_sdp_offer(
                                         sender_address: audio_msg
                                             .sender_address
                                             .unwrap_or_default(),
+                                        codec_id: wpffi::protocol::CODEC_OPUS,
                                         audio_data: audio_msg.data,
                                     };
 
@@ -262,6 +263,7 @@ pub async fn handle_sdp_offer(
                     ProtocolPacket::ClientTargetedAudio {
                         target_address,
                         audio_data: payload,
+                        ..
                     } => {
                         if payload.len() > MAX_MESSAGE_SIZE {
                             warn!(
@@ -422,6 +424,39 @@ pub async fn handle_sdp_offer(
                             };
                             let _ = caller_dc.send(&Bytes::from(reject_packet.encode())).await;
                         }
+                    }
+                    ProtocolPacket::CallHangup { target_address } => {
+                        let my_addr = sender_addr.clone().unwrap_or_default();
+                        info!(
+                            "Client {} ({}) initiated CallHangup for target {}",
+                            client_id,
+                            my_addr.short_id(),
+                            target_address.short_id()
+                        );
+                        CLIENT_REGISTRY
+                            .write()
+                            .unwrap()
+                            .clear_call_session(client_id, &target_address);
+
+                        let target_dc = find_client_by_address(&target_address).and_then(|target_cid| {
+                            CLIENT_REGISTRY
+                                .read()
+                                .unwrap()
+                                .data_channels
+                                .get(&target_cid)
+                                .cloned()
+                        });
+
+                        if let Some(target_dc) = target_dc {
+                            let ended_pkt = ProtocolPacket::CallEndedNotification {
+                                target_address: my_addr,
+                            };
+                            let _ = target_dc.send(&Bytes::from(ended_pkt.encode())).await;
+                        }
+                    }
+                    ProtocolPacket::Ping { timestamp } => {
+                        let pong = ProtocolPacket::Pong { timestamp };
+                        let _ = dc_inner.send(&Bytes::from(pong.encode())).await;
                     }
                     _ => {}
                 }
@@ -600,5 +635,56 @@ mod tests {
             .unwrap()
             .addresses
             .remove(&client_id);
+    }
+
+    #[test]
+    fn test_clear_call_session() {
+        let client_a = 501u64;
+        let client_b = 502u64;
+        let addr_a = UserAddress::generate_from_time();
+        let addr_b = UserAddress::generate_from_time();
+
+        {
+            let mut reg = CLIENT_REGISTRY.write().unwrap();
+            reg.addresses.insert(client_a, addr_a.clone());
+            reg.addresses.insert(client_b, addr_b.clone());
+            reg.approved_calls.entry(client_a).or_default().push(addr_b.clone());
+            reg.approved_calls.entry(client_b).or_default().push(addr_a.clone());
+            reg.notified_requests.entry(client_b).or_default().push(client_a);
+        }
+
+        assert!(is_call_approved(client_a, &addr_b));
+
+        // Perform clear_call_session for CallHangup
+        CLIENT_REGISTRY
+            .write()
+            .unwrap()
+            .clear_call_session(client_a, &addr_b);
+
+        assert!(!is_call_approved(client_a, &addr_b));
+        assert!(!is_call_approved(client_b, &addr_a));
+
+        // Cleanup
+        {
+            let mut reg = CLIENT_REGISTRY.write().unwrap();
+            reg.addresses.remove(&client_a);
+            reg.addresses.remove(&client_b);
+            reg.approved_calls.remove(&client_a);
+            reg.approved_calls.remove(&client_b);
+            reg.notified_requests.remove(&client_b);
+        }
+    }
+
+    #[test]
+    fn test_short_id_minimum_length_rule() {
+        let full = UserAddress::new("1234567890abcdef1234567890abcdef");
+        assert!(full.id.len() >= 12);
+
+        let short_valid = UserAddress::new("1234567890ab");
+        assert_eq!(short_valid.id.len(), 12);
+        assert!(short_valid.id.len() >= 12);
+
+        let short_invalid = UserAddress::new("1234567890a");
+        assert!(short_invalid.id.len() < 12);
     }
 }

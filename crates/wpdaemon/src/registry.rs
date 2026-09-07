@@ -127,6 +127,30 @@ impl ClientRegistry {
         }
     }
 
+    /// Clear call approval state for a given client and target UserAddress.
+    pub fn clear_call_session(&mut self, client_id: u64, target_key: &UserAddress) {
+        let target_cid = self.find_client_by_address(target_key);
+        let my_addr = self.addresses.get(&client_id).cloned();
+
+        if let Some(list) = self.approved_calls.get_mut(&client_id) {
+            list.retain(|a| !matches_address(a, target_key));
+        }
+
+        if let Some(t_cid) = target_cid {
+            if let Some(list) = self.approved_calls.get_mut(&t_cid)
+                && let Some(ref addr) = my_addr
+            {
+                list.retain(|a| !matches_address(a, addr));
+            }
+            if let Some(list) = self.notified_requests.get_mut(&t_cid) {
+                list.retain(|&cid| cid != client_id);
+            }
+            if let Some(list) = self.notified_requests.get_mut(&client_id) {
+                list.retain(|&cid| cid != t_cid);
+            }
+        }
+    }
+
     /// Check if client_id belongs to the room identified by room_key.
     pub fn is_client_in_room(&self, client_id: u64, room_key: &UserAddress) -> bool {
         let my_addr = self.addresses.get(&client_id);

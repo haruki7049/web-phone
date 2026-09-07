@@ -59,6 +59,7 @@ pub async fn setup_data_channel(
                     if let Some(ref target) = target_opt {
                         let packet = ProtocolPacket::ClientTargetedAudio {
                             target_address: target.clone(),
+                            codec_id: crate::protocol::CODEC_OPUS,
                             audio_data: audio_bytes,
                         };
                         if dc_inner.send(&Bytes::from(packet.encode())).await.is_err() {
@@ -230,6 +231,26 @@ pub async fn setup_data_channel(
                     error!("============================================================");
                     std::process::exit(1);
                 }
+                ProtocolPacket::CallHangup { target_address } => {
+                    info!(
+                        "Call hangup initiated for target {}",
+                        target_address.short_id()
+                    );
+                }
+                ProtocolPacket::CallEndedNotification { target_address } => {
+                    info!("============================================================");
+                    info!(
+                        " Call Session Ended by peer user ({})",
+                        target_address.short_id()
+                    );
+                    info!(" Returned to Standby Mode.");
+                    info!("============================================================");
+                }
+                ProtocolPacket::Ping { timestamp } => {
+                    let pong = ProtocolPacket::Pong { timestamp };
+                    let _ = dc_inner.send(&Bytes::from(pong.encode())).await;
+                }
+                ProtocolPacket::Pong { .. } => {}
                 _ => {}
             }
         })

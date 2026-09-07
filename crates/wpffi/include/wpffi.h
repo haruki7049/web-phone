@@ -14,6 +14,21 @@
 #include <stdlib.h>
 
 /**
+ * Default Opus Codec ID as defined in WPIP-04.
+ */
+#define CODEC_OPUS 1
+
+/**
+ * PCM 32-bit float LE Codec ID.
+ */
+#define CODEC_PCM_F32LE 0
+
+/**
+ * PCM 16-bit signed integer LE Codec ID.
+ */
+#define CODEC_PCM_S16LE 2
+
+/**
  * Log levels for WPFFI log callback.
  * 0 = DEBUG, 1 = INFO, 2 = WARN, 3 = ERROR
  */
