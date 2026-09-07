@@ -32,8 +32,9 @@
 
       perSystem =
         {
-          pkgs,
+          config,
           lib,
+          pkgs,
           system,
           ...
         }:
@@ -69,6 +70,8 @@
             pkgs.nushell # Script runner
             pkgs.cachix # cachix CLI
           ];
+          inputsFrom = [ config.treefmt.build.devShell ];
+
           cargoArtifacts = craneLib.buildDepsOnly {
             inherit src buildInputs nativeBuildInputs;
 
@@ -175,7 +178,7 @@
           };
 
           devShells.default = pkgs.mkShell {
-            inherit buildInputs nativeBuildInputs;
+            inherit buildInputs nativeBuildInputs inputsFrom;
 
             LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
             LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
