@@ -3,17 +3,22 @@
 //! This binary provides a command-line interface for the web-phone
 //! audio client. It supports the following commands:
 //!
-//! - `call` - Start an audio call with the server via WebRTC
-//! - `list-devices` - List available audio devices
+//! - `call` - Start a 1-to-1 audio call or standby to receive incoming calls via WebRTC
+//! - `room` - Join a group audio room (WPIP-08)
+//! - `list-addresses` - List all registered user addresses connected to `wpdaemon`
+//! - `list-devices` - List available audio input/output devices
 //!
 //! # Usage
 //!
 //! ```bash
-//! # Start a call with default configuration
-//! wpclient call
+//! # Start a direct 1-to-1 call
+//! wpclient call --to <TARGET_USER_ID>
 //!
-//! # Start a call with custom server IP and port
-//! wpclient --server-ip 127.0.0.1 --server-port 15000 call
+//! # Join a group audio room
+//! wpclient room --id <ROOM_ID>
+//!
+//! # List connected user addresses
+//! wpclient list-addresses
 //!
 //! # List available audio devices
 //! wpclient list-devices
