@@ -10,8 +10,10 @@ pub mod broadcast;
 pub mod config;
 pub mod connection;
 pub mod peer;
+pub mod registry;
 pub mod stun;
 
 // Re-export commonly used types
 pub use broadcast::{AUDIO_BROADCAST, AudioMessage};
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
+pub use registry::{CLIENT_REGISTRY, ClientRegistry, matches_address};

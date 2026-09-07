@@ -5,20 +5,19 @@
 
 use crate::broadcast::{AUDIO_BROADCAST, AudioMessage};
 use crate::config::CONFIGURATION;
+use crate::registry::{CLIENT_REGISTRY, matches_address};
 use axum::{
     extract::Json,
     http::{HeaderMap, StatusCode},
 };
 use bytes::Bytes;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::Arc;
 use tracing::{error, info, warn};
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
@@ -27,201 +26,94 @@ use wpffi::{ProtocolPacket, UserAddress};
 /// Counter for connected clients.
 static CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 
-/// Active WebRTC peer connections.
-static PEER_CONNECTIONS: LazyLock<Mutex<HashMap<u64, Arc<RTCPeerConnection>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Registered client addresses (client_id -> UserAddress).
-static CLIENT_ADDRESSES: LazyLock<Mutex<HashMap<u64, UserAddress>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Registered client target addresses (client_id -> target UserAddress).
-static CLIENT_TARGETS: LazyLock<Mutex<HashMap<u64, UserAddress>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Active WebRTC client DataChannels (client_id -> Arc<RTCDataChannel>).
-static CLIENT_DATA_CHANNELS: LazyLock<Mutex<HashMap<u64, Arc<RTCDataChannel>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Approved calls (target_client_id -> Vec<caller_UserAddress>).
-static APPROVED_CALLS: LazyLock<Mutex<HashMap<u64, Vec<UserAddress>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Rejected calls (target_client_id -> Vec<caller_UserAddress>).
-static REJECTED_CALLS: LazyLock<Mutex<HashMap<u64, Vec<UserAddress>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Tracked call request notifications already sent (target_client_id -> Vec<caller_client_id>).
-static NOTIFIED_REQUESTS: LazyLock<Mutex<HashMap<u64, Vec<u64>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
 /// Maximum audio message size in bytes (1MB).
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 
 /// Find client ID matching a given UserAddress (exact or prefix match).
 fn find_client_by_address(target_key: &UserAddress) -> Option<u64> {
-    let addrs = CLIENT_ADDRESSES.lock().unwrap();
-    for (&cid, addr) in addrs.iter() {
-        if matches_address(addr, target_key) {
-            return Some(cid);
-        }
-    }
-    None
+    CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .find_client_by_address(target_key)
 }
 
 fn is_call_approved(target_id: u64, caller_addr: &UserAddress) -> bool {
-    let approved = APPROVED_CALLS.lock().unwrap();
-    if let Some(list) = approved.get(&target_id) {
-        list.iter().any(|a| matches_address(a, caller_addr))
-    } else {
-        false
-    }
+    CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .is_call_approved(target_id, caller_addr)
 }
 
 fn is_call_rejected(target_id: u64, caller_addr: &UserAddress) -> bool {
-    let rejected = REJECTED_CALLS.lock().unwrap();
-    if let Some(list) = rejected.get(&target_id) {
-        list.iter().any(|a| matches_address(a, caller_addr))
-    } else {
-        false
-    }
+    CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .is_call_rejected(target_id, caller_addr)
 }
 
 fn mark_call_approved(target_id: u64, caller_addr: UserAddress) {
-    let mut approved = APPROVED_CALLS.lock().unwrap();
-    let list = approved.entry(target_id).or_default();
-    if !list.iter().any(|a| matches_address(a, &caller_addr)) {
-        list.push(caller_addr);
-    }
+    CLIENT_REGISTRY
+        .write()
+        .unwrap()
+        .mark_call_approved(target_id, caller_addr);
 }
 
 fn mark_call_rejected(target_id: u64, caller_addr: UserAddress) {
-    let mut rejected = REJECTED_CALLS.lock().unwrap();
-    let list = rejected.entry(target_id).or_default();
-    if !list.iter().any(|a| matches_address(a, &caller_addr)) {
-        list.push(caller_addr);
-    }
+    CLIENT_REGISTRY
+        .write()
+        .unwrap()
+        .mark_call_rejected(target_id, caller_addr);
 }
 
 fn has_been_notified(target_id: u64, caller_id: u64) -> bool {
-    let notified = NOTIFIED_REQUESTS.lock().unwrap();
-    if let Some(list) = notified.get(&target_id) {
-        list.contains(&caller_id)
-    } else {
-        false
-    }
+    CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .has_been_notified(target_id, caller_id)
 }
 
 fn mark_notified(target_id: u64, caller_id: u64) {
-    let mut notified = NOTIFIED_REQUESTS.lock().unwrap();
-    let list = notified.entry(target_id).or_default();
-    if !list.contains(&caller_id) {
-        list.push(caller_id);
-    }
-}
-
-/// Helper to check if address matches room key (exact match or prefix match).
-fn matches_address(addr: &UserAddress, key: &UserAddress) -> bool {
-    addr.id == key.id
-        || (!key.id.is_empty() && key.id.len() <= addr.id.len() && addr.id.starts_with(&key.id))
-        || (!addr.id.is_empty() && addr.id.len() <= key.id.len() && key.id.starts_with(&addr.id))
+    CLIENT_REGISTRY
+        .write()
+        .unwrap()
+        .mark_notified(target_id, caller_id);
 }
 
 /// Check if a client belongs to the ad-hoc room identified by room_key.
 fn is_client_in_room(client_id: u64, room_key: &UserAddress) -> bool {
-    let my_addr = CLIENT_ADDRESSES.lock().unwrap().get(&client_id).cloned();
-    let my_target = CLIENT_TARGETS.lock().unwrap().get(&client_id).cloned();
-
-    if let Some(ref addr) = my_addr
-        && matches_address(addr, room_key)
-    {
-        return true;
-    }
-
-    if let Some(ref target) = my_target
-        && matches_address(target, room_key)
-    {
-        return true;
-    }
-    false
-}
-
-fn count_participants_inner(
-    addrs: &HashMap<u64, UserAddress>,
-    targets: &HashMap<u64, UserAddress>,
-    room_key: &UserAddress,
-) -> usize {
-    let mut count = 0;
-    for (&cid, addr) in addrs.iter() {
-        let target = targets.get(&cid);
-        if matches_address(addr, room_key) || target.is_some_and(|t| matches_address(t, room_key)) {
-            count += 1;
-        }
-    }
-    count
+    CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .is_client_in_room(client_id, room_key)
 }
 
 /// Count participants in room identified by `room_key`.
 pub fn get_participant_count_for_room(room_key: &UserAddress) -> usize {
-    let addrs = CLIENT_ADDRESSES.lock().unwrap();
-    let targets = CLIENT_TARGETS.lock().unwrap();
-    count_participants_inner(&addrs, &targets, room_key)
+    CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .get_participant_count_for_room(room_key)
 }
 
 /// Check if client_id is already part of the call with target_key.
 fn is_client_in_same_call(client_id: u64, target_key: &UserAddress) -> bool {
-    if is_client_in_room(client_id, target_key) {
-        return true;
-    }
-
-    let addrs = CLIENT_ADDRESSES.lock().unwrap();
-    let targets = CLIENT_TARGETS.lock().unwrap();
-
-    let my_addr = match addrs.get(&client_id) {
-        Some(a) => a,
-        None => return false,
-    };
-
-    // Check if target client (matching target_key) is targeting my_addr
-    for (&cid, addr) in addrs.iter() {
-        if matches_address(addr, target_key)
-            && let Some(other_target) = targets.get(&cid)
-            && matches_address(other_target, my_addr)
-        {
-            return true;
-        }
-    }
-    false
+    CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .is_client_in_same_call(client_id, target_key)
 }
 
 /// Check if room or target user is already in a call with maximum allowed participants (2).
 fn is_room_or_target_full(target_key: &UserAddress) -> bool {
-    let addrs = CLIENT_ADDRESSES.lock().unwrap();
-    let targets = CLIENT_TARGETS.lock().unwrap();
-
-    if count_participants_inner(&addrs, &targets, target_key) >= 2 {
-        return true;
-    }
-
-    for (&cid, addr) in addrs.iter() {
-        if matches_address(addr, target_key)
-            && let Some(other_room) = targets.get(&cid)
-            && !matches_address(other_room, target_key)
-            && count_participants_inner(&addrs, &targets, other_room) >= 2
-        {
-            return true;
-        }
-    }
-
-    false
+    CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .is_room_or_target_full(target_key)
 }
 
 /// Get currently registered wpclient addresses across active connections.
 pub fn get_registered_addresses() -> Vec<UserAddress> {
-    let mut addrs: Vec<UserAddress> = CLIENT_ADDRESSES.lock().unwrap().values().cloned().collect();
-    addrs.sort_by(|a, b| a.id.cmp(&b.id));
-    addrs.dedup();
-    addrs
+    CLIENT_REGISTRY.read().unwrap().get_registered_addresses()
 }
 
 /// Handle an SDP offer from a WebRTC client.
@@ -252,15 +144,11 @@ pub async fn handle_sdp_offer(
         client_id, user_address
     );
 
-    PEER_CONNECTIONS
-        .lock()
-        .unwrap()
-        .insert(client_id, Arc::clone(&peer_connection));
-
-    CLIENT_ADDRESSES
-        .lock()
-        .unwrap()
-        .insert(client_id, user_address.clone());
+    CLIENT_REGISTRY.write().unwrap().register_client(
+        client_id,
+        user_address.clone(),
+        Arc::clone(&peer_connection),
+    );
 
     peer_connection.on_peer_connection_state_change(Box::new(
         move |state: RTCPeerConnectionState| {
@@ -274,13 +162,10 @@ pub async fn handle_sdp_offer(
                     client_id,
                     user_address.short_id()
                 );
-                PEER_CONNECTIONS.lock().unwrap().remove(&client_id);
-                CLIENT_ADDRESSES.lock().unwrap().remove(&client_id);
-                CLIENT_TARGETS.lock().unwrap().remove(&client_id);
-                CLIENT_DATA_CHANNELS.lock().unwrap().remove(&client_id);
-                APPROVED_CALLS.lock().unwrap().remove(&client_id);
-                REJECTED_CALLS.lock().unwrap().remove(&client_id);
-                NOTIFIED_REQUESTS.lock().unwrap().remove(&client_id);
+                CLIENT_REGISTRY
+                    .write()
+                    .unwrap()
+                    .unregister_client(client_id);
             }
             Box::pin(async move {})
         },
@@ -290,9 +175,10 @@ pub async fn handle_sdp_offer(
         let dc_label = dc.label().to_string();
         info!("Client {} created DataChannel: {}", client_id, dc_label);
 
-        CLIENT_DATA_CHANNELS
-            .lock()
+        CLIENT_REGISTRY
+            .write()
             .unwrap()
+            .data_channels
             .insert(client_id, Arc::clone(&dc));
 
         let dc_open = Arc::clone(&dc);
@@ -304,9 +190,10 @@ pub async fn handle_sdp_offer(
             Box::pin(async move {
                 info!("Client {} DataChannel opened", client_id);
 
-                let my_addr = CLIENT_ADDRESSES
-                    .lock()
+                let my_addr = CLIENT_REGISTRY
+                    .read()
                     .unwrap()
+                    .addresses
                     .get(&client_id)
                     .cloned()
                     .unwrap_or_default();
@@ -364,7 +251,12 @@ pub async fn handle_sdp_offer(
                     return;
                 };
 
-                let sender_addr = CLIENT_ADDRESSES.lock().unwrap().get(&client_id).cloned();
+                let sender_addr = CLIENT_REGISTRY
+                    .read()
+                    .unwrap()
+                    .addresses
+                    .get(&client_id)
+                    .cloned();
 
                 match packet {
                     ProtocolPacket::ClientTargetedAudio {
@@ -402,8 +294,12 @@ pub async fn handle_sdp_offer(
                         {
                             let caller_user_addr = sender_addr.clone().unwrap_or_default();
 
-                            let target_explicit_target =
-                                CLIENT_TARGETS.lock().unwrap().get(&target_cid).cloned();
+                            let target_explicit_target = CLIENT_REGISTRY
+                                .read()
+                                .unwrap()
+                                .targets
+                                .get(&target_cid)
+                                .cloned();
                             let is_mutual = target_explicit_target
                                 .as_ref()
                                 .is_some_and(|t| matches_address(t, &caller_user_addr));
@@ -419,9 +315,10 @@ pub async fn handle_sdp_offer(
                             if !is_mutual && !is_call_approved(target_cid, &caller_user_addr) {
                                 if !has_been_notified(target_cid, client_id) {
                                     mark_notified(target_cid, client_id);
-                                    let target_dc = CLIENT_DATA_CHANNELS
-                                        .lock()
+                                    let target_dc = CLIENT_REGISTRY
+                                        .read()
                                         .unwrap()
+                                        .data_channels
                                         .get(&target_cid)
                                         .cloned();
                                     if let Some(target_dc) = target_dc {
@@ -443,9 +340,10 @@ pub async fn handle_sdp_offer(
                         }
 
                         // Register/update client's target address for call routing
-                        CLIENT_TARGETS
-                            .lock()
+                        CLIENT_REGISTRY
+                            .write()
                             .unwrap()
+                            .targets
                             .insert(client_id, target_address.clone());
 
                         let _ = AUDIO_BROADCAST.send(AudioMessage {
@@ -465,25 +363,25 @@ pub async fn handle_sdp_offer(
                         mark_call_approved(client_id, caller_address.clone());
 
                         {
-                            let mut targets = CLIENT_TARGETS.lock().unwrap();
-                            if targets.get(&client_id).is_none() {
-                                targets.insert(client_id, caller_address.clone());
-                            }
+                            let mut reg = CLIENT_REGISTRY.write().unwrap();
+                            reg.targets.entry(client_id).or_insert_with(|| caller_address.clone());
                         }
 
                         let caller_dc =
                             find_client_by_address(&caller_address).and_then(|caller_cid| {
-                                CLIENT_DATA_CHANNELS
-                                    .lock()
+                                CLIENT_REGISTRY
+                                    .read()
                                     .unwrap()
+                                    .data_channels
                                     .get(&caller_cid)
                                     .cloned()
                             });
 
                         if let Some(caller_dc) = caller_dc {
-                            let my_addr = CLIENT_ADDRESSES
-                                .lock()
+                            let my_addr = CLIENT_REGISTRY
+                                .read()
                                 .unwrap()
+                                .addresses
                                 .get(&client_id)
                                 .cloned()
                                 .unwrap_or_default();
@@ -503,17 +401,19 @@ pub async fn handle_sdp_offer(
 
                         let caller_dc =
                             find_client_by_address(&caller_address).and_then(|caller_cid| {
-                                CLIENT_DATA_CHANNELS
-                                    .lock()
+                                CLIENT_REGISTRY
+                                    .read()
                                     .unwrap()
+                                    .data_channels
                                     .get(&caller_cid)
                                     .cloned()
                             });
 
                         if let Some(caller_dc) = caller_dc {
-                            let my_addr = CLIENT_ADDRESSES
-                                .lock()
+                            let my_addr = CLIENT_REGISTRY
+                                .read()
                                 .unwrap()
+                                .addresses
                                 .get(&client_id)
                                 .cloned()
                                 .unwrap_or_default();
@@ -581,15 +481,16 @@ mod tests {
     #[test]
     fn test_client_addresses_registration() {
         let test_addr = UserAddress::generate_from_time();
-        CLIENT_ADDRESSES
-            .lock()
+        CLIENT_REGISTRY
+            .write()
             .unwrap()
+            .addresses
             .insert(999, test_addr.clone());
 
         let addrs = get_registered_addresses();
         assert!(addrs.contains(&test_addr));
 
-        CLIENT_ADDRESSES.lock().unwrap().remove(&999);
+        CLIENT_REGISTRY.write().unwrap().addresses.remove(&999);
         let addrs_after = get_registered_addresses();
         assert!(!addrs_after.contains(&test_addr));
     }
@@ -600,22 +501,13 @@ mod tests {
         let caller_addr = UserAddress::generate_from_time();
         let third_addr = UserAddress::generate_from_time();
 
-        CLIENT_ADDRESSES
-            .lock()
-            .unwrap()
-            .insert(101, host_addr.clone());
-        CLIENT_ADDRESSES
-            .lock()
-            .unwrap()
-            .insert(102, caller_addr.clone());
-        CLIENT_TARGETS
-            .lock()
-            .unwrap()
-            .insert(102, host_addr.clone());
-        CLIENT_ADDRESSES
-            .lock()
-            .unwrap()
-            .insert(103, third_addr.clone());
+        {
+            let mut reg = CLIENT_REGISTRY.write().unwrap();
+            reg.addresses.insert(101, host_addr.clone());
+            reg.addresses.insert(102, caller_addr.clone());
+            reg.targets.insert(102, host_addr.clone());
+            reg.addresses.insert(103, third_addr.clone());
+        }
 
         assert_eq!(get_participant_count_for_room(&host_addr), 2);
         assert!(is_room_or_target_full(&host_addr));
@@ -624,10 +516,13 @@ mod tests {
         assert!(!is_client_in_same_call(103, &host_addr));
 
         // Cleanup
-        CLIENT_ADDRESSES.lock().unwrap().remove(&101);
-        CLIENT_ADDRESSES.lock().unwrap().remove(&102);
-        CLIENT_ADDRESSES.lock().unwrap().remove(&103);
-        CLIENT_TARGETS.lock().unwrap().remove(&102);
+        {
+            let mut reg = CLIENT_REGISTRY.write().unwrap();
+            reg.addresses.remove(&101);
+            reg.addresses.remove(&102);
+            reg.addresses.remove(&103);
+            reg.targets.remove(&102);
+        }
     }
 
     #[test]
@@ -645,8 +540,11 @@ mod tests {
         assert!(is_call_rejected(host_id, &caller_addr));
 
         // Cleanup
-        APPROVED_CALLS.lock().unwrap().remove(&host_id);
-        REJECTED_CALLS.lock().unwrap().remove(&host_id);
+        {
+            let mut reg = CLIENT_REGISTRY.write().unwrap();
+            reg.approved_calls.remove(&host_id);
+            reg.rejected_calls.remove(&host_id);
+        }
     }
 
     #[test]
@@ -660,7 +558,11 @@ mod tests {
         assert!(has_been_notified(target_id, caller_id));
 
         // Cleanup
-        NOTIFIED_REQUESTS.lock().unwrap().remove(&target_id);
+        CLIENT_REGISTRY
+            .write()
+            .unwrap()
+            .notified_requests
+            .remove(&target_id);
     }
 
     #[test]
@@ -679,9 +581,10 @@ mod tests {
     fn test_find_client_by_address() {
         let client_id = 888u64;
         let addr = UserAddress::new("11223344556677889900aabbccddeeff");
-        CLIENT_ADDRESSES
-            .lock()
+        CLIENT_REGISTRY
+            .write()
             .unwrap()
+            .addresses
             .insert(client_id, addr.clone());
 
         let short_search = UserAddress::new("112233445566");
@@ -692,6 +595,10 @@ mod tests {
         assert_eq!(find_client_by_address(&not_found), None);
 
         // Cleanup
-        CLIENT_ADDRESSES.lock().unwrap().remove(&client_id);
+        CLIENT_REGISTRY
+            .write()
+            .unwrap()
+            .addresses
+            .remove(&client_id);
     }
 }
