@@ -61,6 +61,13 @@ async fn main() -> Result<()> {
         loaded_config.output_device = Some(output_device);
     }
 
+    if let Actions::Call {
+        auto_accept: true, ..
+    } = &args.action
+    {
+        loaded_config.auto_accept = true;
+    }
+
     CONFIGURATION.set(loaded_config).unwrap();
 
     let config: &Configuration = CONFIGURATION
@@ -68,7 +75,7 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Failed to get Configuration"))?;
 
     match args.action {
-        Actions::Call { to } => wclient::call::start_call(config, to).await?,
+        Actions::Call { to, .. } => wclient::call::start_call(config, to).await?,
         Actions::ListAddresses => list_registered_addresses(config).await?,
         Actions::ListDevices => wclient::audio::list_devices()?,
     }
@@ -151,6 +158,10 @@ enum Actions {
         /// Target wclient temporary SHA-256 user ID (or prefix) to call directly (optional).
         #[arg(long, short = 't')]
         to: Option<UserAddress>,
+
+        /// Automatically accept incoming call requests without prompting.
+        #[arg(long, short = 'y', default_value_t = false)]
+        auto_accept: bool,
     },
     /// List all registered wclient temporary user IDs connected to wdaemon.
     ListAddresses,

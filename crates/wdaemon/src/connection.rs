@@ -39,8 +39,86 @@ static CLIENT_ADDRESSES: LazyLock<Mutex<HashMap<u64, UserAddress>>> =
 static CLIENT_TARGETS: LazyLock<Mutex<HashMap<u64, UserAddress>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Active WebRTC client DataChannels (client_id -> Arc<RTCDataChannel>).
+static CLIENT_DATA_CHANNELS: LazyLock<Mutex<HashMap<u64, Arc<RTCDataChannel>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Approved calls (target_client_id -> Vec<caller_UserAddress>).
+static APPROVED_CALLS: LazyLock<Mutex<HashMap<u64, Vec<UserAddress>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Rejected calls (target_client_id -> Vec<caller_UserAddress>).
+static REJECTED_CALLS: LazyLock<Mutex<HashMap<u64, Vec<UserAddress>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Tracked call request notifications already sent (target_client_id -> Vec<caller_client_id>).
+static NOTIFIED_REQUESTS: LazyLock<Mutex<HashMap<u64, Vec<u64>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// Maximum audio message size in bytes (1MB).
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+
+/// Find client ID matching a given UserAddress (exact or prefix match).
+fn find_client_by_address(target_key: &UserAddress) -> Option<u64> {
+    let addrs = CLIENT_ADDRESSES.lock().unwrap();
+    for (&cid, addr) in addrs.iter() {
+        if matches_address(addr, target_key) {
+            return Some(cid);
+        }
+    }
+    None
+}
+
+fn is_call_approved(target_id: u64, caller_addr: &UserAddress) -> bool {
+    let approved = APPROVED_CALLS.lock().unwrap();
+    if let Some(list) = approved.get(&target_id) {
+        list.iter().any(|a| matches_address(a, caller_addr))
+    } else {
+        false
+    }
+}
+
+fn is_call_rejected(target_id: u64, caller_addr: &UserAddress) -> bool {
+    let rejected = REJECTED_CALLS.lock().unwrap();
+    if let Some(list) = rejected.get(&target_id) {
+        list.iter().any(|a| matches_address(a, caller_addr))
+    } else {
+        false
+    }
+}
+
+fn mark_call_approved(target_id: u64, caller_addr: UserAddress) {
+    let mut approved = APPROVED_CALLS.lock().unwrap();
+    let list = approved.entry(target_id).or_default();
+    if !list.iter().any(|a| matches_address(a, &caller_addr)) {
+        list.push(caller_addr);
+    }
+}
+
+fn mark_call_rejected(target_id: u64, caller_addr: UserAddress) {
+    let mut rejected = REJECTED_CALLS.lock().unwrap();
+    let list = rejected.entry(target_id).or_default();
+    if !list.iter().any(|a| matches_address(a, &caller_addr)) {
+        list.push(caller_addr);
+    }
+}
+
+fn has_been_notified(target_id: u64, caller_id: u64) -> bool {
+    let notified = NOTIFIED_REQUESTS.lock().unwrap();
+    if let Some(list) = notified.get(&target_id) {
+        list.contains(&caller_id)
+    } else {
+        false
+    }
+}
+
+fn mark_notified(target_id: u64, caller_id: u64) {
+    let mut notified = NOTIFIED_REQUESTS.lock().unwrap();
+    let list = notified.entry(target_id).or_default();
+    if !list.contains(&caller_id) {
+        list.push(caller_id);
+    }
+}
 
 /// Helper to check if address matches room key (exact match or prefix match).
 fn matches_address(addr: &UserAddress, key: &UserAddress) -> bool {
@@ -199,6 +277,10 @@ pub async fn handle_sdp_offer(
                 PEER_CONNECTIONS.lock().unwrap().remove(&client_id);
                 CLIENT_ADDRESSES.lock().unwrap().remove(&client_id);
                 CLIENT_TARGETS.lock().unwrap().remove(&client_id);
+                CLIENT_DATA_CHANNELS.lock().unwrap().remove(&client_id);
+                APPROVED_CALLS.lock().unwrap().remove(&client_id);
+                REJECTED_CALLS.lock().unwrap().remove(&client_id);
+                NOTIFIED_REQUESTS.lock().unwrap().remove(&client_id);
             }
             Box::pin(async move {})
         },
@@ -207,6 +289,11 @@ pub async fn handle_sdp_offer(
     peer_connection.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
         let dc_label = dc.label().to_string();
         info!("Client {} created DataChannel: {}", client_id, dc_label);
+
+        CLIENT_DATA_CHANNELS
+            .lock()
+            .unwrap()
+            .insert(client_id, Arc::clone(&dc));
 
         let dc_open = Arc::clone(&dc);
 
@@ -316,6 +403,49 @@ pub async fn handle_sdp_offer(
                         return;
                     }
 
+                    // Check approval status with target client if target client is connected
+                    if let Some(target_cid) = find_client_by_address(&target_address) &&
+                        target_cid != client_id {
+                            let caller_user_addr = sender_addr.clone().unwrap_or_default();
+
+                            let target_explicit_target =
+                                CLIENT_TARGETS.lock().unwrap().get(&target_cid).cloned();
+                            let is_mutual = target_explicit_target
+                                .as_ref()
+                                .is_some_and(|t| matches_address(t, &caller_user_addr));
+
+                            if is_call_rejected(target_cid, &caller_user_addr) {
+                                let mut err_packet = Vec::with_capacity(33);
+                                err_packet.push(0x07);
+                                err_packet.extend_from_slice(&target_address.to_bytes());
+                                let _ = dc_inner.send(&Bytes::from(err_packet)).await;
+                                return;
+                            }
+
+                            if !is_mutual && !is_call_approved(target_cid, &caller_user_addr) {
+                                if !has_been_notified(target_cid, client_id) {
+                                    mark_notified(target_cid, client_id);
+                                    let target_dc = CLIENT_DATA_CHANNELS
+                                        .lock()
+                                        .unwrap()
+                                        .get(&target_cid)
+                                        .cloned();
+                                    if let Some(target_dc) = target_dc {
+                                        let mut req_packet = Vec::with_capacity(41);
+                                        req_packet.push(0x04);
+                                        req_packet.extend_from_slice(&client_id.to_le_bytes());
+                                        req_packet.extend_from_slice(&caller_user_addr.to_bytes());
+                                        let _ = target_dc.send(&Bytes::from(req_packet)).await;
+                                        info!(
+                                            "Sent call request notification (0x04) to Client {} for caller Client {} ({})",
+                                            target_cid, client_id, caller_user_addr.short_id()
+                                        );
+                                    }
+                                }
+                                return;
+                            }
+                    }
+
                     // Register/update client's target address for call routing
                     CLIENT_TARGETS
                         .lock()
@@ -329,6 +459,77 @@ pub async fn handle_sdp_offer(
                         origin_node: my_node_id,
                         data: payload,
                     });
+                } else if msg_type == 0x05 && msg.data.len() >= 33 {
+                    // Call Accept Response from target client: [0x05, caller_address (32 bytes SHA256)]
+                    let caller_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
+                    let caller_addr = UserAddress::from_bytes(caller_bytes);
+
+                    info!(
+                        "Client {} accepted call request from caller {}",
+                        client_id,
+                        caller_addr.short_id()
+                    );
+                    mark_call_approved(client_id, caller_addr.clone());
+
+                    {
+                        let mut targets = CLIENT_TARGETS.lock().unwrap();
+                        if targets.get(&client_id).is_none() {
+                            targets.insert(client_id, caller_addr.clone());
+                        }
+                    }
+
+                    let caller_dc = find_client_by_address(&caller_addr).and_then(|caller_cid| {
+                        CLIENT_DATA_CHANNELS
+                            .lock()
+                            .unwrap()
+                            .get(&caller_cid)
+                            .cloned()
+                    });
+
+                    if let Some(caller_dc) = caller_dc {
+                        let my_addr = CLIENT_ADDRESSES
+                            .lock()
+                            .unwrap()
+                            .get(&client_id)
+                            .cloned()
+                            .unwrap_or_default();
+                        let mut accept_packet = Vec::with_capacity(33);
+                        accept_packet.push(0x08);
+                        accept_packet.extend_from_slice(&my_addr.to_bytes());
+                        let _ = caller_dc.send(&Bytes::from(accept_packet)).await;
+                    }
+                } else if msg_type == 0x06 && msg.data.len() >= 33 {
+                    // Call Reject Response from target client: [0x06, caller_address (32 bytes SHA256)]
+                    let caller_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
+                    let caller_addr = UserAddress::from_bytes(caller_bytes);
+
+                    info!(
+                        "Client {} rejected call request from caller {}",
+                        client_id,
+                        caller_addr.short_id()
+                    );
+                    mark_call_rejected(client_id, caller_addr.clone());
+
+                    let caller_dc = find_client_by_address(&caller_addr).and_then(|caller_cid| {
+                        CLIENT_DATA_CHANNELS
+                            .lock()
+                            .unwrap()
+                            .get(&caller_cid)
+                            .cloned()
+                    });
+
+                    if let Some(caller_dc) = caller_dc {
+                        let my_addr = CLIENT_ADDRESSES
+                            .lock()
+                            .unwrap()
+                            .get(&client_id)
+                            .cloned()
+                            .unwrap_or_default();
+                        let mut reject_packet = Vec::with_capacity(33);
+                        reject_packet.push(0x07);
+                        reject_packet.extend_from_slice(&my_addr.to_bytes());
+                        let _ = caller_dc.send(&Bytes::from(reject_packet)).await;
+                    }
                 }
             })
         }));
@@ -433,5 +634,38 @@ mod tests {
         CLIENT_ADDRESSES.lock().unwrap().remove(&102);
         CLIENT_ADDRESSES.lock().unwrap().remove(&103);
         CLIENT_TARGETS.lock().unwrap().remove(&102);
+    }
+
+    #[test]
+    fn test_call_approval_and_rejection_states() {
+        let host_id = 201u64;
+        let caller_addr = UserAddress::generate_from_time();
+
+        assert!(!is_call_approved(host_id, &caller_addr));
+        assert!(!is_call_rejected(host_id, &caller_addr));
+
+        mark_call_approved(host_id, caller_addr.clone());
+        assert!(is_call_approved(host_id, &caller_addr));
+
+        mark_call_rejected(host_id, caller_addr.clone());
+        assert!(is_call_rejected(host_id, &caller_addr));
+
+        // Cleanup
+        APPROVED_CALLS.lock().unwrap().remove(&host_id);
+        REJECTED_CALLS.lock().unwrap().remove(&host_id);
+    }
+
+    #[test]
+    fn test_notification_tracking() {
+        let target_id = 301u64;
+        let caller_id = 302u64;
+
+        assert!(!has_been_notified(target_id, caller_id));
+
+        mark_notified(target_id, caller_id);
+        assert!(has_been_notified(target_id, caller_id));
+
+        // Cleanup
+        NOTIFIED_REQUESTS.lock().unwrap().remove(&target_id);
     }
 }

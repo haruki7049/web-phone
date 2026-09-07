@@ -39,7 +39,11 @@ cargo run -p wdaemon -- --port 15001 --stun-port 3479 --peer http://127.0.0.1:15
 
 ```bash
 # Connect to wdaemon, receive an assigned temporary SHA-256 User ID, and stand by for incoming calls
+# (Prompts "Allow connection? [y/N]" when an incoming call request arrives)
 cargo run -p wclient -- call
+
+# Automatically accept incoming call requests without interactive terminal prompt
+cargo run -p wclient -- call --auto-accept # or -y
 
 # Join or start a 1-to-1 call with a specific target SHA-256 User ID (max 2 participants allowed)
 # (Attempts by a 3rd participant to connect will be rejected with a connection error)
@@ -48,13 +52,8 @@ cargo run -p wclient -- call --to <SHA256_USER_ID>
 # List all registered wclient temporary user IDs connected to the daemon
 cargo run -p wclient -- list-addresses
 
-
 # List available audio input and output devices
 cargo run -p wclient -- list-devices
-
-
-
-
 ```
 
 ### Configuration

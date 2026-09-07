@@ -44,6 +44,9 @@ pub struct Configuration {
     /// Allow echo back (hear your own voice).
     #[serde(default)]
     pub allow_echoback: bool,
+    /// Automatically accept incoming call requests without prompting.
+    #[serde(default)]
+    pub auto_accept: bool,
     /// Name (or substring) of input audio device (microphone) to use.
     #[serde(default)]
     pub input_device: Option<String>,
@@ -66,6 +69,7 @@ impl Default for Configuration {
             sample_rate: 48000,
             channels: 1,
             allow_echoback: false,
+            auto_accept: false,
             input_device: None,
             output_device: None,
         }

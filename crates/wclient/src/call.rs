@@ -102,7 +102,10 @@ pub async fn start_call(config: &Configuration, target_address: Option<UserAddre
         })
     }));
 
+    let auto_accept = config.auto_accept;
+    let dc_msg = Arc::clone(&data_channel);
     data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
+        let dc_inner = Arc::clone(&dc_msg);
         Box::pin(async move {
             if msg.data.is_empty() {
                 return;
@@ -169,6 +172,96 @@ pub async fn start_call(config: &Configuration, target_address: Option<UserAddre
                 for sample in samples {
                     buffer.push_back(sample);
                 }
+            } else if msg_type == 0x04 && msg.data.len() >= 41 {
+                // Call Request Notification from server: [0x04, caller_id (8b LE), caller_address (32b SHA256)]
+                let caller_bytes: [u8; 32] = msg.data[9..41].try_into().unwrap();
+                let caller_addr = UserAddress::from_bytes(caller_bytes);
+
+                if auto_accept {
+                    info!(
+                        "Auto-accepting incoming call request from {} (Short ID: {})",
+                        caller_addr,
+                        caller_addr.short_id()
+                    );
+                    let mut resp = Vec::with_capacity(33);
+                    resp.push(0x05); // Call Accept
+                    resp.extend_from_slice(&caller_bytes);
+                    let _ = dc_inner.send(&Bytes::from(resp)).await;
+                } else {
+                    let dc_reply = Arc::clone(&dc_inner);
+                    let caller_addr_clone = caller_addr.clone();
+
+                    tokio::spawn(async move {
+                        use std::io::{self, Write};
+                        println!("\n============================================================");
+                        println!(" Incoming Call Request!");
+                        println!(" From: {}", caller_addr_clone);
+                        println!(" Short ID: {}", caller_addr_clone.short_id());
+                        print!(" Allow connection? [y/N]: ");
+                        let _ = io::stdout().flush();
+
+                        let mut input = String::new();
+                        let accepted = tokio::task::spawn_blocking(move || {
+                            let stdin = io::stdin();
+                            if stdin.read_line(&mut input).is_ok() {
+                                let trimmed = input.trim().to_lowercase();
+                                trimmed == "y" || trimmed == "yes"
+                            } else {
+                                false
+                            }
+                        })
+                        .await
+                        .unwrap_or_default();
+
+                        if accepted {
+                            info!(
+                                "Accepted incoming call request from {}",
+                                caller_addr_clone.short_id()
+                            );
+                            let mut resp = Vec::with_capacity(33);
+                            resp.push(0x05); // Call Accept
+                            resp.extend_from_slice(&caller_bytes);
+                            let _ = dc_reply.send(&Bytes::from(resp)).await;
+                        } else {
+                            info!(
+                                "Rejected incoming call request from {}",
+                                caller_addr_clone.short_id()
+                            );
+                            let mut resp = Vec::with_capacity(33);
+                            resp.push(0x06); // Call Reject
+                            resp.extend_from_slice(&caller_bytes);
+                            let _ = dc_reply.send(&Bytes::from(resp)).await;
+                        }
+                    });
+                }
+            } else if msg_type == 0x07 {
+                // Call Rejected notification: [0x07, target_address (32b)]
+                let target_str = if msg.data.len() >= 33 {
+                    let addr_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
+                    UserAddress::from_bytes(addr_bytes).short_id().to_string()
+                } else {
+                    "target".to_string()
+                };
+                error!("============================================================");
+                error!(
+                    " Call Connection Error: Connection rejected by target user ({})",
+                    target_str
+                );
+                error!(" Connection rejected.");
+                error!("============================================================");
+                std::process::exit(1);
+            } else if msg_type == 0x08 {
+                // Call Accepted notification: [0x08, target_address (32b)]
+                let target_str = if msg.data.len() >= 33 {
+                    let addr_bytes: [u8; 32] = msg.data[1..33].try_into().unwrap();
+                    UserAddress::from_bytes(addr_bytes).short_id().to_string()
+                } else {
+                    "target".to_string()
+                };
+                info!("============================================================");
+                info!(" Call connection accepted by target user ({})!", target_str);
+                info!(" Call connected.");
+                info!("============================================================");
             } else if msg_type == 0xFF {
                 // Connection rejection message: [0xFF, target_address (32b)]
                 let target_str = if msg.data.len() >= 33 {
