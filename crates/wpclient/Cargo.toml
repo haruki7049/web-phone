@@ -1,8 +1,8 @@
 [package]
 name = "wpclient"
-version = "0.1.0"
+version.workspace = true
 description = "WebRTC client CLI for real-time audio transmission"
-edition = "2024"
+edition.workspace = true
 
 [dependencies]
 wpffi = { path = "../wpffi" }

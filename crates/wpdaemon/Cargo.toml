@@ -1,8 +1,8 @@
 [package]
 name = "wpdaemon"
-version = "0.1.0"
+version.workspace = true
 description = "WebRTC server daemon, STUN/TURN server, and peer mesh daemon"
-edition = "2024"
+edition.workspace = true
 
 [dependencies]
 axum.workspace = true
