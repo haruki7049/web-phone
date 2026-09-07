@@ -1,7 +1,7 @@
 //! WebRTC server daemon, STUN/TURN server, SFU group call router, and peer mesh daemon for real-time audio.
 //!
 //! This crate provides the server-side implementation for the web-phone
-//! audio transmission system strictly conforming to WPIP-01 through WPIP-12.
+//! audio transmission system strictly conforming to WPIP-01 through WPIP-13.
 //! It supports:
 //! - WebRTC SDP signaling & DataChannel audio streaming
 //! - Selective Forwarding Unit (SFU) audio routing with Top-K active speaker selection (WPIP-08)
