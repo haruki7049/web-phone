@@ -88,9 +88,14 @@
             LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
             LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
 
+            postInstall = ''
+              mkdir -p $out/include
+              cp crates/wpffi/include/wpffi.h $out/include/wpffi.h
+            '';
+
             meta = {
               licenses = [ lib.licenses.mit ];
-              mainProgram = "spr";
+              mainProgram = "wpclient";
             };
           };
           cargo-clippy = craneLib.cargoClippy {
