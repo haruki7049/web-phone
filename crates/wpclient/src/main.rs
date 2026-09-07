@@ -15,9 +15,6 @@
 //! # Start a call with custom server IP and port
 //! wpclient --server-ip 127.0.0.1 --server-port 15000 call
 //!
-//! # Start a call with a custom user IPv6 address for recognition
-//! wpclient --user-address 2001:db8::1 call
-//!
 //! # List available audio devices
 //! wpclient list-devices
 //! ```
@@ -47,9 +44,6 @@ async fn main() -> Result<()> {
     }
     if let Some(server_port) = args.server_port {
         loaded_config.server_port = server_port;
-    }
-    if let Some(user_address) = args.user_address {
-        loaded_config.user_address = user_address;
     }
     if let Some(stun_server) = args.stun_server {
         loaded_config.stun_server = stun_server;
@@ -132,10 +126,6 @@ struct CLIArgs {
     /// Server port override.
     #[arg(long)]
     server_port: Option<u16>,
-
-    /// User address override for wpclient recognition.
-    #[arg(long)]
-    user_address: Option<UserAddress>,
 
     /// STUN server URL override.
     #[arg(long)]

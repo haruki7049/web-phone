@@ -3,7 +3,6 @@
 //! This module provides configuration types and defaults for the WebRTC
 //! audio client.
 
-use crate::address::UserAddress;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
@@ -31,9 +30,6 @@ pub struct Configuration {
     pub server_ip: IpAddr,
     /// Port number of the audio server.
     pub server_port: u16,
-    /// Address information to recognize this wpclient user (IPv6).
-    #[serde(default)]
-    pub user_address: UserAddress,
     /// STUN server URL for NAT traversal.
     #[serde(default = "default_stun_server")]
     pub stun_server: String,
@@ -64,7 +60,6 @@ impl Default for Configuration {
         Self {
             server_ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             server_port: 15000,
-            user_address: UserAddress::default(),
             stun_server: default_stun_server(),
             sample_rate: 48000,
             channels: 1,
@@ -85,7 +80,6 @@ mod tests {
         let config = Configuration::default();
         assert_eq!(config.server_ip, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
         assert_eq!(config.server_port, 15000);
-        assert_eq!(config.user_address.id.len(), 64);
         assert_eq!(config.sample_rate, 48000);
         assert_eq!(config.channels, 1);
         assert!(!config.allow_echoback);
@@ -98,7 +92,6 @@ mod tests {
         let toml_str = toml::to_string(&config).expect("Failed to serialize configuration");
         assert!(toml_str.contains("server_ip"));
         assert!(toml_str.contains("server_port"));
-        assert!(toml_str.contains("user_address"));
         assert!(toml_str.contains("sample_rate"));
         assert!(toml_str.contains("channels"));
     }
@@ -108,7 +101,6 @@ mod tests {
         let toml_str = r#"
             server_ip = "192.168.1.1"
             server_port = 16000
-            user_address = "a1b2c3d4e5f607080900"
             stun_server = "stun:stun.l.google.com:19302"
             sample_rate = 44100
             channels = 2
@@ -119,10 +111,6 @@ mod tests {
         let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
         assert_eq!(config.server_ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
         assert_eq!(config.server_port, 16000);
-        assert_eq!(
-            config.user_address,
-            UserAddress::new("a1b2c3d4e5f607080900")
-        );
         assert_eq!(config.stun_server, "stun:stun.l.google.com:19302");
         assert_eq!(config.sample_rate, 44100);
         assert_eq!(config.channels, 2);

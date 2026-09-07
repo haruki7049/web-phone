@@ -79,7 +79,6 @@ node_id = 1
 ```toml
 server_ip = "127.0.0.1"
 server_port = 15000
-user_address = "::1"
 stun_server = "stun:127.0.0.1:3478"
 sample_rate = 48000
 channels = 1
