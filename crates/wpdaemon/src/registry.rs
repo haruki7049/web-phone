@@ -13,11 +13,16 @@ use wpffi::UserAddress;
 pub static CLIENT_REGISTRY: LazyLock<RwLock<ClientRegistry>> =
     LazyLock::new(|| RwLock::new(ClientRegistry::default()));
 
-/// Helper to check if address matches room key (exact match or prefix match).
+/// Helper to check if address matches room key (exact match or prefix match, handling zero-padded Short IDs).
 pub fn matches_address(addr: &UserAddress, key: &UserAddress) -> bool {
-    addr.id == key.id
-        || (!key.id.is_empty() && key.id.len() <= addr.id.len() && addr.id.starts_with(&key.id))
-        || (!addr.id.is_empty() && addr.id.len() <= key.id.len() && key.id.starts_with(&addr.id))
+    if addr.id == key.id {
+        return true;
+    }
+    let key_clean = key.id.trim_end_matches('0');
+    let addr_clean = addr.id.trim_end_matches('0');
+
+    (!key_clean.is_empty() && key_clean.len() <= addr.id.len() && addr.id.starts_with(key_clean))
+        || (!addr_clean.is_empty() && addr_clean.len() <= key.id.len() && key.id.starts_with(addr_clean))
 }
 
 /// Unified registry for managing all WebRTC client state, routing, and call approvals.

@@ -604,11 +604,13 @@ mod tests {
     fn test_matches_address() {
         let full_addr = UserAddress::new("a1b2c3d4e5f607080900112233445566");
         let short_key = UserAddress::new("a1b2c3d4e5f6");
+        let zero_padded_short = UserAddress::new("a1b2c3d4e5f60000000000000000000000000000000000000000000000000000");
         let different = UserAddress::new("fffffffff");
 
         assert!(matches_address(&full_addr, &full_addr));
         assert!(matches_address(&full_addr, &short_key));
         assert!(matches_address(&short_key, &full_addr));
+        assert!(matches_address(&full_addr, &zero_padded_short));
         assert!(!matches_address(&full_addr, &different));
     }
 
