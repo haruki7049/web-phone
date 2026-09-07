@@ -49,10 +49,21 @@ pub async fn setup_data_channel(
 
     let dc_clone = Arc::clone(&data_channel);
     let target_opt = target_address;
+    let target_opt_clone = target_opt.clone();
     data_channel.on_open(Box::new(move || {
         let dc_inner = Arc::clone(&dc_clone);
+        let target_opt = target_opt_clone.clone();
         Box::pin(async move {
             info!("WebRTC DataChannel 'audio' successfully opened");
+
+            if let Some(ref target) = target_opt {
+                let init_packet = ProtocolPacket::ClientTargetedAudio {
+                    target_address: target.clone(),
+                    codec_id: crate::protocol::CODEC_OPUS,
+                    audio_data: vec![],
+                };
+                let _ = dc_inner.send(&Bytes::from(init_packet.encode())).await;
+            }
 
             tokio::spawn(async move {
                 while let Some(audio_bytes) = rx_audio.recv().await {
