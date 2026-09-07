@@ -76,7 +76,7 @@ use crate::config::Configuration;
 use cpal::traits::StreamTrait;
 use cpal::{SampleRate, Stream, StreamConfig};
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -91,7 +91,7 @@ impl AudioEngine {
     pub fn start(
         config: &Configuration,
         tx_audio: mpsc::Sender<Vec<u8>>,
-        audio_buffer: &'static Mutex<VecDeque<f32>>,
+        audio_buffer: Arc<Mutex<VecDeque<f32>>>,
     ) -> Result<Self> {
         let host = cpal::default_host();
 
@@ -173,6 +173,7 @@ impl AudioEngine {
                 let mut output_resampler = crate::resample::Resampler::new(net_sample_rate, rate);
                 let mut leftover: Vec<f32> = Vec::new();
                 let channels = ch as usize;
+                let audio_buf = Arc::clone(&audio_buffer);
 
                 output_device.build_output_stream(
                     cfg,
@@ -190,7 +191,7 @@ impl AudioEngine {
                                 + 4;
                             let mut net_samples = Vec::with_capacity(net_needed);
                             {
-                                let mut buffer = audio_buffer.lock().unwrap();
+                                let mut buffer = audio_buf.lock().unwrap();
                                 let drain_count = net_needed.min(buffer.len());
                                 for _ in 0..drain_count {
                                     if let Some(s) = buffer.pop_front() {

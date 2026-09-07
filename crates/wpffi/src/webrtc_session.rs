@@ -6,11 +6,11 @@
 use crate::address::UserAddress;
 use crate::config::Configuration;
 use crate::protocol::ProtocolPacket;
+use crate::session::ClientSession;
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 use webrtc::api::APIBuilder;
@@ -41,9 +41,10 @@ pub async fn setup_data_channel(
     target_address: Option<UserAddress>,
     mut rx_audio: mpsc::Receiver<Vec<u8>>,
     config: &Configuration,
-    my_client_id: &'static AtomicU64,
-    audio_buffer: &'static Mutex<VecDeque<f32>>,
+    session: &ClientSession,
 ) -> Result<Arc<RTCDataChannel>> {
+    let my_client_id = Arc::clone(&session.client_id);
+    let audio_buffer = Arc::clone(&session.audio_buffer);
     let data_channel = peer_connection.create_data_channel("audio", None).await?;
 
     let dc_clone = Arc::clone(&data_channel);
@@ -75,6 +76,8 @@ pub async fn setup_data_channel(
 
     data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
         let dc_inner = Arc::clone(&dc_msg);
+        let my_client_id = Arc::clone(&my_client_id);
+        let audio_buffer = Arc::clone(&audio_buffer);
         Box::pin(async move {
             let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
                 return;

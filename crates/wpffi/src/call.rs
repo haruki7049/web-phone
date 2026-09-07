@@ -5,20 +5,12 @@
 use crate::address::UserAddress;
 use crate::audio::AudioEngine;
 use crate::config::Configuration;
+use crate::session::ClientSession;
 use crate::webrtc_session::{create_peer_connection, perform_sdp_handshake, setup_data_channel};
 use anyhow::Result;
-use std::collections::VecDeque;
-use std::sync::atomic::AtomicU64;
-use std::sync::{LazyLock, Mutex};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::info;
-
-/// Audio buffer for receiving audio data from WebRTC DataChannel.
-pub static AUDIO_BUFFER: LazyLock<Mutex<VecDeque<f32>>> =
-    LazyLock::new(|| Mutex::new(VecDeque::new()));
-
-/// Store assigned client ID received from server.
-pub static MY_CLIENT_ID: AtomicU64 = AtomicU64::new(u64::MAX);
 
 /// Start an audio CLI call to the server using WebRTC.
 pub async fn start_call(config: &Configuration, target_address: Option<UserAddress>) -> Result<()> {
@@ -29,7 +21,18 @@ pub async fn start_call(config: &Configuration, target_address: Option<UserAddre
 pub async fn start_call_with_cancel(
     config: &Configuration,
     target_address: Option<UserAddress>,
+    cancel_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+) -> Result<()> {
+    let session = ClientSession::new();
+    start_call_with_session(config, target_address, cancel_rx, &session).await
+}
+
+/// Start an audio CLI call with a specific `ClientSession` and optional cancellation receiver.
+pub async fn start_call_with_session(
+    config: &Configuration,
+    target_address: Option<UserAddress>,
     mut cancel_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+    session: &ClientSession,
 ) -> Result<()> {
     if let Some(ref target) = target_address {
         info!("Targeting direct 1-to-1 call to wpclient user ID: {}", target);
@@ -47,8 +50,7 @@ pub async fn start_call_with_cancel(
         target_address,
         rx_audio,
         config,
-        &MY_CLIENT_ID,
-        &AUDIO_BUFFER,
+        session,
     )
     .await?;
 
@@ -56,7 +58,8 @@ pub async fn start_call_with_cancel(
     perform_sdp_handshake(&peer_connection, config).await?;
 
     // 4. Start CPAL Audio Engine (Microphone & Speaker Streams)
-    let _audio_engine = AudioEngine::start(config, tx_audio, &AUDIO_BUFFER)?;
+    let _audio_engine =
+        AudioEngine::start(config, tx_audio, Arc::clone(&session.audio_buffer))?;
 
     // 5. Keep call running until interrupted or cancelled
     if let Some(rx) = cancel_rx.as_mut() {
