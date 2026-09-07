@@ -16,7 +16,7 @@ ______________________________________________________________________
 
 - **Endianness**: All multi-byte integer fields (`client_id`, `origin_node`, etc.) MUST be encoded in **Little Endian**.
 - **Header Tag**: The first byte (`Index 0`) of every packet MUST contain an 8-bit unsigned integer (`u8`) tag identifying the packet type.
-- **`UserAddress` Raw Binary Representation**: When packed into DataChannel wire packets, `UserAddress` MUST be represented as **32 raw bytes** (fixed-length binary byte array `[u8; 32]`), NOT as a 64-character hex ASCII string. (Human-readable 64-char hex strings are used only for text representation, logging, or JSON serialization).
+- **`UserAddress` Ed25519 Raw Binary Representation**: When packed into DataChannel wire packets, `UserAddress` MUST be represented as **32 raw bytes** (fixed-length binary byte array `[u8; 32]`) corresponding to the client's Ed25519 Public Key, NOT as a 64-character hex ASCII string. (Human-readable 64-char hex strings are used only for text representation, logging, or JSON serialization).
 
 ______________________________________________________________________
 

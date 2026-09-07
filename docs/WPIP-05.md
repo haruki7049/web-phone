@@ -6,35 +6,38 @@ ______________________________________________________________________
 
 ## Abstract
 
-This specification defines the **Inter-Daemon Peer Mesh Federation** protocol allowing multiple `wpdaemon` server nodes to interconnect and relay audio across distributed nodes.
+This specification defines the **Inter-Daemon Peer Mesh Federation** protocol allowing multiple authenticated `wpdaemon` server nodes to interconnect and relay audio across distributed nodes using Ed25519 node signatures.
 
-The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
-
-______________________________________________________________________
-
-## 1. Node Identifiers (Node ID)
-
-Each `wpdaemon` instance MUST maintain a unique 64-bit unsigned integer `node_id`.
-
-- **Generation Algorithm**: SHA-256 hash of UNIX nanosecond timestamp, process ID (PID), and atomic counter, truncated to 8 bytes (LE uint64).
-- **Collision Prevention**: Every daemon in a mesh network MUST have a distinct `node_id`.
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
 
 ______________________________________________________________________
 
-## 2. Interconnection Handshake
+## 1. Node Identifiers & Cryptographic Identity
+
+Each `wpdaemon` instance MUST maintain a unique Ed25519 keypair:
+
+- **Node Identity**: A daemon's identity is represented by its 32-byte Ed25519 Public Key.
+- **`node_id` (64-bit)**: Truncated 8-byte LE uint64 derived from the daemon's Ed25519 Public Key.
+- **Node Collision Prevention**: Every daemon in a mesh network MUST have a distinct keypair and `node_id`.
+
+______________________________________________________________________
+
+## 2. Signed Interconnection Handshake
 
 ```mermaid
 sequenceDiagram
     participant DaemonA as wpdaemon (Node A)
     participant DaemonB as wpdaemon (Node B)
 
-    DaemonA->>DaemonB: POST /peer/sdp (SDP Offer)
+    DaemonA->>DaemonB: POST /peer/sdp (SDP Offer + Authorization: WP-Ed25519 <NodePubKeyA>:<Timestamp>:<SigA>)
+    Note over DaemonB: Verify Ed25519 Node SigA
     DaemonB-->>DaemonA: 200 OK (SDP Answer)
     Note over DaemonA,DaemonB: WebRTC DataChannel ("daemon-peer") Established
 ```
 
-1. **Establishment**: Nodes configured with peer URLs (`--peer <URL>`) MUST issue an HTTP `POST /peer/sdp` containing an SDP Offer to target peer nodes.
-1. **Dedicated DataChannel**: Nodes MUST establish a WebRTC DataChannel labeled `"daemon-peer"` for node-to-node relaying.
+1. **Signed Handshake**: Nodes configured with peer URLs (`--peer <URL>`) MUST issue an HTTP `POST /peer/sdp` containing an SDP Offer and a valid Ed25519 Authorization header (`Authorization: WP-Ed25519 <NodePubKeyHex>:<Timestamp>:<SignatureHex>`).
+1. **Verification**: Receiving nodes MUST verify node signatures and reject unauthorized peer connection requests with `401 Unauthorized`.
+1. **Dedicated DataChannel**: Authenticated nodes MUST establish a WebRTC DataChannel labeled `"daemon-peer"` for node-to-node relaying.
 
 ______________________________________________________________________
 

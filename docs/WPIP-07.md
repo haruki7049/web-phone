@@ -2,7 +2,7 @@
 
 `draft` `optional` `author:haruki7049`
 
----
+______________________________________________________________________
 
 ## Abstract
 
@@ -10,7 +10,7 @@ This specification defines an optional extension for `wpdaemon` and `wpclient` i
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
 
----
+______________________________________________________________________
 
 ## 1. Capacity Constraints (2-Participant Limit)
 
@@ -19,7 +19,7 @@ Implementations adopting WPIP-07 MUST enforce call capacity constraints:
 - **Maximum Capacity**: A call session or target `UserAddress` room MUST NOT exceed **2 active participants**.
 - **Rejection**: If a third client attempts to connect or transmit audio to a room with 2 or more participants, `wpdaemon` MUST respond with `ConnectionError` (`0x0A`) and drop the audio payload.
 
----
+______________________________________________________________________
 
 ## 2. Interactive Call Control Flow
 
@@ -36,5 +36,6 @@ Implementations adopting WPIP-07 MUST enforce call capacity constraints:
 ### 2.3 Client Auto-Accept Behavior
 
 `wpclient` MAY support an `auto_accept` configuration option:
+
 - If `auto_accept = true`: `wpclient` MUST automatically transmit `CallAcceptResponse` upon receiving `CallRequest`.
 - If `auto_accept = false`: `wpclient` MUST prompt the user interactively before responding.
