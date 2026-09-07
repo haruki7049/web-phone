@@ -40,11 +40,7 @@ impl ClientSession {
     /// Get current client ID if assigned by server.
     pub fn get_client_id(&self) -> Option<u64> {
         let id = self.client_id.load(Ordering::SeqCst);
-        if id == u64::MAX {
-            None
-        } else {
-            Some(id)
-        }
+        if id == u64::MAX { None } else { Some(id) }
     }
 }
 

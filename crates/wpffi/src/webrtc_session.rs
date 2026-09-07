@@ -154,7 +154,9 @@ pub async fn setup_data_channel(
 
                         tokio::spawn(async move {
                             use std::io::{self, Write};
-                            println!("\n============================================================");
+                            println!(
+                                "\n============================================================"
+                            );
                             println!(" Incoming Call Request!");
                             println!(" From: {}", caller_addr_clone);
                             println!(" Short ID: {}", caller_addr_clone.short_id());
@@ -221,7 +223,9 @@ pub async fn setup_data_channel(
                         " Call Connection Error: Target user ({}) is currently in another call.",
                         target_address.short_id()
                     );
-                    error!(" Calls are restricted to 1-to-1 only (Maximum 2 participants allowed).");
+                    error!(
+                        " Calls are restricted to 1-to-1 only (Maximum 2 participants allowed)."
+                    );
                     error!(" Connection rejected.");
                     error!("============================================================");
                     std::process::exit(1);
@@ -260,7 +264,10 @@ pub async fn perform_sdp_handshake(
     let resp = client.post(&sdp_endpoint).json(&local_desc).send().await?;
 
     if !resp.status().is_success() {
-        anyhow::bail!("Server returned error status for SDP offer: {}", resp.status());
+        anyhow::bail!(
+            "Server returned error status for SDP offer: {}",
+            resp.status()
+        );
     }
 
     let answer: RTCSessionDescription = resp.json().await?;

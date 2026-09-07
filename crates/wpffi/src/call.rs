@@ -35,7 +35,10 @@ pub async fn start_call_with_session(
     session: &ClientSession,
 ) -> Result<()> {
     if let Some(ref target) = target_address {
-        info!("Targeting direct 1-to-1 call to wpclient user ID: {}", target);
+        info!(
+            "Targeting direct 1-to-1 call to wpclient user ID: {}",
+            target
+        );
     } else {
         info!("No target address specified. Operating in incoming call standby mode...");
     }
@@ -45,21 +48,14 @@ pub async fn start_call_with_session(
 
     // 2. Setup DataChannel & audio byte sender channel
     let (tx_audio, rx_audio) = mpsc::channel::<Vec<u8>>(100);
-    let _data_channel = setup_data_channel(
-        &peer_connection,
-        target_address,
-        rx_audio,
-        config,
-        session,
-    )
-    .await?;
+    let _data_channel =
+        setup_data_channel(&peer_connection, target_address, rx_audio, config, session).await?;
 
     // 3. Perform SDP Offer / Answer exchange with server
     perform_sdp_handshake(&peer_connection, config).await?;
 
     // 4. Start CPAL Audio Engine (Microphone & Speaker Streams)
-    let _audio_engine =
-        AudioEngine::start(config, tx_audio, Arc::clone(&session.audio_buffer))?;
+    let _audio_engine = AudioEngine::start(config, tx_audio, Arc::clone(&session.audio_buffer))?;
 
     // 5. Keep call running until interrupted or cancelled
     if let Some(rx) = cancel_rx.as_mut() {
