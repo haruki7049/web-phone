@@ -14,6 +14,8 @@ pub struct ClientSession {
     pub audio_buffer: Arc<Mutex<VecDeque<f32>>>,
     /// Assigned client ID received from server (u64::MAX if unassigned).
     pub client_id: Arc<AtomicU64>,
+    /// Assigned temporary UserAddress received from server via ClientAssignment (0x01).
+    pub user_address: Arc<Mutex<Option<crate::address::UserAddress>>>,
 }
 
 impl Default for ClientSession {
@@ -21,6 +23,7 @@ impl Default for ClientSession {
         Self {
             audio_buffer: Arc::new(Mutex::new(VecDeque::new())),
             client_id: Arc::new(AtomicU64::new(u64::MAX)),
+            user_address: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -35,12 +38,20 @@ impl ClientSession {
     pub fn reset(&self) {
         self.audio_buffer.lock().unwrap().clear();
         self.client_id.store(u64::MAX, Ordering::SeqCst);
+        if let Ok(mut guard) = self.user_address.lock() {
+            *guard = None;
+        }
     }
 
     /// Get current client ID if assigned by server.
     pub fn get_client_id(&self) -> Option<u64> {
         let id = self.client_id.load(Ordering::SeqCst);
         if id == u64::MAX { None } else { Some(id) }
+    }
+
+    /// Get current assigned temporary UserAddress if assigned by server.
+    pub fn get_user_address(&self) -> Option<crate::address::UserAddress> {
+        self.user_address.lock().ok()?.clone()
     }
 }
 

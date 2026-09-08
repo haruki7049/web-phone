@@ -1,4 +1,4 @@
-//! WebRTC audio client entry point re-exporting core modules from `wpapi`.
+pub mod gui;
 
 pub use wpapi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, UserAddress};
 pub use wpapi::{address, audio, call, config, resample};

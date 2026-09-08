@@ -85,11 +85,13 @@ pub async fn setup_data_channel(
     let auto_accept = config.auto_accept;
     let allow_echoback = config.allow_echoback;
     let dc_msg = Arc::clone(&data_channel);
+    let session_user_addr = Arc::clone(&session.user_address);
 
     data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
         let dc_inner = Arc::clone(&dc_msg);
         let my_client_id = Arc::clone(&my_client_id);
         let audio_buffer = Arc::clone(&audio_buffer);
+        let session_user_addr = Arc::clone(&session_user_addr);
         Box::pin(async move {
             let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
                 return;
@@ -101,6 +103,9 @@ pub async fn setup_data_channel(
                     user_address,
                 } => {
                     my_client_id.store(client_id, Ordering::SeqCst);
+                    if let Ok(mut guard) = session_user_addr.lock() {
+                        *guard = Some(user_address.clone());
+                    }
                     info!("============================================================");
                     info!(" Assigned Temporary User ID (SHA-256): {}", user_address);
                     info!(" Short ID: {}", user_address.short_id());
@@ -126,6 +131,12 @@ pub async fn setup_data_channel(
                     for sample in samples {
                         buffer.push_back(sample);
                     }
+                    if buffer.len() > 4800 {
+                        let excess = buffer.len() - 4800;
+                        for _ in 0..excess {
+                            buffer.pop_front();
+                        }
+                    }
                 }
                 ProtocolPacket::ServerTargetedAudio {
                     sender_id,
@@ -148,6 +159,12 @@ pub async fn setup_data_channel(
                     let mut buffer = audio_buffer.lock().unwrap();
                     for sample in samples {
                         buffer.push_back(sample);
+                    }
+                    if buffer.len() > 4800 {
+                        let excess = buffer.len() - 4800;
+                        for _ in 0..excess {
+                            buffer.pop_front();
+                        }
                     }
                 }
                 ProtocolPacket::CallRequest { caller_address, .. } => {
@@ -298,6 +315,12 @@ pub async fn setup_data_channel(
                     for sample in samples {
                         buffer.push_back(sample);
                     }
+                    if buffer.len() > 4800 {
+                        let excess = buffer.len() - 4800;
+                        for _ in 0..excess {
+                            buffer.pop_front();
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -354,11 +377,13 @@ pub async fn setup_room_data_channel(
 
     let _allow_echoback = config.allow_echoback;
     let dc_msg = Arc::clone(&data_channel);
+    let session_user_addr = Arc::clone(&session.user_address);
 
     data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
         let dc_inner = Arc::clone(&dc_msg);
         let my_client_id = Arc::clone(&my_client_id);
         let audio_buffer = Arc::clone(&audio_buffer);
+        let session_user_addr = Arc::clone(&session_user_addr);
         Box::pin(async move {
             let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
                 return;
@@ -370,6 +395,9 @@ pub async fn setup_room_data_channel(
                     user_address,
                 } => {
                     my_client_id.store(client_id, Ordering::SeqCst);
+                    if let Ok(mut guard) = session_user_addr.lock() {
+                        *guard = Some(user_address.clone());
+                    }
                     info!("============================================================");
                     info!(" Assigned Temporary User ID (SHA-256): {}", user_address);
                     info!(" Short ID: {}", user_address.short_id());
@@ -411,6 +439,12 @@ pub async fn setup_room_data_channel(
                     let mut buffer = audio_buffer.lock().unwrap();
                     for sample in samples {
                         buffer.push_back(sample);
+                    }
+                    if buffer.len() > 4800 {
+                        let excess = buffer.len() - 4800;
+                        for _ in 0..excess {
+                            buffer.pop_front();
+                        }
                     }
                 }
                 ProtocolPacket::Ping { timestamp } => {

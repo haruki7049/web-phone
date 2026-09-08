@@ -7,6 +7,31 @@ use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait};
 use tracing::info;
 
+/// Get list of names for available audio input (microphones) and output (speakers) devices.
+pub fn get_device_names() -> Result<(Vec<String>, Vec<String>)> {
+    let host = cpal::default_host();
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+
+    if let Ok(devices) = host.input_devices() {
+        for device in devices {
+            if let Ok(name) = device.name() {
+                inputs.push(name);
+            }
+        }
+    }
+
+    if let Ok(devices) = host.output_devices() {
+        for device in devices {
+            if let Ok(name) = device.name() {
+                outputs.push(name);
+            }
+        }
+    }
+
+    Ok((inputs, outputs))
+}
+
 /// List all available audio input and output devices.
 pub fn list_devices() -> Result<()> {
     let host = cpal::default_host();
@@ -133,7 +158,7 @@ impl AudioEngine {
                             .iter()
                             .flat_map(|&sample| sample.to_le_bytes())
                             .collect();
-                        let _ = tx.blocking_send(bytes);
+                        let _ = tx.try_send(bytes);
                     },
                     |err| error!("Input stream error: {}", err),
                     None,
@@ -192,6 +217,15 @@ impl AudioEngine {
                             let mut net_samples = Vec::with_capacity(net_needed);
                             {
                                 let mut buffer = audio_buf.lock().unwrap();
+                                // Latency Capping: If audio_buffer accumulated >100ms of samples (e.g. 4800 samples),
+                                // drop oldest stale backlog down to ~1920 samples (~40ms) to guarantee low latency.
+                                let max_samples = 4800;
+                                if buffer.len() > max_samples {
+                                    let drain_count = buffer.len() - 1920;
+                                    for _ in 0..drain_count {
+                                        buffer.pop_front();
+                                    }
+                                }
                                 let drain_count = net_needed.min(buffer.len());
                                 for _ in 0..drain_count {
                                     if let Some(s) = buffer.pop_front() {
