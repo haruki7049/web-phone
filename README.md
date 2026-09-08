@@ -38,6 +38,10 @@ cargo run -p wpdaemon -- --port 15000 --stun-port 3478
 
 # Connect to another peer wpdaemon node to form a daemon mesh
 cargo run -p wpdaemon -- --port 15001 --stun-port 3479 --peer http://127.0.0.1:15000
+
+# Alternatively, run via Podman / Containerfile
+podman build -t wpdaemon .
+podman run -d --name wpdaemon -p 15000:15000/tcp -p 3478:3478/udp wpdaemon
 ```
 
 ### Start a Client
