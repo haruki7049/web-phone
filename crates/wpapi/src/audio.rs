@@ -111,6 +111,12 @@ pub struct AudioEngine {
     _output_stream: Stream,
 }
 
+// Safety: `cpal::Stream` on macOS (CoreAudio) contains internal property listener callbacks
+// typed as `Box<dyn FnMut()>` without a `Send` bound in `cpal` 0.16.0. The underlying
+// AudioUnit handles are thread-safe to transfer and drop across threads.
+unsafe impl Send for AudioEngine {}
+unsafe impl Sync for AudioEngine {}
+
 impl AudioEngine {
     /// Start microphone input and speaker output streams based on the provided `Configuration`.
     pub fn start(
