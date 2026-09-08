@@ -29,6 +29,72 @@ where
     }
 }
 
+/// Helper to construct tasks for starting audio sessions and receiving server-assigned UserAddress.
+pub fn spawn_session_tasks<F>(
+    config: Configuration,
+    cancel_rx: tokio::sync::oneshot::Receiver<()>,
+    display_label: String,
+    session_fn: F,
+    result_msg: fn(Result<String, String>) -> Message,
+) -> Task<Message>
+where
+    F: FnOnce(
+            Configuration,
+            tokio::sync::oneshot::Receiver<()>,
+            wpapi::session::ClientSession,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>
+        + Send
+        + 'static,
+{
+    let (assigned_tx, mut assigned_rx) = tokio::sync::mpsc::channel::<UserAddress>(1);
+
+    Task::batch(vec![
+        Task::perform(
+            async move {
+                spawn_tokio(async move {
+                    if let Some(addr) = assigned_rx.recv().await {
+                        Ok(addr)
+                    } else {
+                        Err("No address assigned".to_string())
+                    }
+                })
+                .await
+                .unwrap_or_else(Err)
+            },
+            Message::ServerAssignedAddressReceived,
+        ),
+        Task::perform(
+            async move {
+                let res = spawn_tokio(async move {
+                    let session = wpapi::session::ClientSession::new();
+                    let session_clone = session.clone();
+
+                    tokio::spawn(async move {
+                        for _ in 0..100 {
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                            if let Some(addr) = session_clone.get_user_address() {
+                                let _ = assigned_tx.send(addr).await;
+                                break;
+                            }
+                        }
+                    });
+
+                    session_fn(config, cancel_rx, session).await
+                })
+                .await
+                .unwrap_or_else(Err);
+
+                match res {
+                    Ok(()) => Ok(display_label),
+                    Err(e) => Err(e),
+                }
+            },
+            result_msg,
+        ),
+    ])
+}
+
 /// Main application state for wpclient iced GUI.
 #[derive(Debug)]
 pub struct WpClientGui {
@@ -228,60 +294,24 @@ impl WpClientGui {
                 let mut config = self.config.clone();
                 config.auto_accept = self.auto_accept;
 
-                let (assigned_tx, mut assigned_rx) = tokio::sync::mpsc::channel::<UserAddress>(1);
-
-                Task::batch(vec![
-                    Task::perform(
-                        async move {
-                            spawn_tokio(async move {
-                                if let Some(addr) = assigned_rx.recv().await {
-                                    Ok(addr)
-                                } else {
-                                    Err("No address assigned".to_string())
-                                }
-                            })
+                spawn_session_tasks(
+                    config,
+                    cancel_rx,
+                    display_target.clone(),
+                    |cfg, cancel, session| {
+                        Box::pin(async move {
+                            wpapi::call::start_call_with_session(
+                                &cfg,
+                                target_opt,
+                                Some(cancel),
+                                &session,
+                            )
                             .await
-                            .unwrap_or_else(Err)
-                        },
-                        Message::ServerAssignedAddressReceived,
-                    ),
-                    Task::perform(
-                        async move {
-                            let res = spawn_tokio(async move {
-                                let session = wpapi::session::ClientSession::new();
-                                let session_clone = session.clone();
-
-                                tokio::spawn(async move {
-                                    for _ in 0..100 {
-                                        tokio::time::sleep(std::time::Duration::from_millis(50))
-                                            .await;
-                                        if let Some(addr) = session_clone.get_user_address() {
-                                            let _ = assigned_tx.send(addr).await;
-                                            break;
-                                        }
-                                    }
-                                });
-
-                                wpapi::call::start_call_with_session(
-                                    &config,
-                                    target_opt,
-                                    Some(cancel_rx),
-                                    &session,
-                                )
-                                .await
-                                .map_err(|e| format!("Call error: {}", e))
-                            })
-                            .await
-                            .unwrap_or_else(Err);
-
-                            match res {
-                                Ok(()) => Ok(display_target),
-                                Err(e) => Err(e),
-                            }
-                        },
-                        Message::CallResult,
-                    ),
-                ])
+                            .map_err(|e| format!("Call error: {}", e))
+                        })
+                    },
+                    Message::CallResult,
+                )
             }
             Message::StartRoomPressed => {
                 let room_str = self.room_address_input.trim().to_string();
@@ -309,60 +339,24 @@ impl WpClientGui {
                 let mut config = self.config.clone();
                 config.auto_accept = self.auto_accept;
 
-                let (assigned_tx, mut assigned_rx) = tokio::sync::mpsc::channel::<UserAddress>(1);
-
-                Task::batch(vec![
-                    Task::perform(
-                        async move {
-                            spawn_tokio(async move {
-                                if let Some(addr) = assigned_rx.recv().await {
-                                    Ok(addr)
-                                } else {
-                                    Err("No address assigned".to_string())
-                                }
-                            })
+                spawn_session_tasks(
+                    config,
+                    cancel_rx,
+                    display_room.clone(),
+                    move |cfg, cancel, session| {
+                        Box::pin(async move {
+                            wpapi::call::start_room_call_with_session(
+                                &cfg,
+                                room_addr,
+                                Some(cancel),
+                                &session,
+                            )
                             .await
-                            .unwrap_or_else(Err)
-                        },
-                        Message::ServerAssignedAddressReceived,
-                    ),
-                    Task::perform(
-                        async move {
-                            let res = spawn_tokio(async move {
-                                let session = wpapi::session::ClientSession::new();
-                                let session_clone = session.clone();
-
-                                tokio::spawn(async move {
-                                    for _ in 0..100 {
-                                        tokio::time::sleep(std::time::Duration::from_millis(50))
-                                            .await;
-                                        if let Some(addr) = session_clone.get_user_address() {
-                                            let _ = assigned_tx.send(addr).await;
-                                            break;
-                                        }
-                                    }
-                                });
-
-                                wpapi::call::start_room_call_with_session(
-                                    &config,
-                                    room_addr,
-                                    Some(cancel_rx),
-                                    &session,
-                                )
-                                .await
-                                .map_err(|e| format!("Room call error: {}", e))
-                            })
-                            .await
-                            .unwrap_or_else(Err);
-
-                            match res {
-                                Ok(()) => Ok(display_room),
-                                Err(e) => Err(e),
-                            }
-                        },
-                        Message::RoomResult,
-                    ),
-                ])
+                            .map_err(|e| format!("Room call error: {}", e))
+                        })
+                    },
+                    Message::RoomResult,
+                )
             }
             Message::HangupPressed => {
                 if let Some(tx) = self.call_cancel_tx.take() {

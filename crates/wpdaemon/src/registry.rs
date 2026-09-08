@@ -93,14 +93,25 @@ impl ClientRegistry {
         }
     }
 
-    /// Find client ID matching a given UserAddress (exact or prefix match).
+    /// Find client ID matching a given UserAddress (exact or prefix match per WPIP-02 Section 5).
     pub fn find_client_by_address(&self, target_key: &UserAddress) -> Option<u64> {
+        let clean_id = target_key.id.trim_end_matches('0');
+        if clean_id.len() < 12 && target_key.id.len() < 12 {
+            return None;
+        }
+
+        let mut matches = Vec::new();
         for (&cid, addr) in self.addresses.iter() {
             if matches_address(addr, target_key) {
-                return Some(cid);
+                matches.push(cid);
             }
         }
-        None
+        // Ambiguity Rule: MUST NOT select arbitrarily if multiple matches exist
+        if matches.len() == 1 {
+            Some(matches[0])
+        } else {
+            None
+        }
     }
 
     /// Check if a call from `caller_addr` to `target_id` is approved.

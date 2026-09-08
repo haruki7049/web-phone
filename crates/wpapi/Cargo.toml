@@ -23,6 +23,8 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 webrtc.workspace = true
+ed25519-dalek.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 toml.workspace = true

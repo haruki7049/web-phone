@@ -475,15 +475,30 @@ pub async fn perform_sdp_handshake(
         .await
         .ok_or_else(|| anyhow!("Failed to get local SDP description"))?;
 
+    let is_loopback = config.server_ip.is_loopback();
+    let scheme = if is_loopback { "http" } else { "https" };
     let server_url = match config.server_ip {
-        std::net::IpAddr::V4(ip) => format!("http://{}:{}", ip, config.server_port),
-        std::net::IpAddr::V6(ip) => format!("http://[{}]:{}", ip, config.server_port),
+        std::net::IpAddr::V4(ip) => format!("{}://{}:{}", scheme, ip, config.server_port),
+        std::net::IpAddr::V6(ip) => format!("{}://[{}]:{}", scheme, ip, config.server_port),
     };
 
     let sdp_endpoint = format!("{}/sdp", server_url);
-    info!("Sending SDP offer to {}...", sdp_endpoint);
-    let client = reqwest::Client::new();
-    let resp = client.post(&sdp_endpoint).json(&local_desc).send().await?;
+    info!("Sending signed SDP offer to {}...", sdp_endpoint);
+
+    let client_keypair = crate::address::UserKeypair::generate();
+    let (_, auth_header_val) =
+        crate::address::build_authorization_header(&client_keypair, &local_desc.sdp);
+
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()?;
+
+    let resp = client
+        .post(&sdp_endpoint)
+        .header(reqwest::header::AUTHORIZATION, auth_header_val)
+        .json(&local_desc)
+        .send()
+        .await?;
 
     if !resp.status().is_success() {
         anyhow::bail!(

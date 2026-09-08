@@ -17,7 +17,6 @@ use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use wpapi::UserAddress;
 
 /// Active inter-daemon peer connections.
 static PEER_DAEMONS: LazyLock<Mutex<HashMap<String, Arc<RTCPeerConnection>>>> =
@@ -58,22 +57,20 @@ pub async fn handle_peer_sdp(
                     loop {
                         match audio_rx.recv().await {
                             Ok(audio_msg) => {
-                                let target_addr = &audio_msg.target_address;
-                                let sender_bytes = audio_msg
-                                    .sender_address
-                                    .map(|a| a.to_bytes())
-                                    .unwrap_or([0u8; 32]);
+                                let target_addr = audio_msg.target_address.clone();
+                                let sender_addr = audio_msg.sender_address.unwrap_or_default();
 
-                                // Packet: [0x04, sender_id (8b), origin_node (8b), target_address (32b), sender_address (32b), data...]
-                                let mut packet = Vec::with_capacity(81 + audio_msg.data.len());
-                                packet.push(0x04);
-                                packet.extend_from_slice(&audio_msg.sender_id.to_le_bytes());
-                                packet.extend_from_slice(&audio_msg.origin_node.to_le_bytes());
-                                packet.extend_from_slice(&target_addr.to_bytes());
-                                packet.extend_from_slice(&sender_bytes);
-                                packet.extend_from_slice(&audio_msg.data);
+                                let packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+                                    sender_id: audio_msg.sender_id,
+                                    origin_node: audio_msg.origin_node,
+                                    target_address: target_addr,
+                                    sender_address: sender_addr,
+                                    codec_id: wpapi::protocol::CODEC_OPUS,
+                                    ttl: 8, // WPIP-05 Initial TTL = 8
+                                    audio_data: audio_msg.data,
+                                };
 
-                                if dc_inner.send(&Bytes::from(packet)).await.is_err() {
+                                if dc_inner.send(&Bytes::from(packet.encode())).await.is_err() {
                                     break;
                                 }
                             }
@@ -87,26 +84,24 @@ pub async fn handle_peer_sdp(
 
         dc.on_message(Box::new(move |msg: DataChannelMessage| {
             Box::pin(async move {
-                if msg.data.is_empty() {
-                    return;
-                }
-
-                let msg_type = msg.data[0];
-                if msg_type == 0x04 && msg.data.len() >= 81 {
-                    // Targeted peer audio packet: [0x04, sender_id (8b), origin_node (8b), target_address (32b), sender_address (32b), audio...]
-                    let sender_id = u64::from_le_bytes(msg.data[1..9].try_into().unwrap());
-                    let origin_node = u64::from_le_bytes(msg.data[9..17].try_into().unwrap());
-                    let target_bytes: [u8; 32] = msg.data[17..49].try_into().unwrap();
-                    let sender_bytes: [u8; 32] = msg.data[49..81].try_into().unwrap();
-                    let payload = msg.data[81..].to_vec();
-
-                    if origin_node != my_node_id {
+                if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+                    sender_id,
+                    origin_node,
+                    target_address,
+                    sender_address,
+                    ttl,
+                    audio_data,
+                    ..
+                }) = wpapi::protocol::ProtocolPacket::decode(&msg.data)
+                {
+                    // WPIP-05 Loop prevention & TTL expiration checks
+                    if origin_node != my_node_id && ttl > 0 {
                         let _ = AUDIO_BROADCAST.send(AudioMessage {
                             sender_id,
-                            sender_address: Some(UserAddress::from_bytes(sender_bytes)),
-                            target_address: UserAddress::from_bytes(target_bytes),
+                            sender_address: Some(sender_address),
+                            target_address,
                             origin_node,
-                            data: payload,
+                            data: audio_data,
                         });
                     }
                 }
@@ -183,21 +178,20 @@ pub async fn connect_to_peer(
                 loop {
                     match audio_rx.recv().await {
                         Ok(audio_msg) => {
-                            let target_addr = &audio_msg.target_address;
-                            let sender_bytes = audio_msg
-                                .sender_address
-                                .map(|a| a.to_bytes())
-                                .unwrap_or([0u8; 32]);
+                            let target_addr = audio_msg.target_address.clone();
+                            let sender_addr = audio_msg.sender_address.unwrap_or_default();
 
-                            let mut packet = Vec::with_capacity(81 + audio_msg.data.len());
-                            packet.push(0x04);
-                            packet.extend_from_slice(&audio_msg.sender_id.to_le_bytes());
-                            packet.extend_from_slice(&audio_msg.origin_node.to_le_bytes());
-                            packet.extend_from_slice(&target_addr.to_bytes());
-                            packet.extend_from_slice(&sender_bytes);
-                            packet.extend_from_slice(&audio_msg.data);
+                            let packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+                                sender_id: audio_msg.sender_id,
+                                origin_node: audio_msg.origin_node,
+                                target_address: target_addr,
+                                sender_address: sender_addr,
+                                codec_id: wpapi::protocol::CODEC_OPUS,
+                                ttl: 8, // WPIP-05 Initial TTL = 8
+                                audio_data: audio_msg.data,
+                            };
 
-                            if dc_inner.send(&Bytes::from(packet)).await.is_err() {
+                            if dc_inner.send(&Bytes::from(packet.encode())).await.is_err() {
                                 break;
                             }
                         }
@@ -211,25 +205,24 @@ pub async fn connect_to_peer(
 
     data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
         Box::pin(async move {
-            if msg.data.is_empty() {
-                return;
-            }
-
-            let msg_type = msg.data[0];
-            if msg_type == 0x04 && msg.data.len() >= 81 {
-                let sender_id = u64::from_le_bytes(msg.data[1..9].try_into().unwrap());
-                let origin_node = u64::from_le_bytes(msg.data[9..17].try_into().unwrap());
-                let target_bytes: [u8; 32] = msg.data[17..49].try_into().unwrap();
-                let sender_bytes: [u8; 32] = msg.data[49..81].try_into().unwrap();
-                let payload = msg.data[81..].to_vec();
-
-                if origin_node != my_node_id {
+            if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+                sender_id,
+                origin_node,
+                target_address,
+                sender_address,
+                ttl,
+                audio_data,
+                ..
+            }) = wpapi::protocol::ProtocolPacket::decode(&msg.data)
+            {
+                // WPIP-05 Loop prevention & TTL expiration checks
+                if origin_node != my_node_id && ttl > 0 {
                     let _ = AUDIO_BROADCAST.send(AudioMessage {
                         sender_id,
-                        sender_address: Some(UserAddress::from_bytes(sender_bytes)),
-                        target_address: UserAddress::from_bytes(target_bytes),
+                        sender_address: Some(sender_address),
+                        target_address,
                         origin_node,
-                        data: payload,
+                        data: audio_data,
                     });
                 }
             }

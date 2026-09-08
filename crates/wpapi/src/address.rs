@@ -45,22 +45,19 @@ impl UserAddress {
 
     /// Convert 32-byte SHA-256 raw bytes to `UserAddress`.
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        let hex_id: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
-        Self { id: hex_id }
+        Self {
+            id: hex_encode(&bytes),
+        }
     }
 
     /// Convert `UserAddress` to 32-byte raw array representation.
     pub fn to_bytes(&self) -> [u8; 32] {
         let mut bytes = [0u8; 32];
-        let hex_bytes = self.id.as_bytes();
-        for (i, byte) in bytes.iter_mut().enumerate() {
-            if i * 2 + 1 < hex_bytes.len()
-                && let Ok(val) = u8::from_str_radix(&self.id[i * 2..i * 2 + 2], 16)
-            {
-                *byte = val;
-            }
+        if hex_decode_into(&self.id, &mut bytes) {
+            bytes
+        } else {
+            [0u8; 32]
         }
-        bytes
     }
 
     /// Return a short 12-character preview string of the SHA-256 ID.
@@ -89,6 +86,147 @@ impl UserAddress {
     }
 }
 
+/// Helper function to convert a byte slice into a lower-hex String.
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        use std::fmt::Write;
+        let _ = write!(s, "{:02x}", b);
+    }
+    s
+}
+
+/// Helper function to decode hex string into a fixed-size byte slice.
+fn hex_decode_into(hex_str: &str, out: &mut [u8]) -> bool {
+    let bytes = hex_str.as_bytes();
+    for (i, byte) in out.iter_mut().enumerate() {
+        if i * 2 + 1 < bytes.len()
+            && let Ok(val) = u8::from_str_radix(&hex_str[i * 2..i * 2 + 2], 16)
+        {
+            *byte = val;
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+/// Self-Sovereign Ed25519 Cryptographic Identity Keypair for wpclient / wpdaemon (WPIP-01, WPIP-02, WPIP-03).
+#[derive(Debug)]
+pub struct UserKeypair {
+    signing_key: ed25519_dalek::SigningKey,
+}
+
+impl UserKeypair {
+    /// Generate a new random Ed25519 keypair.
+    pub fn generate() -> Self {
+        let mut rng = rand::rngs::OsRng;
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut rng);
+        Self { signing_key }
+    }
+
+    /// Construct `UserKeypair` from raw 32-byte secret key.
+    pub fn from_bytes(bytes: &[u8; 32]) -> Self {
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(bytes);
+        Self { signing_key }
+    }
+
+    /// Return raw 32-byte secret key.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.signing_key.to_bytes()
+    }
+
+    /// Get `UserAddress` representing this keypair's 32-byte Ed25519 Public Key (64 hex string).
+    pub fn public_key_address(&self) -> UserAddress {
+        let verifying_key = self.signing_key.verifying_key();
+        UserAddress::from_bytes(verifying_key.to_bytes())
+    }
+
+    /// Sign arbitrary byte message using Ed25519 secret key, returning 64-byte hex signature string.
+    pub fn sign(&self, message: &[u8]) -> String {
+        use ed25519_dalek::Signer;
+        let sig = self.signing_key.sign(message);
+        hex_encode(&sig.to_bytes())
+    }
+
+    /// Cryptographically verify an Ed25519 signature hex string for a given `UserAddress` public key.
+    pub fn verify(pubkey_address: &UserAddress, message: &[u8], signature_hex: &str) -> bool {
+        use ed25519_dalek::Verifier;
+        let pubkey_bytes = pubkey_address.to_bytes();
+        let Ok(verifying_key) = ed25519_dalek::VerifyingKey::from_bytes(&pubkey_bytes) else {
+            return false;
+        };
+
+        if signature_hex.len() != 128 {
+            return false;
+        }
+
+        let mut sig_bytes = [0u8; 64];
+        if !hex_decode_into(signature_hex, &mut sig_bytes) {
+            return false;
+        }
+
+        let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
+        verifying_key.verify(message, &sig).is_ok()
+    }
+}
+
+/// Build HTTP `Authorization` header value per WPIP-02 / WPIP-03: `WP-Ed25519 <PubKeyHex>:<Timestamp>:<SignatureHex>`
+pub fn build_authorization_header(keypair: &UserKeypair, sdp_offer: &str) -> (u64, String) {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let payload = format!("{}:{}", timestamp, sdp_offer);
+    let sig_hex = keypair.sign(payload.as_bytes());
+    let header = format!(
+        "WP-Ed25519 {}:{}:{}",
+        keypair.public_key_address().id,
+        timestamp,
+        sig_hex
+    );
+    (timestamp, header)
+}
+
+/// Verify HTTP `Authorization` header value per WPIP-02 Section 2.2.
+pub fn verify_authorization_header(
+    header_val: &str,
+    sdp_offer: &str,
+) -> Result<UserAddress, String> {
+    let val = header_val
+        .strip_prefix("WP-Ed25519 ")
+        .ok_or("Invalid authorization scheme")?;
+    let parts: Vec<&str> = val.split(':').collect();
+    if parts.len() != 3 {
+        return Err("Invalid authorization header format (expected PubKey:Timestamp:Sig)".into());
+    }
+    let pubkey_hex = parts[0];
+    let timestamp: u64 = parts[1]
+        .parse()
+        .map_err(|_| "Invalid timestamp in authorization header")?;
+    let sig_hex = parts[2];
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let diff = now.abs_diff(timestamp);
+    if diff > 300 {
+        return Err(format!(
+            "Authorization timestamp drift too large ({}s > 300s)",
+            diff
+        ));
+    }
+
+    let addr = UserAddress::new(pubkey_hex);
+    let payload = format!("{}:{}", timestamp, sdp_offer);
+    if UserKeypair::verify(&addr, payload.as_bytes(), sig_hex) {
+        Ok(addr)
+    } else {
+        Err("Invalid Ed25519 cryptographic signature".into())
+    }
+}
+
 impl Default for UserAddress {
     fn default() -> Self {
         Self::generate_from_time()
@@ -114,6 +252,29 @@ impl FromStr for UserAddress {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_ed25519_keypair_sign_verify() {
+        let keypair = UserKeypair::generate();
+        let pubkey_addr = keypair.public_key_address();
+        assert_eq!(pubkey_addr.id.len(), 64);
+
+        let msg = b"1757275200:v=0\r\nt=0 0\r\n";
+        let sig_hex = keypair.sign(msg);
+        assert_eq!(sig_hex.len(), 128);
+
+        assert!(UserKeypair::verify(&pubkey_addr, msg, &sig_hex));
+        assert!(!UserKeypair::verify(&pubkey_addr, b"wrong_msg", &sig_hex));
+    }
+
+    #[test]
+    fn test_authorization_header_roundtrip() {
+        let keypair = UserKeypair::generate();
+        let sdp = "v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\n";
+        let (_, header) = build_authorization_header(&keypair, sdp);
+        let verified_addr = verify_authorization_header(&header, sdp).expect("Verification failed");
+        assert_eq!(verified_addr, keypair.public_key_address());
+    }
 
     #[test]
     fn test_user_address_generation_from_time() {
