@@ -2,8 +2,6 @@
 
 **WPIPs** (web-phone Implementation Possibilities) are standard specification documents that define protocol formats, node behaviors, wire specifications, and standard implementations for the `web-phone` real-time WebRTC audio system.
 
-Inspired by [NIPs (Nostr Implementation Possibilities)](https://github.com/nostr-protocol/nips).
-
 ______________________________________________________________________
 
 ## List of WPIPs
@@ -35,6 +33,7 @@ ______________________________________________________________________
 | [WPIP-11](WPIP-11.md) | End-to-End Encryption (E2EE) for Group Rooms | Experimental | SFrame AES-256-GCM payload encryption for Zero-Knowledge SFU group calls |
 | [WPIP-12](WPIP-12.md) | Dynamic Codec Negotiation & Capability Handshake | Experimental | Dynamic audio codec selection and capability negotiation during SDP signaling |
 | [WPIP-13](WPIP-13.md) | Audio Device Hot-plugging & Dynamic Audio Route Switching | Experimental | Dynamic audio device event monitoring, fallback, and route switching |
+| [WPIP-14](WPIP-14.md) | Client Key Store Encryption & Passphrase Key Derivation | Experimental | Argon2id & AES-256-GCM encrypted client identity key store format |
 
 ______________________________________________________________________
 

@@ -1,7 +1,7 @@
 //! WebRTC DataChannel packet protocol module.
 //!
 //! Provides type-safe encoding and decoding for web-phone DataChannel network packets
-//! strictly conforming to WPIP specifications (WPIP-01 through WPIP-13).
+//! strictly conforming to WPIP specifications (WPIP-01 through WPIP-14).
 
 use crate::address::UserAddress;
 use std::fmt;
