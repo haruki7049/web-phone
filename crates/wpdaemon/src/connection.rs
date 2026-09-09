@@ -257,6 +257,28 @@ pub async fn handle_sdp_offer(
         Arc::clone(&peer_connection),
     );
 
+    // Handshake timeout task: close connection if DataChannel is not opened within 15s
+    let pc_timeout = Arc::clone(&peer_connection);
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+        let has_dc = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .data_channels
+            .contains_key(&client_id);
+        if !has_dc {
+            warn!(
+                "Handshake timeout: Client {} failed to open DataChannel within 15s, closing connection",
+                client_id
+            );
+            let _ = pc_timeout.close().await;
+            CLIENT_REGISTRY
+                .write()
+                .unwrap()
+                .unregister_client(client_id);
+        }
+    });
+
     peer_connection.on_peer_connection_state_change(Box::new(
         move |state: RTCPeerConnectionState| {
             info!("Client {} PeerConnection state: {}", client_id, state);
