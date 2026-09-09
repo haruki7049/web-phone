@@ -568,9 +568,7 @@ pub async fn perform_sdp_handshake(
     let (_, auth_header_val) =
         crate::address::build_authorization_header(client_keypair, &local_desc.sdp);
 
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()?;
+    let client = reqwest::Client::builder().build()?;
 
     let resp = client
         .post(&sdp_endpoint)
