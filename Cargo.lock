@@ -4321,7 +4321,7 @@ dependencies = [
 
 [[package]]
 name = "wpapi"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4344,7 +4344,7 @@ dependencies = [
 
 [[package]]
 name = "wpclient"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -4364,7 +4364,7 @@ dependencies = [
 
 [[package]]
 name = "wpdaemon"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "axum",
  "bytes",
