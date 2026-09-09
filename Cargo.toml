@@ -42,6 +42,10 @@ turn = "0.6"
 webrtc = "0.8"
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 
+hmac = "0.12"
+sha1 = "0.10"
+base64 = "0.22"
+hex = "0.4"
 rand = "0.8"
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }

@@ -188,6 +188,20 @@ pub fn get_registered_addresses() -> Vec<UserAddress> {
     CLIENT_REGISTRY.read().unwrap().get_registered_addresses()
 }
 
+/// Generate Ephemeral TURN credentials for an authenticated UserAddress (WPIP-10).
+pub fn generate_turn_credentials_for_client(
+    user_address: &UserAddress,
+    ttl_seconds: u64,
+) -> wpapi::TurnCredential {
+    let daemon_config = CONFIGURATION.get().cloned().unwrap_or_default();
+    let secret = crate::config::get_turn_server_secret();
+    let turn_urls = vec![format!(
+        "turn:{}:{}?transport=udp",
+        daemon_config.ip, daemon_config.stun_port
+    )];
+    wpapi::generate_ephemeral_turn_credential(&secret, user_address, turn_urls, ttl_seconds)
+}
+
 /// Handle an SDP offer from a WebRTC client.
 pub async fn handle_sdp_offer(
     headers: HeaderMap,
@@ -1043,5 +1057,19 @@ mod tests {
 
         let short_invalid = UserAddress::new("1234567890a");
         assert!(short_invalid.id.len() < 12);
+    }
+
+    #[test]
+    fn test_generate_turn_credentials_for_client() {
+        let user_addr = UserAddress::generate_from_time();
+        let cred = generate_turn_credentials_for_client(&user_addr, 300);
+        assert!(cred.username.contains(&user_addr.id));
+        assert!(!cred.credential.is_empty());
+        assert!(!cred.urls.is_empty());
+
+        let verified =
+            crate::stun::verify_turn_allocation_credentials(&cred.username, &cred.credential);
+        assert!(verified.is_ok());
+        assert_eq!(verified.unwrap().id, user_addr.id);
     }
 }

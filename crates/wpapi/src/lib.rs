@@ -7,6 +7,7 @@ pub mod config;
 pub mod protocol;
 pub mod resample;
 pub mod session;
+pub mod turn_auth;
 pub mod webrtc_session;
 
 pub use address::{UserAddress, UserKeypair};
@@ -14,6 +15,9 @@ pub use audio::AudioEngine;
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 pub use protocol::{ProtocolError, ProtocolPacket};
 pub use session::ClientSession;
+pub use turn_auth::{
+    TurnCredential, generate_ephemeral_turn_credential, verify_ephemeral_turn_credential,
+};
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::cell::RefCell;

@@ -51,6 +51,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn STUN/TURN UDP server if enabled
     if config.turn_enabled {
         let stun_addr = SocketAddr::new(config.ip, config.stun_port);
+        info!(
+            "STUN/TURN HMAC authentication active (node ID: {})",
+            config.node_id
+        );
         tokio::spawn(async move {
             if let Err(e) = run_stun_server(stun_addr).await {
                 error!("STUN/TURN server error: {}", e);

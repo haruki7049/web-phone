@@ -23,6 +23,7 @@ pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
 /// Global configuration instance.
 pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
+use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -58,6 +59,9 @@ pub struct Configuration {
     /// Whether STUN/TURN service is enabled.
     #[serde(default = "default_true")]
     pub turn_enabled: bool,
+    /// Secret key for STUN/TURN Ephemeral HMAC-SHA1 Token Authentication (WPIP-10).
+    #[serde(default = "default_turn_server_secret")]
+    pub turn_server_secret: String,
     /// List of peer wpdaemon signaling addresses to connect to for mesh federation.
     #[serde(default)]
     pub peers: Vec<String>,
@@ -79,6 +83,27 @@ fn default_true() -> bool {
     true
 }
 
+/// Generate a cryptographically secure 256-bit random hex secret for TURN authentication.
+pub fn generate_random_turn_secret() -> String {
+    let mut key = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut key);
+    hex::encode(key)
+}
+
+static DEFAULT_DYNAMIC_TURN_SECRET: LazyLock<String> = LazyLock::new(generate_random_turn_secret);
+
+/// Get the active TURN server secret key (from CONFIGURATION or fallback lazy static secret).
+pub fn get_turn_server_secret() -> Vec<u8> {
+    CONFIGURATION
+        .get()
+        .map(|c| c.turn_server_secret.as_bytes().to_vec())
+        .unwrap_or_else(|| DEFAULT_DYNAMIC_TURN_SECRET.as_bytes().to_vec())
+}
+
+fn default_turn_server_secret() -> String {
+    generate_random_turn_secret()
+}
+
 fn default_max_connections() -> usize {
     1000
 }
@@ -98,6 +123,7 @@ impl Default for Configuration {
             port: 15000,
             stun_port: 3478,
             turn_enabled: true,
+            turn_server_secret: default_turn_server_secret(),
             peers: Vec::new(),
             node_id: generate_node_id(),
             max_connections: default_max_connections(),
