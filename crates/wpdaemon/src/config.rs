@@ -70,6 +70,9 @@ pub struct Configuration {
     /// Maximum allowed inter-daemon mesh peer connections.
     #[serde(default = "default_max_mesh_peers")]
     pub max_mesh_peers: usize,
+    /// Maximum allowed members per group room.
+    #[serde(default = "default_max_room_members")]
+    pub max_room_members: usize,
 }
 
 fn default_true() -> bool {
@@ -84,6 +87,10 @@ fn default_max_mesh_peers() -> usize {
     16
 }
 
+fn default_max_room_members() -> usize {
+    50
+}
+
 impl Default for Configuration {
     fn default() -> Self {
         Self {
@@ -95,6 +102,7 @@ impl Default for Configuration {
             node_id: generate_node_id(),
             max_connections: default_max_connections(),
             max_mesh_peers: default_max_mesh_peers(),
+            max_room_members: default_max_room_members(),
         }
     }
 }
