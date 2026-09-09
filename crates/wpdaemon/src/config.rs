@@ -67,6 +67,9 @@ pub struct Configuration {
     /// Maximum allowed concurrent WebRTC peer connections.
     #[serde(default = "default_max_connections")]
     pub max_connections: usize,
+    /// Maximum allowed inter-daemon mesh peer connections.
+    #[serde(default = "default_max_mesh_peers")]
+    pub max_mesh_peers: usize,
 }
 
 fn default_true() -> bool {
@@ -75,6 +78,10 @@ fn default_true() -> bool {
 
 fn default_max_connections() -> usize {
     1000
+}
+
+fn default_max_mesh_peers() -> usize {
+    16
 }
 
 impl Default for Configuration {
@@ -87,6 +94,7 @@ impl Default for Configuration {
             peers: Vec::new(),
             node_id: generate_node_id(),
             max_connections: default_max_connections(),
+            max_mesh_peers: default_max_mesh_peers(),
         }
     }
 }
