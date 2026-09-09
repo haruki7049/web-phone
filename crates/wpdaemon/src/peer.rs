@@ -45,6 +45,21 @@ pub async fn handle_peer_sdp(
         ));
     }
 
+    let current_peers = PEER_DAEMONS.lock().unwrap().len();
+    if current_peers >= config.max_mesh_peers {
+        warn!(
+            "Rejected peer SDP offer: mesh peer connections ({}) reached max limit ({})",
+            current_peers, config.max_mesh_peers
+        );
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!(
+                "503 Service Unavailable: Maximum mesh peer connections reached ({})",
+                config.max_mesh_peers
+            ),
+        ));
+    }
+
     let api = APIBuilder::new().build();
     let rtc_config = RTCConfiguration::default();
 
