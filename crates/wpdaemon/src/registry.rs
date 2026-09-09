@@ -278,8 +278,13 @@ impl ClientRegistry {
         addrs
     }
 
-    /// Join client to a group room, returning updated room participant count.
-    pub fn join_room(&mut self, client_id: u64, room_address: UserAddress) -> u32 {
+    /// Join client to a group room with member limit check, returning updated room participant count.
+    pub fn join_room_with_limit(
+        &mut self,
+        client_id: u64,
+        room_address: UserAddress,
+        max_members: usize,
+    ) -> Result<u32, &'static str> {
         let mut target_key = room_address.clone();
         for key in self.room_members.keys() {
             if matches_address(key, &room_address) {
@@ -289,9 +294,27 @@ impl ClientRegistry {
         }
         let members = self.room_members.entry(target_key).or_default();
         if !members.contains(&client_id) {
+            if members.len() >= max_members {
+                return Err("Room member limit reached");
+            }
             members.push(client_id);
         }
-        members.len() as u32
+        Ok(members.len() as u32)
+    }
+
+    /// Join client to a group room, returning updated room participant count.
+    pub fn join_room(&mut self, client_id: u64, room_address: UserAddress) -> u32 {
+        self.join_room_with_limit(client_id, room_address.clone(), 50)
+            .unwrap_or_else(|_| {
+                let mut target_key = room_address.clone();
+                for key in self.room_members.keys() {
+                    if matches_address(key, &room_address) {
+                        target_key = key.clone();
+                        break;
+                    }
+                }
+                self.room_members.get(&target_key).map_or(0, |m| m.len()) as u32
+            })
     }
 
     /// Leave room for a client, returning remaining participant count.
@@ -430,6 +453,26 @@ mod tests {
         // Leave room
         assert_eq!(registry.leave_room(4, &room_addr), 3);
         assert_eq!(registry.get_room_member_ids(&room_addr), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_room_member_limit() {
+        let mut registry = ClientRegistry::new();
+        let room_addr = UserAddress::generate_from_time();
+
+        assert_eq!(
+            registry
+                .join_room_with_limit(1, room_addr.clone(), 2)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            registry
+                .join_room_with_limit(2, room_addr.clone(), 2)
+                .unwrap(),
+            2
+        );
+        assert!(registry.join_room_with_limit(3, room_addr, 2).is_err());
     }
 
     #[test]
