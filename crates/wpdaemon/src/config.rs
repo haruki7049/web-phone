@@ -64,10 +64,17 @@ pub struct Configuration {
     /// Unique identifier for this daemon node.
     #[serde(default = "generate_node_id")]
     pub node_id: u64,
+    /// Maximum allowed concurrent WebRTC peer connections.
+    #[serde(default = "default_max_connections")]
+    pub max_connections: usize,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_max_connections() -> usize {
+    1000
 }
 
 impl Default for Configuration {
@@ -79,6 +86,7 @@ impl Default for Configuration {
             turn_enabled: true,
             peers: Vec::new(),
             node_id: generate_node_id(),
+            max_connections: default_max_connections(),
         }
     }
 }
@@ -96,6 +104,7 @@ mod tests {
         assert!(config.turn_enabled);
         assert!(config.peers.is_empty());
         assert_ne!(config.node_id, 0);
+        assert_eq!(config.max_connections, 1000);
     }
 
     #[test]

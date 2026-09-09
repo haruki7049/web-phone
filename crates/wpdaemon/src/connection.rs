@@ -196,6 +196,21 @@ pub async fn handle_sdp_offer(
     let daemon_config = CONFIGURATION.get().cloned().unwrap_or_default();
     let my_node_id = daemon_config.node_id;
 
+    let active_connections = CLIENT_REGISTRY.read().unwrap().peer_connections.len();
+    if active_connections >= daemon_config.max_connections {
+        warn!(
+            "Rejected SDP offer: active connections ({}) reached max limit ({})",
+            active_connections, daemon_config.max_connections
+        );
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!(
+                "503 Service Unavailable: Maximum concurrent connections reached ({})",
+                daemon_config.max_connections
+            ),
+        ));
+    }
+
     let auth_header = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok());

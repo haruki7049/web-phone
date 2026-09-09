@@ -6,11 +6,12 @@
 
 use crate::broadcast::{AUDIO_BROADCAST, AudioMessage};
 use crate::config::CONFIGURATION;
+use crate::registry::CLIENT_REGISTRY;
 use axum::{extract::Json, http::StatusCode};
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
-use tracing::info;
+use tracing::{info, warn};
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
@@ -28,6 +29,21 @@ pub async fn handle_peer_sdp(
 ) -> Result<Json<RTCSessionDescription>, (StatusCode, String)> {
     let config = CONFIGURATION.get().cloned().unwrap_or_default();
     let my_node_id = config.node_id;
+
+    let active_connections = CLIENT_REGISTRY.read().unwrap().peer_connections.len();
+    if active_connections >= config.max_connections {
+        warn!(
+            "Rejected peer SDP offer: active connections ({}) reached max limit ({})",
+            active_connections, config.max_connections
+        );
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!(
+                "503 Service Unavailable: Maximum concurrent connections reached ({})",
+                config.max_connections
+            ),
+        ));
+    }
 
     let api = APIBuilder::new().build();
     let rtc_config = RTCConfiguration::default();

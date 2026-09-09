@@ -1,13 +1,13 @@
 //! WebRTC audio daemon, STUN/TURN server, and peer mesh entry point.
 
-use axum::{Router, routing::post};
+use axum::{Router, middleware, routing::post};
 use clap::Parser;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::{error, info};
 use wpdaemon::{
     CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, connection::handle_sdp_offer,
-    peer::connect_to_peer, peer::handle_peer_sdp, stun::run_stun_server,
+    peer::connect_to_peer, peer::handle_peer_sdp, rate_limit_middleware, stun::run_stun_server,
 };
 
 /// Main entry point for the audio server daemon.
@@ -34,6 +34,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loaded_config.node_id = node_id;
     } else if loaded_config.node_id == 0 {
         loaded_config.node_id = wpdaemon::config::generate_node_id();
+    }
+    if let Some(max_conn) = args.max_connections {
+        loaded_config.max_connections = max_conn;
     }
     if !args.peer.is_empty() {
         loaded_config.peers.extend(args.peer);
@@ -75,12 +78,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/sdp", post(handle_sdp_offer))
         .route("/peer/sdp", post(handle_peer_sdp))
+        .layer(middleware::from_fn(rate_limit_middleware))
         .route("/addresses", axum::routing::get(list_registered_addresses));
 
     let listener = tokio::net::TcpListener::bind(address).await?;
     info!(
-        "WebRTC audio daemon node {} running on http://{}",
-        config.node_id, &address
+        "WebRTC audio daemon node {} running on http://{} (max_connections: {})",
+        config.node_id, &address, config.max_connections
     );
     if config.turn_enabled {
         info!(
@@ -90,7 +94,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     info!("Waiting for wpclient audio calls & peer daemon mesh connections...");
 
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -118,6 +126,10 @@ struct CLIArgs {
     /// Unique node ID override for this daemon node.
     #[arg(long)]
     node_id: Option<u64>,
+
+    /// Maximum allowed concurrent WebRTC connections.
+    #[arg(long)]
+    max_connections: Option<usize>,
 
     /// Peer wpdaemon URLs to connect to for mesh interconnection.
     #[arg(long)]
