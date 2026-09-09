@@ -3,9 +3,15 @@
 //! This module implements a STUN (RFC 5389) and TURN media relay server
 //! running over UDP to facilitate NAT traversal for WebRTC clients.
 
+use crate::rate_limit::RateLimiter;
 use std::net::SocketAddr;
+use std::sync::{Arc, LazyLock};
 use tokio::net::UdpSocket;
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
+
+/// Static STUN IP rate limiter: 20 requests/sec, max burst of 50.
+static STUN_RATE_LIMITER: LazyLock<Arc<RateLimiter>> =
+    LazyLock::new(|| Arc::new(RateLimiter::new(20.0, 50.0)));
 
 /// STUN Magic Cookie (RFC 5389)
 const STUN_MAGIC_COOKIE: u32 = 0x2112A442;
@@ -36,6 +42,14 @@ pub async fn run_stun_server(
 
         if len < 20 {
             continue; // Not a valid STUN header
+        }
+
+        if !STUN_RATE_LIMITER.check_and_consume(src.ip()) {
+            warn!(
+                "STUN packet rate limit exceeded for IP: {}, dropping",
+                src.ip()
+            );
+            continue;
         }
 
         let msg_type = u16::from_be_bytes([buf[0], buf[1]]);
