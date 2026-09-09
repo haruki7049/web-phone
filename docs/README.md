@@ -35,6 +35,7 @@ ______________________________________________________________________
 | [WPIP-13](WPIP-13.md) | Audio Device Hot-plugging & Dynamic Audio Route Switching | Experimental | Dynamic audio device event monitoring, fallback, and route switching |
 | [WPIP-14](WPIP-14.md) | Client Key Store Encryption & Passphrase Key Derivation | Experimental | Argon2id & AES-256-GCM encrypted client identity key store format |
 | [WPIP-15](WPIP-15.md) | Optional Security Mechanisms & DoS Protections | Optional | Standardized Rate Limiting (Token Bucket), Request Authorization, and DoS Protections |
+| [WPIP-16](WPIP-16.md) | Secp256k1 & Nostr Identity Authentication Support | Optional | BIP-340 Schnorr signature authentication and Nostr public key identity support |
 
 ______________________________________________________________________
 

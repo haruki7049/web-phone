@@ -238,6 +238,57 @@ pub fn verify_authorization_header(
     }
 }
 
+use k256::schnorr::{
+    Signature as SchnorrSignature, VerifyingKey as SchnorrVerifyingKey, signature::Verifier,
+};
+
+/// Verify HTTP `Authorization` header value per WPIP-16 (secp256k1 BIP-340 Schnorr signature).
+pub fn verify_secp256k1_authorization_header(
+    header_val: &str,
+    sdp_offer: &str,
+) -> Result<UserAddress, String> {
+    let val = header_val
+        .strip_prefix("WP-Secp256k1 ")
+        .ok_or("Invalid authorization scheme (expected WP-Secp256k1)")?;
+    let parts: Vec<&str> = val.split(':').collect();
+    if parts.len() != 3 {
+        return Err("Invalid authorization header format (expected PubKey:Timestamp:Sig)".into());
+    }
+    let pubkey_hex = parts[0];
+    let timestamp: u64 = parts[1]
+        .parse()
+        .map_err(|_| "Invalid timestamp in authorization header")?;
+    let sig_hex = parts[2];
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let diff = now.abs_diff(timestamp);
+    if diff > 300 {
+        return Err(format!(
+            "Authorization timestamp drift too large ({}s > 300s)",
+            diff
+        ));
+    }
+
+    let pubkey_bytes =
+        hex::decode(pubkey_hex).map_err(|_| "Invalid hex in secp256k1 public key")?;
+    let verifying_key = SchnorrVerifyingKey::from_bytes(&pubkey_bytes)
+        .map_err(|_| "Invalid secp256k1 public key format")?;
+
+    let sig_bytes = hex::decode(sig_hex).map_err(|_| "Invalid hex in Schnorr signature")?;
+    let signature = SchnorrSignature::try_from(sig_bytes.as_slice())
+        .map_err(|_| "Invalid Schnorr signature bytes")?;
+
+    let payload = format!("{}:{}", timestamp, sdp_offer);
+    if verifying_key.verify(payload.as_bytes(), &signature).is_ok() {
+        Ok(UserAddress::new(pubkey_hex))
+    } else {
+        Err("Invalid secp256k1 Schnorr cryptographic signature".into())
+    }
+}
+
 impl Default for UserAddress {
     fn default() -> Self {
         Self::generate_from_time()
@@ -344,5 +395,33 @@ mod tests {
         let parsed: UserAddress = addr_str.parse().unwrap();
         assert_eq!(parsed.to_string(), addr_str);
         assert_eq!(parsed.id, addr_str);
+    }
+
+    #[test]
+    fn test_verify_secp256k1_authorization_header() {
+        use k256::schnorr::SigningKey;
+        use k256::schnorr::signature::Signer;
+        use rand::thread_rng;
+
+        let signing_key = SigningKey::random(&mut thread_rng());
+        let verifying_key = signing_key.verifying_key();
+        let pubkey_bytes = verifying_key.to_bytes();
+        let pubkey_hex = hex::encode(pubkey_bytes);
+
+        let sdp = "v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\n";
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let payload = format!("{}:{}", timestamp, sdp);
+
+        let signature: SchnorrSignature = signing_key.sign(payload.as_bytes());
+        let sig_hex = hex::encode(signature.to_bytes());
+
+        let header = format!("WP-Secp256k1 {}:{}:{}", pubkey_hex, timestamp, sig_hex);
+
+        let verified_addr = verify_secp256k1_authorization_header(&header, sdp)
+            .expect("Schnorr verification should pass");
+        assert_eq!(verified_addr.id, pubkey_hex);
     }
 }

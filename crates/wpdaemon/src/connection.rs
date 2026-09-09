@@ -230,17 +230,36 @@ pub async fn handle_sdp_offer(
         .and_then(|v| v.to_str().ok());
 
     let user_address = if let Some(auth_val) = auth_header {
-        match wpapi::address::verify_authorization_header(auth_val, &offer.sdp) {
-            Ok(addr) => {
-                info!("Verified client Ed25519 identity signature: {}", addr);
-                addr
+        if auth_val.starts_with("WP-Secp256k1 ") {
+            match wpapi::verify_secp256k1_authorization_header(auth_val, &offer.sdp) {
+                Ok(addr) => {
+                    info!(
+                        "Verified client secp256k1/Nostr Schnorr identity signature: {}",
+                        addr
+                    );
+                    addr
+                }
+                Err(err_msg) => {
+                    error!("secp256k1 authorization verification failed: {}", err_msg);
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        format!("401 Unauthorized: {}", err_msg),
+                    ));
+                }
             }
-            Err(err_msg) => {
-                error!("Ed25519 authorization verification failed: {}", err_msg);
-                return Err((
-                    StatusCode::UNAUTHORIZED,
-                    format!("401 Unauthorized: {}", err_msg),
-                ));
+        } else {
+            match wpapi::verify_authorization_header(auth_val, &offer.sdp) {
+                Ok(addr) => {
+                    info!("Verified client Ed25519 identity signature: {}", addr);
+                    addr
+                }
+                Err(err_msg) => {
+                    error!("Ed25519 authorization verification failed: {}", err_msg);
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        format!("401 Unauthorized: {}", err_msg),
+                    ));
+                }
             }
         }
     } else {
