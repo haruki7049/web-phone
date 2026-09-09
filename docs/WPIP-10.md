@@ -1,12 +1,12 @@
 # WPIP-10: STUN/TURN Dynamic HMAC Token Authentication
 
-`experimental` `optional` `author:haruki7049`
+`optional` `author:haruki7049`
 
 ______________________________________________________________________
 
 ## Abstract
 
-This specification defines an experimental extension for `wpdaemon` and `wpclient` implementations to support **Ephemeral HMAC-SHA1 Token Authentication** for embedded STUN/TURN services (WPIP-06).
+This specification defines an optional extension for `wpdaemon` and `wpclient` implementations to support **Ephemeral HMAC-SHA1 Token Authentication** for embedded STUN/TURN services (WPIP-06).
 
 By issuing time-limited, cryptographically signed TURN credentials during HTTP signaling (`POST /sdp`), nodes prevent unauthorized third parties from abusing embedded TURN relays as open bandwidth proxies.
 

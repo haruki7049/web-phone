@@ -1,12 +1,12 @@
 # WPIP-14: Client Key Store Encryption & Passphrase Key Derivation
 
-`experimental` `optional` `author:haruki7049`
+`optional` `author:haruki7049`
 
 ______________________________________________________________________
 
 ## Abstract
 
-This specification defines an experimental security extension for `wpclient` and `wpapi` implementations to encrypt local Ed25519 client identity key pairs (`UserAddress` secret keys) on disk.
+This specification defines an optional security extension for `wpclient` and `wpapi` implementations to encrypt local Ed25519 client identity key pairs (`UserAddress` secret keys) on disk.
 
 By deriving a 256-bit encryption key from a user-supplied **Passphrase** using **Argon2id** Key Derivation Function (KDF) and encrypting the secret key with **AES-256-GCM**, implementations prevent unauthorized key extraction if a client device or configuration file is physically or digitally compromised.
 

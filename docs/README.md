@@ -23,19 +23,19 @@ ______________________________________________________________________
 | [WPIP-06](WPIP-06.md) | Embedded STUN/TURN Service | Optional | Built-in UDP STUN/TURN responder for NAT traversal in `wpdaemon` |
 | [WPIP-07](WPIP-07.md) | Call Control & Capacity Constraints | Optional | Interactive call approval, rejection states, and 2-participant limit |
 | [WPIP-08](WPIP-08.md) | Group Call & SFU Extension | Optional | Selective Forwarding Unit (SFU) audio routing, Top-K active speaker selection, and room identity |
+| [WPIP-09](WPIP-09.md) | Connection Keep-Alive & Session Health Check | Optional | Ping/Pong heartbeat packets over DataChannel for silent disconnection pruning |
+| [WPIP-10](WPIP-10.md) | STUN/TURN Dynamic HMAC Token Authentication | Optional | Time-limited HMAC-SHA1 credential allocation for embedded TURN relays |
+| [WPIP-14](WPIP-14.md) | Client Key Store Encryption & Passphrase Key Derivation | Optional | Argon2id & AES-256-GCM encrypted client identity key store format |
+| [WPIP-15](WPIP-15.md) | Optional Security Mechanisms & DoS Protections | Optional | Standardized Rate Limiting (Token Bucket), Request Authorization, and DoS Protections |
+| [WPIP-16](WPIP-16.md) | Secp256k1 & Nostr Identity Authentication Support | Optional | BIP-340 Schnorr signature authentication and Nostr public key identity support |
 
 ### Experimental Specifications
 
 | WPIP | Title | Status | Summary |
 | :--- | :--- | :---: | :--- |
-| [WPIP-09](WPIP-09.md) | Connection Keep-Alive & Session Health Check | Experimental | Ping/Pong heartbeat packets over DataChannel for silent disconnection pruning |
-| [WPIP-10](WPIP-10.md) | STUN/TURN Dynamic HMAC Token Authentication | Experimental | Time-limited HMAC-SHA1 credential allocation for embedded TURN relays |
 | [WPIP-11](WPIP-11.md) | End-to-End Encryption (E2EE) for Group Rooms | Experimental | SFrame AES-256-GCM payload encryption for Zero-Knowledge SFU group calls |
 | [WPIP-12](WPIP-12.md) | Dynamic Codec Negotiation & Capability Handshake | Experimental | Dynamic audio codec selection and capability negotiation during SDP signaling |
 | [WPIP-13](WPIP-13.md) | Audio Device Hot-plugging & Dynamic Audio Route Switching | Experimental | Dynamic audio device event monitoring, fallback, and route switching |
-| [WPIP-14](WPIP-14.md) | Client Key Store Encryption & Passphrase Key Derivation | Experimental | Argon2id & AES-256-GCM encrypted client identity key store format |
-| [WPIP-15](WPIP-15.md) | Optional Security Mechanisms & DoS Protections | Optional | Standardized Rate Limiting (Token Bucket), Request Authorization, and DoS Protections |
-| [WPIP-16](WPIP-16.md) | Secp256k1 & Nostr Identity Authentication Support | Optional | BIP-340 Schnorr signature authentication and Nostr public key identity support |
 | [WPIP-17](WPIP-17.md) | Inter-Daemon Mutual TLS (mTLS) Mesh Authentication | Experimental | Self-signed Ed25519 node X.509 certificates and mutual TLS inter-daemon mesh authentication |
 | [WPIP-18](WPIP-18.md) | Dynamic IP Blacklisting & Automated Abuse Mitigation | Experimental | Dynamic IP blacklisting and Fail2ban penalty tracking for abuse mitigation |
 | [WPIP-19](WPIP-19.md) | Direct Client-to-Client ICE Transport Negotiation | Experimental | Direct client-to-client ICE transport negotiation and daemon bypass mode |

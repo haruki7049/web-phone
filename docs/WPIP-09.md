@@ -1,12 +1,12 @@
 # WPIP-09: Connection Keep-Alive & Session Health Check
 
-`experimental` `optional` `author:haruki7049`
+`optional` `author:haruki7049`
 
 ______________________________________________________________________
 
 ## Abstract
 
-This specification defines an experimental extension for `wpdaemon` and `wpclient` implementations to support **Heartbeat Keep-Alive** and **Session Health Checking**.
+This specification defines an optional extension for `wpdaemon` and `wpclient` implementations to support **Heartbeat Keep-Alive** and **Session Health Checking**.
 
 By transmitting periodic `Ping` (`0x12`) and `Pong` (`0x13`) packets over established WebRTC DataChannels, nodes can promptly detect silent network disconnections (e.g., sudden Wi-Fi loss or unannounced client process crashes) and purge stale entries from `ClientRegistry`.
 
