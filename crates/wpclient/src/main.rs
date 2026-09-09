@@ -232,16 +232,16 @@ fn list_audio_devices() -> Result<()> {
     println!("Audio Input Devices (Microphones):");
     if let Ok(devices) = host.input_devices() {
         for dev in devices {
-            if let Ok(name) = dev.name() {
-                println!("  • {}", name);
+            if let Ok(desc) = dev.description() {
+                println!("  • {}", desc.name());
             }
         }
     }
     println!("\nAudio Output Devices (Speakers):");
     if let Ok(devices) = host.output_devices() {
         for dev in devices {
-            if let Ok(name) = dev.name() {
-                println!("  • {}", name);
+            if let Ok(desc) = dev.description() {
+                println!("  • {}", desc.name());
             }
         }
     }

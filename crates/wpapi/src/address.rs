@@ -38,7 +38,7 @@ impl UserAddress {
         let mut hasher = Sha256::new();
         hasher.update(format!("{}-{}", nanos, count).as_bytes());
         let result = hasher.finalize();
-        let hex_id = format!("{:x}", result);
+        let hex_id = hex::encode(result);
 
         Self { id: hex_id }
     }

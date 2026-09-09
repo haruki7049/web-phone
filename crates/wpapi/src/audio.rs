@@ -15,16 +15,16 @@ pub fn get_device_names() -> Result<(Vec<String>, Vec<String>)> {
 
     if let Ok(devices) = host.input_devices() {
         for device in devices {
-            if let Ok(name) = device.name() {
-                inputs.push(name);
+            if let Ok(desc) = device.description() {
+                inputs.push(desc.name().to_string());
             }
         }
     }
 
     if let Ok(devices) = host.output_devices() {
         for device in devices {
-            if let Ok(name) = device.name() {
-                outputs.push(name);
+            if let Ok(desc) = device.description() {
+                outputs.push(desc.name().to_string());
             }
         }
     }
@@ -38,8 +38,8 @@ pub fn list_devices() -> Result<()> {
 
     info!("Available input devices:");
     for device in host.input_devices()? {
-        if let Ok(name) = device.name() {
-            info!("  - {}", name);
+        if let Ok(desc) = device.description() {
+            info!("  - {}", desc.name());
             if let Ok(config) = device.default_input_config() {
                 info!("      Default input config: {:?}", config);
             }
@@ -48,8 +48,8 @@ pub fn list_devices() -> Result<()> {
 
     info!("Available output devices:");
     for device in host.output_devices()? {
-        if let Ok(name) = device.name() {
-            info!("  - {}", name);
+        if let Ok(desc) = device.description() {
+            info!("  - {}", desc.name());
             if let Ok(config) = device.default_output_config() {
                 info!("      Default output config: {:?}", config);
             }
@@ -65,8 +65,8 @@ pub fn find_input_device(host: &cpal::Host, name_opt: Option<&str>) -> Result<cp
         let name_lower = name.to_lowercase();
         let devices = host.input_devices()?;
         for device in devices {
-            if let Ok(dev_name) = device.name()
-                && dev_name.to_lowercase().contains(&name_lower)
+            if let Ok(desc) = device.description()
+                && desc.name().to_lowercase().contains(&name_lower)
             {
                 return Ok(device);
             }
@@ -84,8 +84,8 @@ pub fn find_output_device(host: &cpal::Host, name_opt: Option<&str>) -> Result<c
         let name_lower = name.to_lowercase();
         let devices = host.output_devices()?;
         for device in devices {
-            if let Ok(dev_name) = device.name()
-                && dev_name.to_lowercase().contains(&name_lower)
+            if let Ok(desc) = device.description()
+                && desc.name().to_lowercase().contains(&name_lower)
             {
                 return Ok(device);
             }
@@ -99,7 +99,7 @@ pub fn find_output_device(host: &cpal::Host, name_opt: Option<&str>) -> Result<c
 
 use crate::config::Configuration;
 use cpal::traits::StreamTrait;
-use cpal::{SampleRate, Stream, StreamConfig};
+use cpal::{Stream, StreamConfig};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -127,14 +127,26 @@ impl AudioEngine {
         let host = cpal::default_host();
 
         let input_device = find_input_device(&host, config.input_device.as_deref())?;
-        info!("Using input device: {}", input_device.name()?);
+        info!(
+            "Using input device: {}",
+            input_device
+                .description()
+                .map(|d| d.name().to_string())
+                .unwrap_or_else(|_| "Unknown".into())
+        );
 
         let output_device = find_output_device(&host, config.output_device.as_deref())?;
-        info!("Using output device: {}", output_device.name()?);
+        info!(
+            "Using output device: {}",
+            output_device
+                .description()
+                .map(|d| d.name().to_string())
+                .unwrap_or_else(|_| "Unknown".into())
+        );
 
         let target_input_config = StreamConfig {
             channels: config.channels,
-            sample_rate: SampleRate(config.sample_rate),
+            sample_rate: config.sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -147,7 +159,7 @@ impl AudioEngine {
                 let mut resampler = crate::resample::Resampler::new(rate, net_sample_rate);
                 let tx = tx_audio_clone.clone();
                 input_device.build_input_stream(
-                    cfg,
+                    *cfg,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
                         let channels = ch as usize;
                         let num_frames = data.len() / channels;
@@ -180,7 +192,7 @@ impl AudioEngine {
                     );
                     let def_cfg = input_device.default_input_config()?;
                     let def_stream_config: StreamConfig = def_cfg.config();
-                    let rate = def_stream_config.sample_rate.0;
+                    let rate = def_stream_config.sample_rate;
                     let ch = def_stream_config.channels;
                     info!(
                         "Using input device default config: {} Hz, {} channels",
@@ -195,7 +207,7 @@ impl AudioEngine {
         // Build Output Stream (audio_buffer -> Resampler -> Speaker)
         let target_output_config = StreamConfig {
             channels: config.channels,
-            sample_rate: SampleRate(config.sample_rate),
+            sample_rate: config.sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -207,7 +219,7 @@ impl AudioEngine {
                 let audio_buf = Arc::clone(&audio_buffer);
 
                 output_device.build_output_stream(
-                    cfg,
+                    *cfg,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         let frames_needed = data.len() / channels;
                         if frames_needed == 0 {
@@ -267,7 +279,7 @@ impl AudioEngine {
                     );
                     let def_cfg = output_device.default_output_config()?;
                     let def_stream_config: StreamConfig = def_cfg.config();
-                    let rate = def_stream_config.sample_rate.0;
+                    let rate = def_stream_config.sample_rate;
                     let ch = def_stream_config.channels;
                     info!(
                         "Using output device default config: {} Hz, {} channels",

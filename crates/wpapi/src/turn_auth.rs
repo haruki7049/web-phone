@@ -3,7 +3,7 @@
 use crate::address::UserAddress;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use std::time::{SystemTime, UNIX_EPOCH};

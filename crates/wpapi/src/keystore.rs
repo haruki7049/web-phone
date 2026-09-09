@@ -1,10 +1,7 @@
 //! WPIP-14: Client Key Store Encryption & Passphrase Key Derivation module.
 
 use crate::address::UserKeypair;
-use aes_gcm::{
-    Aes256Gcm, KeyInit,
-    aead::{Aead, AeadCore},
-};
+use aes_gcm::{Aes256Gcm, KeyInit, aead::Aead};
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -74,7 +71,9 @@ pub fn save_encrypted_keystore(
 
     let cipher = Aes256Gcm::new_from_slice(&derived_key)
         .map_err(|e| format!("AES-256-GCM initialization failed: {}", e))?;
-    let nonce = Aes256Gcm::generate_nonce(&mut rand::thread_rng());
+    let mut nonce_bytes = [0u8; 12];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let nonce = aes_gcm::Nonce::from(nonce_bytes);
 
     let raw_secret = keypair.to_bytes();
     let ciphertext = cipher
@@ -125,12 +124,16 @@ pub fn load_encrypted_keystore(passphrase: &str, path: &Path) -> Result<UserKeyp
     let salt = BASE64_STANDARD
         .decode(&store.crypto.kdf_params.salt)
         .map_err(|_| "Invalid Base64 in salt")?;
-    let nonce = BASE64_STANDARD
+    let nonce_raw = BASE64_STANDARD
         .decode(&store.crypto.nonce)
         .map_err(|_| "Invalid Base64 in nonce")?;
     let ciphertext = BASE64_STANDARD
         .decode(&store.crypto.ciphertext)
         .map_err(|_| "Invalid Base64 in ciphertext")?;
+
+    let nonce_bytes: [u8; 12] = nonce_raw
+        .try_into()
+        .map_err(|_| "Invalid nonce length (must be 12 bytes)")?;
 
     let params = Params::new(
         store.crypto.kdf_params.mem_limit_kib,
@@ -150,9 +153,9 @@ pub fn load_encrypted_keystore(passphrase: &str, path: &Path) -> Result<UserKeyp
     let cipher = Aes256Gcm::new_from_slice(&derived_key)
         .map_err(|e| format!("AES-256-GCM initialization failed: {}", e))?;
 
-    let nonce = aes_gcm::Nonce::from_slice(&nonce);
+    let nonce = aes_gcm::Nonce::from(nonce_bytes);
     let decrypted_bytes = cipher
-        .decrypt(nonce, ciphertext.as_slice())
+        .decrypt(&nonce, ciphertext.as_slice())
         .map_err(|_| "Decryption failed: Incorrect passphrase or corrupted keystore".to_string())?;
 
     if decrypted_bytes.len() != 32 {

@@ -25,7 +25,6 @@ pub use turn_auth::{
     TurnCredential, generate_ephemeral_turn_credential, verify_ephemeral_turn_credential,
 };
 
-use cpal::traits::{DeviceTrait, HostTrait};
 use std::cell::RefCell;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -442,13 +441,18 @@ pub unsafe extern "C" fn wpapi_list_audio_devices(out_json: *mut *mut c_char) ->
             set_last_error("Null pointer argument");
             return -1;
         }
+        use cpal::traits::{DeviceTrait, HostTrait};
         let host = cpal::default_host();
         let input_devices: Vec<String> = match host.input_devices() {
-            Ok(devs) => devs.filter_map(|d| d.name().ok()).collect(),
+            Ok(devs) => devs
+                .filter_map(|d| d.description().map(|desc| desc.name().to_string()).ok())
+                .collect(),
             Err(_) => Vec::new(),
         };
         let output_devices: Vec<String> = match host.output_devices() {
-            Ok(devs) => devs.filter_map(|d| d.name().ok()).collect(),
+            Ok(devs) => devs
+                .filter_map(|d| d.description().map(|desc| desc.name().to_string()).ok())
+                .collect(),
             Err(_) => Vec::new(),
         };
         let val = serde_json::json!({
