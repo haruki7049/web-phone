@@ -99,6 +99,7 @@ impl ClientRegistry {
         for speakers in self.room_speakers.values_mut() {
             speakers.remove(&client_id);
         }
+        crate::rate_limit::DATACHANNEL_RATE_LIMITER.remove_client(client_id);
     }
 
     /// Find client ID matching a given UserAddress (exact or prefix match per WPIP-02 Section 5).

@@ -355,6 +355,13 @@ pub async fn handle_sdp_offer(
         dc.on_message(Box::new(move |msg: DataChannelMessage| {
             let dc_inner = Arc::clone(&dc_msg);
             Box::pin(async move {
+                if !crate::rate_limit::DATACHANNEL_RATE_LIMITER.check_and_consume(client_id) {
+                    warn!(
+                        "DataChannel rate limit exceeded for client {}, dropping packet",
+                        client_id
+                    );
+                    return;
+                }
                 if let Ok(packet) = ProtocolPacket::decode(&msg.data) {
                     process_incoming_packet(client_id, my_node_id, &dc_inner, packet).await;
                 }
