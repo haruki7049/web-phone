@@ -34,6 +34,7 @@ ______________________________________________________________________
 | [WPIP-12](WPIP-12.md) | Dynamic Codec Negotiation & Capability Handshake | Experimental | Dynamic audio codec selection and capability negotiation during SDP signaling |
 | [WPIP-13](WPIP-13.md) | Audio Device Hot-plugging & Dynamic Audio Route Switching | Experimental | Dynamic audio device event monitoring, fallback, and route switching |
 | [WPIP-14](WPIP-14.md) | Client Key Store Encryption & Passphrase Key Derivation | Experimental | Argon2id & AES-256-GCM encrypted client identity key store format |
+| [WPIP-15](WPIP-15.md) | Optional Security Mechanisms & DoS Protections | Optional | Standardized Rate Limiting (Token Bucket), Request Authorization, and DoS Protections |
 
 ______________________________________________________________________
 
