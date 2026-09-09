@@ -1,4 +1,6 @@
-pub mod gui;
+pub mod tui;
+
+
 
 pub use wpapi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, UserAddress};
 pub use wpapi::{address, audio, call, config, resample};

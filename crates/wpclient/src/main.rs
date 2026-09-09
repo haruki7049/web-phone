@@ -1,20 +1,7 @@
-//! WebRTC audio client GUI application entry point.
+//! WebRTC audio client TUI application entry point.
 //!
-//! This binary provides the graphical desktop user interface (Iced) for the web-phone
-//! audio client.
-//!
-//! # Usage
-//!
-//! ```bash
-//! # Launch desktop GUI
-//! wpclient
-//!
-//! # Show version
-//! wpclient --version
-//!
-//! # Show help
-//! wpclient --help
-//! ```
+//! This binary provides an interactive Terminal User Interface (Ratatui)
+//! for the web-phone audio client.
 
 use anyhow::Result;
 use clap::Parser;
@@ -23,12 +10,12 @@ use std::path::PathBuf;
 use tracing::info;
 use wpapi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 
-/// Command-line arguments for the audio client GUI.
+/// Command-line arguments for the audio client TUI.
 #[derive(Debug, Parser)]
 #[clap(
     version,
     author,
-    about = "Decentralized WebRTC audio client featuring full interactive GUI (Iced)."
+    about = "Decentralized WebRTC audio client featuring interactive TUI (Ratatui)."
 )]
 struct CLIArgs {
     /// Path to the configuration file.
@@ -56,14 +43,10 @@ struct CLIArgs {
     output_device: Option<String>,
 }
 
-/// Main entry point for the audio client GUI.
+/// Main entry point for the audio client TUI.
 #[tokio::main]
 async fn main() -> Result<()> {
-    let handle = tokio::runtime::Handle::current();
-    let _ = wpclient::gui::TOKIO_HANDLE.set(handle);
-
     color_eyre::install().expect("Failed to install color_eyre panic handler");
-    tracing_subscriber::fmt::init();
     let args: CLIArgs = CLIArgs::parse();
 
     let mut loaded_config: Configuration =
@@ -94,8 +77,8 @@ async fn main() -> Result<()> {
         .get()
         .ok_or_else(|| anyhow::anyhow!("Failed to get Configuration"))?;
 
-    // Launch Iced GUI directly
-    wpclient::gui::run_gui(config.clone())?;
+    // Launch Ratatui TUI directly
+    wpclient::tui::run_tui(config.clone()).await?;
 
     Ok(())
 }

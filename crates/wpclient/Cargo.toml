@@ -10,11 +10,16 @@ anyhow.workspace = true
 clap.workspace = true
 color-eyre.workspace = true
 confy.workspace = true
-iced.workspace = true
 reqwest.workspace = true
+
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+futures.workspace = true
+
+
 
 [dev-dependencies]
 toml.workspace = true
