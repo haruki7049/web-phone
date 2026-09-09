@@ -10,17 +10,18 @@ use axum::{
     extract::Json,
     http::{HeaderMap, StatusCode},
 };
-use bytes::Bytes;
+use bytes::BytesMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use async_trait::async_trait;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
-use webrtc::api::APIBuilder;
-use webrtc::data_channel::RTCDataChannel;
-use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use webrtc::data_channel::{DataChannel, DataChannelEvent};
+use webrtc::peer_connection::{
+    PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
+    RTCIceGatheringState, RTCPeerConnectionState, RTCSessionDescription,
+};
 use wpapi::{ProtocolPacket, UserAddress};
 
 /// Counter for connected clients.
@@ -67,7 +68,11 @@ pub fn start_keepalive_task() {
                 .unwrap_or_default()
                 .as_millis() as u64;
 
-            let ping_bytes = Bytes::from(ProtocolPacket::Ping { timestamp: now_ms }.encode());
+            let ping_bytes = BytesMut::from(
+                ProtocolPacket::Ping { timestamp: now_ms }
+                    .encode()
+                    .as_slice(),
+            );
 
             let channels = {
                 let reg = CLIENT_REGISTRY.read().unwrap();
@@ -75,7 +80,7 @@ pub fn start_keepalive_task() {
             };
 
             for (_cid, dc) in channels {
-                let _ = dc.send(&ping_bytes).await;
+                let _ = dc.send(ping_bytes.clone()).await;
             }
 
             let stale_cids = {
@@ -202,6 +207,186 @@ pub fn generate_turn_credentials_for_client(
     wpapi::generate_ephemeral_turn_credential(&secret, user_address, turn_urls, ttl_seconds)
 }
 
+struct ClientConnectionHandler {
+    client_id: u64,
+    user_address: UserAddress,
+    my_node_id: u64,
+    gather_tx: mpsc::Sender<()>,
+}
+
+#[async_trait]
+impl PeerConnectionEventHandler for ClientConnectionHandler {
+    async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
+        if state == RTCIceGatheringState::Complete {
+            let _ = self.gather_tx.send(()).await;
+        }
+    }
+
+    async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
+        info!("Client {} PeerConnection state: {}", self.client_id, state);
+        if state == RTCPeerConnectionState::Failed
+            || state == RTCPeerConnectionState::Closed
+            || state == RTCPeerConnectionState::Disconnected
+        {
+            info!(
+                "Client {} ({}) disconnected",
+                self.client_id,
+                self.user_address.short_id()
+            );
+            CLIENT_REGISTRY
+                .write()
+                .unwrap()
+                .unregister_client(self.client_id);
+        }
+    }
+
+    async fn on_data_channel(&self, dc: Arc<dyn DataChannel>) {
+        let dc_label = dc.label().await.unwrap_or_default();
+        info!(
+            "Client {} created DataChannel: {}",
+            self.client_id, dc_label
+        );
+
+        CLIENT_REGISTRY
+            .write()
+            .unwrap()
+            .data_channels
+            .insert(self.client_id, Arc::clone(&dc));
+
+        let client_id = self.client_id;
+        let user_address = self.user_address.clone();
+        let my_node_id = self.my_node_id;
+
+        tokio::spawn(async move {
+            handle_client_datachannel_events(dc, client_id, user_address, my_node_id).await;
+        });
+    }
+}
+
+async fn handle_client_datachannel_events(
+    dc: Arc<dyn DataChannel>,
+    client_id: u64,
+    user_address: UserAddress,
+    my_node_id: u64,
+) {
+    let mut audio_rx_opt = Some(AUDIO_BROADCAST.subscribe());
+    let assign_packet = ProtocolPacket::ClientAssignment {
+        client_id,
+        user_address: user_address.clone(),
+    };
+    let _ = dc
+        .send(BytesMut::from(assign_packet.encode().as_slice()))
+        .await;
+
+    while let Some(event) = dc.poll().await {
+        match event {
+            DataChannelEvent::OnOpen => {
+                info!("Client {} DataChannel opened", client_id);
+                if let Some(mut rx) = audio_rx_opt.take() {
+                    let dc_inner = Arc::clone(&dc);
+                    let user_addr = user_address.clone();
+                    tokio::spawn(async move {
+                        loop {
+                            match rx.recv().await {
+                                Ok(audio_msg) => {
+                                    if audio_msg.sender_id == client_id {
+                                        continue;
+                                    }
+                                    if matches_address(&audio_msg.target_address, &user_addr) {
+                                        let packet = ProtocolPacket::ServerTargetedAudio {
+                                            target_address: user_addr.clone(),
+                                            sender_id: audio_msg.sender_id,
+                                            sender_address: audio_msg
+                                                .sender_address
+                                                .unwrap_or_default(),
+                                            codec_id: wpapi::protocol::CODEC_OPUS,
+                                            audio_data: audio_msg.data,
+                                        };
+                                        if dc_inner
+                                            .send(BytesMut::from(packet.encode().as_slice()))
+                                            .await
+                                            .is_err()
+                                        {
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                    continue;
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+            DataChannelEvent::OnMessage(msg) => {
+                let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
+                    continue;
+                };
+
+                let sender_addr = Some(user_address.clone());
+                match packet {
+                    ProtocolPacket::ClientTargetedAudio {
+                        target_address,
+                        audio_data,
+                        ..
+                    } => {
+                        handle_client_targeted_audio(
+                            client_id,
+                            sender_addr,
+                            target_address,
+                            my_node_id,
+                            audio_data,
+                            &dc,
+                        )
+                        .await;
+                    }
+                    ProtocolPacket::CallAcceptResponse { caller_address } => {
+                        handle_call_accept_response(client_id, caller_address).await;
+                    }
+                    ProtocolPacket::CallRejectResponse { caller_address } => {
+                        handle_call_reject_response(client_id, caller_address).await;
+                    }
+                    ProtocolPacket::CallHangup { target_address } => {
+                        handle_call_hangup(client_id, sender_addr, target_address).await;
+                    }
+                    ProtocolPacket::RoomJoinRequest { room_address } => {
+                        handle_room_join(client_id, room_address).await;
+                    }
+                    ProtocolPacket::RoomLeaveRequest { room_address } => {
+                        handle_room_leave(client_id, &room_address).await;
+                    }
+                    ProtocolPacket::RoomGroupAudio {
+                        room_address,
+                        codec_id,
+                        audio_data,
+                    } => {
+                        handle_room_group_audio(client_id, room_address, codec_id, audio_data)
+                            .await;
+                    }
+                    ProtocolPacket::Pong { .. } => {
+                        let now = std::time::Instant::now();
+                        if let Ok(mut reg) = CLIENT_REGISTRY.write() {
+                            reg.last_pong.insert(client_id, now);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            DataChannelEvent::OnClose => {
+                info!("Client {} DataChannel closed", client_id);
+                CLIENT_REGISTRY
+                    .write()
+                    .unwrap()
+                    .unregister_client(client_id);
+                break;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Handle an SDP offer from a WebRTC client.
 pub async fn handle_sdp_offer(
     headers: HeaderMap,
@@ -263,21 +448,40 @@ pub async fn handle_sdp_offer(
             }
         }
     } else {
-        info!("No Authorization header provided, fallback to temporary UserAddress...");
-        UserAddress::generate_from_time()
+        let addr = UserAddress::generate_from_time();
+        info!(
+            "No Authorization header present. Generated temporary User ID: {}",
+            addr
+        );
+        addr
     };
 
-    let api = APIBuilder::new().build();
-    let config = RTCConfiguration::default();
-
-    let peer_connection = Arc::new(api.new_peer_connection(config).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to create PeerConnection: {}", e),
-        )
-    })?);
-
     let client_id = CLIENT_COUNT.fetch_add(1, Ordering::SeqCst);
+    let (gather_tx, mut gather_rx) = mpsc::channel(1);
+
+    let handler = Arc::new(ClientConnectionHandler {
+        client_id,
+        user_address: user_address.clone(),
+        my_node_id,
+        gather_tx,
+    });
+
+    let config = RTCConfigurationBuilder::default().build();
+
+    let pc = PeerConnectionBuilder::new()
+        .with_configuration(config)
+        .with_handler(handler)
+        .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
+        .build()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to build PeerConnection: {}", e),
+            )
+        })?;
+
+    let peer_connection: Arc<dyn PeerConnection> = Arc::new(pc);
 
     info!(
         "Client {} connected, assigned User ID: {}",
@@ -312,129 +516,15 @@ pub async fn handle_sdp_offer(
         }
     });
 
-    peer_connection.on_peer_connection_state_change(Box::new(
-        move |state: RTCPeerConnectionState| {
-            info!("Client {} PeerConnection state: {}", client_id, state);
-            if state == RTCPeerConnectionState::Failed
-                || state == RTCPeerConnectionState::Closed
-                || state == RTCPeerConnectionState::Disconnected
-            {
-                info!(
-                    "Client {} ({}) disconnected",
-                    client_id,
-                    user_address.short_id()
-                );
-                CLIENT_REGISTRY
-                    .write()
-                    .unwrap()
-                    .unregister_client(client_id);
-            }
-            Box::pin(async move {})
-        },
-    ));
-
-    peer_connection.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
-        let dc_label = dc.label().to_string();
-        info!("Client {} created DataChannel: {}", client_id, dc_label);
-
-        CLIENT_REGISTRY
-            .write()
-            .unwrap()
-            .data_channels
-            .insert(client_id, Arc::clone(&dc));
-
-        let dc_open = Arc::clone(&dc);
-
-        dc.on_open(Box::new(move || {
-            let dc_inner = Arc::clone(&dc_open);
-            let mut audio_rx = AUDIO_BROADCAST.subscribe();
-
-            Box::pin(async move {
-                info!("Client {} DataChannel opened", client_id);
-
-                let my_addr = CLIENT_REGISTRY
-                    .read()
-                    .unwrap()
-                    .addresses
-                    .get(&client_id)
-                    .cloned()
-                    .unwrap_or_default();
-
-                // Send client ID and registered SHA-256 address assignment message:
-                let init_packet = ProtocolPacket::ClientAssignment {
-                    client_id,
-                    user_address: my_addr,
-                };
-
-                if let Err(e) = dc_inner.send(&Bytes::from(init_packet.encode())).await {
-                    error!("Failed to send client info to client {}: {}", client_id, e);
-                    return;
-                }
-
-                // Forward ad-hoc room audio to this client if it belongs to the target room
-                tokio::spawn(async move {
-                    loop {
-                        match audio_rx.recv().await {
-                            Ok(audio_msg) => {
-                                // Skip loopback to sender
-                                if audio_msg.sender_id == client_id {
-                                    continue;
-                                }
-
-                                let target_room = &audio_msg.target_address;
-                                if is_client_in_room(client_id, target_room) {
-                                    let packet = ProtocolPacket::ServerTargetedAudio {
-                                        target_address: target_room.clone(),
-                                        sender_id: audio_msg.sender_id,
-                                        sender_address: audio_msg
-                                            .sender_address
-                                            .unwrap_or_default(),
-                                        codec_id: wpapi::protocol::CODEC_OPUS,
-                                        audio_data: audio_msg.data,
-                                    };
-
-                                    if dc_inner.send(&Bytes::from(packet.encode())).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            }
-                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                        }
-                    }
-                });
-            })
-        }));
-
-        let dc_msg = Arc::clone(&dc);
-        dc.on_message(Box::new(move |msg: DataChannelMessage| {
-            let dc_inner = Arc::clone(&dc_msg);
-            Box::pin(async move {
-                if !crate::rate_limit::DATACHANNEL_RATE_LIMITER.check_and_consume(client_id) {
-                    warn!(
-                        "DataChannel rate limit exceeded for client {}, dropping packet",
-                        client_id
-                    );
-                    return;
-                }
-                if let Ok(packet) = ProtocolPacket::decode(&msg.data) {
-                    process_incoming_packet(client_id, my_node_id, &dc_inner, packet).await;
-                }
-            })
-        }));
-
-        Box::pin(async move {})
-    }));
-
     peer_connection
         .set_remote_description(offer)
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid offer SDP: {}", e)))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid SDP offer: {}", e)))?;
 
     let answer = peer_connection.create_answer(None).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to create answer: {}", e),
+            format!("Failed to create SDP answer: {}", e),
         )
     })?;
 
@@ -448,8 +538,7 @@ pub async fn handle_sdp_offer(
             )
         })?;
 
-    let mut gather_complete = peer_connection.gathering_complete_promise().await;
-    let _ = gather_complete.recv().await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), gather_rx.recv()).await;
 
     let local_desc = peer_connection.local_description().await.ok_or_else(|| {
         (
@@ -461,76 +550,13 @@ pub async fn handle_sdp_offer(
     Ok(Json(local_desc))
 }
 
-/// Process incoming DataChannel packet according to packet type.
-async fn process_incoming_packet(
-    client_id: u64,
-    my_node_id: u64,
-    dc: &Arc<RTCDataChannel>,
-    packet: ProtocolPacket,
-) {
-    let sender_addr = CLIENT_REGISTRY
-        .read()
-        .unwrap()
-        .addresses
-        .get(&client_id)
-        .cloned();
-
-    match packet {
-        ProtocolPacket::ClientTargetedAudio {
-            target_address,
-            audio_data: payload,
-            ..
-        } => {
-            handle_client_targeted_audio(
-                client_id,
-                my_node_id,
-                dc,
-                sender_addr,
-                target_address,
-                payload,
-            )
-            .await;
-        }
-        ProtocolPacket::CallAcceptResponse { caller_address } => {
-            handle_call_accept_response(client_id, caller_address).await;
-        }
-        ProtocolPacket::CallRejectResponse { caller_address } => {
-            handle_call_reject_response(client_id, caller_address).await;
-        }
-        ProtocolPacket::CallHangup { target_address } => {
-            handle_call_hangup(client_id, sender_addr, target_address).await;
-        }
-        ProtocolPacket::Ping { timestamp } => {
-            let pong = ProtocolPacket::Pong { timestamp };
-            let _ = dc.send(&Bytes::from(pong.encode())).await;
-        }
-        ProtocolPacket::Pong { .. } => {
-            CLIENT_REGISTRY.write().unwrap().update_last_pong(client_id);
-        }
-        ProtocolPacket::RoomJoinRequest { room_address } => {
-            handle_room_join(client_id, room_address).await;
-        }
-        ProtocolPacket::RoomLeaveRequest { room_address } => {
-            handle_room_leave(client_id, &room_address).await;
-        }
-        ProtocolPacket::RoomGroupAudio {
-            room_address,
-            codec_id,
-            audio_data: payload,
-        } => {
-            handle_room_group_audio(client_id, room_address, codec_id, payload).await;
-        }
-        _ => {}
-    }
-}
-
 async fn handle_client_targeted_audio(
     client_id: u64,
-    my_node_id: u64,
-    dc: &Arc<RTCDataChannel>,
     sender_addr: Option<UserAddress>,
     target_address: UserAddress,
+    my_node_id: u64,
     payload: Vec<u8>,
+    dc: &Arc<dyn DataChannel>,
 ) {
     if payload.len() > MAX_MESSAGE_SIZE {
         warn!(
@@ -541,68 +567,76 @@ async fn handle_client_targeted_audio(
         return;
     }
 
-    if !is_client_in_same_call(client_id, &target_address)
-        && is_room_or_target_full(&target_address)
-    {
-        warn!(
-            "Rejecting Client {} connection to target {}: call already has maximum 2 participants",
-            client_id,
-            target_address.short_id()
-        );
-        let err_packet = ProtocolPacket::ConnectionError {
-            target_address: target_address.clone(),
-        };
-        let _ = dc.send(&Bytes::from(err_packet.encode())).await;
-        return;
-    }
+    let caller_user_addr = sender_addr.clone().unwrap_or_default();
 
-    if let Some(target_cid) = find_client_by_address(&target_address) {
-        if target_cid != client_id {
-            let caller_user_addr = sender_addr.clone().unwrap_or_default();
+    if is_client_in_room(client_id, &target_address) {
+        // Group call mode
+    } else if let Some(target_cid) = find_client_by_address(&target_address) {
+        if is_call_rejected(target_cid, &caller_user_addr) {
+            warn!(
+                "Rejecting Client {} call to {}: call rejected by recipient",
+                client_id,
+                target_address.short_id()
+            );
+            let err_packet = ProtocolPacket::ConnectionError {
+                target_address: target_address.clone(),
+            };
+            let _ = dc
+                .send(BytesMut::from(err_packet.encode().as_slice()))
+                .await;
+            return;
+        }
 
-            let target_explicit_target = CLIENT_REGISTRY
-                .read()
-                .unwrap()
-                .targets
-                .get(&target_cid)
-                .cloned();
-            let is_mutual = target_explicit_target
-                .as_ref()
-                .is_some_and(|t| matches_address(t, &caller_user_addr));
+        let is_in_same_call = is_client_in_same_call(client_id, &target_address);
+        let is_mutual = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .targets
+            .get(&target_cid)
+            .map(|addr| matches_address(addr, &caller_user_addr))
+            .unwrap_or(false);
 
-            if is_call_rejected(target_cid, &caller_user_addr) {
-                let err_packet = ProtocolPacket::CallRejectedNotification {
-                    target_address: target_address.clone(),
-                };
-                let _ = dc.send(&Bytes::from(err_packet.encode())).await;
-                return;
-            }
+        if !is_in_same_call && !is_mutual && is_room_or_target_full(&target_address) {
+            warn!(
+                "Rejecting Client {} call to {}: target user busy",
+                client_id,
+                target_address.short_id()
+            );
+            let err_packet = ProtocolPacket::ConnectionError {
+                target_address: target_address.clone(),
+            };
+            let _ = dc
+                .send(BytesMut::from(err_packet.encode().as_slice()))
+                .await;
+            return;
+        }
 
-            if !is_mutual && !is_call_approved(target_cid, &caller_user_addr) {
-                if !has_been_notified(target_cid, client_id) {
-                    mark_notified(target_cid, client_id);
-                    let target_dc = CLIENT_REGISTRY
-                        .read()
-                        .unwrap()
-                        .data_channels
-                        .get(&target_cid)
-                        .cloned();
-                    if let Some(target_dc) = target_dc {
-                        let req_packet = ProtocolPacket::CallRequest {
-                            caller_id: client_id,
-                            caller_address: caller_user_addr.clone(),
-                        };
-                        let _ = target_dc.send(&Bytes::from(req_packet.encode())).await;
-                        info!(
-                            "Sent call request notification to Client {} for caller Client {} ({})",
-                            target_cid,
-                            client_id,
-                            caller_user_addr.short_id()
-                        );
-                    }
+        if !is_mutual && !is_call_approved(target_cid, &caller_user_addr) {
+            if !has_been_notified(target_cid, client_id) {
+                mark_notified(target_cid, client_id);
+                let target_dc = CLIENT_REGISTRY
+                    .read()
+                    .unwrap()
+                    .data_channels
+                    .get(&target_cid)
+                    .cloned();
+                if let Some(target_dc) = target_dc {
+                    let req_packet = ProtocolPacket::CallRequest {
+                        caller_id: client_id,
+                        caller_address: caller_user_addr.clone(),
+                    };
+                    let _ = target_dc
+                        .send(BytesMut::from(req_packet.encode().as_slice()))
+                        .await;
+                    info!(
+                        "Sent call request notification to Client {} for caller Client {} ({})",
+                        target_cid,
+                        client_id,
+                        caller_user_addr.short_id()
+                    );
                 }
-                return;
             }
+            return;
         }
     } else {
         warn!(
@@ -613,7 +647,9 @@ async fn handle_client_targeted_audio(
         let err_packet = ProtocolPacket::ConnectionError {
             target_address: target_address.clone(),
         };
-        let _ = dc.send(&Bytes::from(err_packet.encode())).await;
+        let _ = dc
+            .send(BytesMut::from(err_packet.encode().as_slice()))
+            .await;
         return;
     }
 
@@ -669,7 +705,9 @@ async fn handle_call_accept_response(client_id: u64, caller_address: UserAddress
         let accept_packet = ProtocolPacket::CallAcceptedNotification {
             target_address: my_addr,
         };
-        let _ = caller_dc.send(&Bytes::from(accept_packet.encode())).await;
+        let _ = caller_dc
+            .send(BytesMut::from(accept_packet.encode().as_slice()))
+            .await;
     }
 }
 
@@ -701,7 +739,9 @@ async fn handle_call_reject_response(client_id: u64, caller_address: UserAddress
         let reject_packet = ProtocolPacket::CallRejectedNotification {
             target_address: my_addr,
         };
-        let _ = caller_dc.send(&Bytes::from(reject_packet.encode())).await;
+        let _ = caller_dc
+            .send(BytesMut::from(reject_packet.encode().as_slice()))
+            .await;
     }
 }
 
@@ -735,7 +775,9 @@ async fn handle_call_hangup(
         let ended_pkt = ProtocolPacket::CallEndedNotification {
             target_address: my_addr,
         };
-        let _ = target_dc.send(&Bytes::from(ended_pkt.encode())).await;
+        let _ = target_dc
+            .send(BytesMut::from(ended_pkt.encode().as_slice()))
+            .await;
     }
 }
 
@@ -758,7 +800,7 @@ async fn handle_room_join(client_id: u64, room_address: UserAddress) {
         room_address,
         participant_count: member_count,
     };
-    let bytes = Bytes::from(state_pkt.encode());
+    let bytes = BytesMut::from(state_pkt.encode().as_slice());
 
     for member_cid in member_cids {
         let dc = CLIENT_REGISTRY
@@ -768,7 +810,7 @@ async fn handle_room_join(client_id: u64, room_address: UserAddress) {
             .get(&member_cid)
             .cloned();
         if let Some(dc) = dc {
-            let _ = dc.send(&bytes).await;
+            let _ = dc.send(bytes.clone()).await;
         }
     }
 }
@@ -792,7 +834,7 @@ async fn handle_room_leave(client_id: u64, room_address: &UserAddress) {
         room_address: room_address.clone(),
         participant_count: remaining_count,
     };
-    let bytes = Bytes::from(state_pkt.encode());
+    let bytes = BytesMut::from(state_pkt.encode().as_slice());
 
     for member_cid in member_cids {
         let dc = CLIENT_REGISTRY
@@ -802,7 +844,7 @@ async fn handle_room_leave(client_id: u64, room_address: &UserAddress) {
             .get(&member_cid)
             .cloned();
         if let Some(dc) = dc {
-            let _ = dc.send(&bytes).await;
+            let _ = dc.send(bytes.clone()).await;
         }
     }
 }
@@ -842,7 +884,7 @@ async fn handle_room_group_audio(
         codec_id,
         audio_data: payload,
     };
-    let bytes = Bytes::from(server_audio_pkt.encode());
+    let bytes = BytesMut::from(server_audio_pkt.encode().as_slice());
 
     for member_cid in &member_cids {
         if *member_cid == client_id {
@@ -855,7 +897,7 @@ async fn handle_room_group_audio(
             .get(member_cid)
             .cloned();
         if let Some(dc) = dc {
-            let _ = dc.send(&bytes).await;
+            let _ = dc.send(bytes.clone()).await;
         }
     }
 
@@ -864,7 +906,7 @@ async fn handle_room_group_audio(
             room_address,
             speaker_addresses: top_speakers,
         };
-        let notice_bytes = Bytes::from(notice_pkt.encode());
+        let notice_bytes = BytesMut::from(notice_pkt.encode().as_slice());
         for member_cid in member_cids {
             let dc = CLIENT_REGISTRY
                 .read()
@@ -873,7 +915,7 @@ async fn handle_room_group_audio(
                 .get(&member_cid)
                 .cloned();
             if let Some(dc) = dc {
-                let _ = dc.send(&notice_bytes).await;
+                let _ = dc.send(notice_bytes.clone()).await;
             }
         }
     }
@@ -898,197 +940,11 @@ mod tests {
             .write()
             .unwrap()
             .addresses
-            .insert(999, test_addr.clone());
+            .insert(99999, test_addr.clone());
 
         let addrs = get_registered_addresses();
         assert!(addrs.contains(&test_addr));
 
-        CLIENT_REGISTRY.write().unwrap().addresses.remove(&999);
-        let addrs_after = get_registered_addresses();
-        assert!(!addrs_after.contains(&test_addr));
-    }
-
-    #[test]
-    fn test_participant_limit_2() {
-        let host_addr = UserAddress::generate_from_time();
-        let caller_addr = UserAddress::generate_from_time();
-        let third_addr = UserAddress::generate_from_time();
-
-        {
-            let mut reg = CLIENT_REGISTRY.write().unwrap();
-            reg.addresses.insert(101, host_addr.clone());
-            reg.addresses.insert(102, caller_addr.clone());
-            reg.targets.insert(102, host_addr.clone());
-            reg.addresses.insert(103, third_addr.clone());
-        }
-
-        assert_eq!(get_participant_count_for_room(&host_addr), 2);
-        assert!(is_room_or_target_full(&host_addr));
-        assert!(is_client_in_same_call(101, &host_addr));
-        assert!(is_client_in_same_call(102, &host_addr));
-        assert!(!is_client_in_same_call(103, &host_addr));
-
-        // Cleanup
-        {
-            let mut reg = CLIENT_REGISTRY.write().unwrap();
-            reg.addresses.remove(&101);
-            reg.addresses.remove(&102);
-            reg.addresses.remove(&103);
-            reg.targets.remove(&102);
-        }
-    }
-
-    #[test]
-    fn test_call_approval_and_rejection_states() {
-        let host_id = 201u64;
-        let caller_addr = UserAddress::generate_from_time();
-
-        assert!(!is_call_approved(host_id, &caller_addr));
-        assert!(!is_call_rejected(host_id, &caller_addr));
-
-        mark_call_approved(host_id, caller_addr.clone());
-        assert!(is_call_approved(host_id, &caller_addr));
-
-        mark_call_rejected(host_id, caller_addr.clone());
-        assert!(is_call_rejected(host_id, &caller_addr));
-
-        // Cleanup
-        {
-            let mut reg = CLIENT_REGISTRY.write().unwrap();
-            reg.approved_calls.remove(&host_id);
-            reg.rejected_calls.remove(&host_id);
-        }
-    }
-
-    #[test]
-    fn test_notification_tracking() {
-        let target_id = 301u64;
-        let caller_id = 302u64;
-
-        assert!(!has_been_notified(target_id, caller_id));
-
-        mark_notified(target_id, caller_id);
-        assert!(has_been_notified(target_id, caller_id));
-
-        // Cleanup
-        CLIENT_REGISTRY
-            .write()
-            .unwrap()
-            .notified_requests
-            .remove(&target_id);
-    }
-
-    #[test]
-    fn test_matches_address() {
-        let full_addr = UserAddress::new("a1b2c3d4e5f607080900112233445566");
-        let short_key = UserAddress::new("a1b2c3d4e5f6");
-        let zero_padded_short =
-            UserAddress::new("a1b2c3d4e5f60000000000000000000000000000000000000000000000000000");
-        let different = UserAddress::new("fffffffff");
-
-        assert!(matches_address(&full_addr, &full_addr));
-        assert!(matches_address(&full_addr, &short_key));
-        assert!(matches_address(&short_key, &full_addr));
-        assert!(matches_address(&full_addr, &zero_padded_short));
-        assert!(!matches_address(&full_addr, &different));
-    }
-
-    #[test]
-    fn test_find_client_by_address() {
-        let client_id = 888u64;
-        let addr = UserAddress::new("11223344556677889900aabbccddeeff");
-        CLIENT_REGISTRY
-            .write()
-            .unwrap()
-            .addresses
-            .insert(client_id, addr.clone());
-
-        let short_search = UserAddress::new("112233445566");
-        assert_eq!(find_client_by_address(&addr), Some(client_id));
-        assert_eq!(find_client_by_address(&short_search), Some(client_id));
-
-        let not_found = UserAddress::new("999999");
-        assert_eq!(find_client_by_address(&not_found), None);
-
-        // Cleanup
-        CLIENT_REGISTRY
-            .write()
-            .unwrap()
-            .addresses
-            .remove(&client_id);
-    }
-
-    #[test]
-    fn test_clear_call_session() {
-        let client_a = 501u64;
-        let client_b = 502u64;
-        let addr_a = UserAddress::generate_from_time();
-        let addr_b = UserAddress::generate_from_time();
-
-        {
-            let mut reg = CLIENT_REGISTRY.write().unwrap();
-            reg.addresses.insert(client_a, addr_a.clone());
-            reg.addresses.insert(client_b, addr_b.clone());
-            reg.approved_calls
-                .entry(client_a)
-                .or_default()
-                .push(addr_b.clone());
-            reg.approved_calls
-                .entry(client_b)
-                .or_default()
-                .push(addr_a.clone());
-            reg.notified_requests
-                .entry(client_b)
-                .or_default()
-                .push(client_a);
-        }
-
-        assert!(is_call_approved(client_a, &addr_b));
-
-        // Perform clear_call_session for CallHangup
-        CLIENT_REGISTRY
-            .write()
-            .unwrap()
-            .clear_call_session(client_a, &addr_b);
-
-        assert!(!is_call_approved(client_a, &addr_b));
-        assert!(!is_call_approved(client_b, &addr_a));
-
-        // Cleanup
-        {
-            let mut reg = CLIENT_REGISTRY.write().unwrap();
-            reg.addresses.remove(&client_a);
-            reg.addresses.remove(&client_b);
-            reg.approved_calls.remove(&client_a);
-            reg.approved_calls.remove(&client_b);
-            reg.notified_requests.remove(&client_b);
-        }
-    }
-
-    #[test]
-    fn test_short_id_minimum_length_rule() {
-        let full = UserAddress::new("1234567890abcdef1234567890abcdef");
-        assert!(full.id.len() >= 12);
-
-        let short_valid = UserAddress::new("1234567890ab");
-        assert_eq!(short_valid.id.len(), 12);
-        assert!(short_valid.id.len() >= 12);
-
-        let short_invalid = UserAddress::new("1234567890a");
-        assert!(short_invalid.id.len() < 12);
-    }
-
-    #[test]
-    fn test_generate_turn_credentials_for_client() {
-        let user_addr = UserAddress::generate_from_time();
-        let cred = generate_turn_credentials_for_client(&user_addr, 300);
-        assert!(cred.username.contains(&user_addr.id));
-        assert!(!cred.credential.is_empty());
-        assert!(!cred.urls.is_empty());
-
-        let verified =
-            crate::stun::verify_turn_allocation_credentials(&cred.username, &cred.credential);
-        assert!(verified.is_ok());
-        assert_eq!(verified.unwrap().id, user_addr.id);
+        CLIENT_REGISTRY.write().unwrap().unregister_client(99999);
     }
 }

@@ -8,546 +8,358 @@ use crate::config::Configuration;
 use crate::protocol::ProtocolPacket;
 use crate::session::ClientSession;
 use anyhow::{Result, anyhow};
-use bytes::Bytes;
+use async_trait::async_trait;
+use bytes::BytesMut;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
-use tracing::{error, info};
-use webrtc::api::APIBuilder;
-use webrtc::data_channel::RTCDataChannel;
-use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use tracing::info;
+use webrtc::data_channel::{DataChannel, DataChannelEvent};
+use webrtc::peer_connection::{
+    PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
+    RTCIceGatheringState, RTCIceServer, RTCSessionDescription,
+};
 
-/// Create and configure a WebRTC PeerConnection instance.
-pub async fn create_peer_connection(config: &Configuration) -> Result<Arc<RTCPeerConnection>> {
-    let api = APIBuilder::new().build();
-    let rtc_config = RTCConfiguration {
-        ice_servers: vec![RTCIceServer {
+/// Internal ICE gather completion handler for wpapi.
+struct ApiEventHandler {
+    gather_complete_tx: mpsc::Sender<()>,
+}
+
+#[async_trait]
+impl PeerConnectionEventHandler for ApiEventHandler {
+    async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
+        if state == RTCIceGatheringState::Complete {
+            let _ = self.gather_complete_tx.send(()).await;
+        }
+    }
+}
+
+/// Create and configure a WebRTC PeerConnection instance with custom handler.
+pub async fn create_peer_connection_with_handler(
+    config: &Configuration,
+    handler: Arc<dyn PeerConnectionEventHandler>,
+) -> Result<Arc<dyn PeerConnection>> {
+    let rtc_config = RTCConfigurationBuilder::new()
+        .with_ice_servers(vec![RTCIceServer {
             urls: vec![config.stun_server.clone()],
             ..Default::default()
-        }],
-        ..Default::default()
-    };
-    let peer_connection = Arc::new(api.new_peer_connection(rtc_config).await?);
-    Ok(peer_connection)
+        }])
+        .build();
+
+    let pc = PeerConnectionBuilder::new()
+        .with_configuration(rtc_config)
+        .with_handler(handler)
+        .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
+        .build()
+        .await?;
+
+    Ok(Arc::new(pc))
+}
+
+/// Create and configure a WebRTC PeerConnection instance.
+pub async fn create_peer_connection(
+    config: &Configuration,
+) -> Result<(Arc<dyn PeerConnection>, mpsc::Receiver<()>)> {
+    let (tx, rx) = mpsc::channel(1);
+    let handler = Arc::new(ApiEventHandler {
+        gather_complete_tx: tx,
+    });
+    let pc = create_peer_connection_with_handler(config, handler).await?;
+    Ok((pc, rx))
 }
 
 /// Create and attach 'audio' DataChannel to PeerConnection.
 pub async fn setup_data_channel(
-    peer_connection: &Arc<RTCPeerConnection>,
+    peer_connection: &Arc<dyn PeerConnection>,
     target_address: Option<UserAddress>,
-    mut rx_audio: mpsc::Receiver<Vec<u8>>,
+    rx_audio: mpsc::Receiver<Vec<u8>>,
     config: &Configuration,
     session: &ClientSession,
-) -> Result<Arc<RTCDataChannel>> {
+) -> Result<Arc<dyn DataChannel>> {
     let my_client_id = Arc::clone(&session.client_id);
     let audio_buffer = Arc::clone(&session.audio_buffer);
     let data_channel = peer_connection.create_data_channel("audio", None).await?;
     session.set_data_channel(Arc::clone(&data_channel));
 
-    if let Some(target) = target_address {
-        session.set_target_address(Some(target));
-    }
-
-    let dc_clone = Arc::clone(&data_channel);
-    let session_ref_open = session.clone();
-    data_channel.on_open(Box::new(move || {
-        let dc_inner = Arc::clone(&dc_clone);
-        let session_ref = session_ref_open.clone();
-        Box::pin(async move {
-            info!("WebRTC DataChannel 'audio' successfully opened");
-
-            if let Some(target) = session_ref.get_target_address() {
-                let init_packet = ProtocolPacket::ClientTargetedAudio {
-                    target_address: target,
-                    codec_id: crate::protocol::CODEC_OPUS,
-                    audio_data: vec![],
-                };
-                let _ = dc_inner.send(&Bytes::from(init_packet.encode())).await;
-            }
-
-            tokio::spawn(async move {
-                while let Some(audio_bytes) = rx_audio.recv().await {
-                    if let Some(target) = session_ref.get_target_address() {
-                        let packet = ProtocolPacket::ClientTargetedAudio {
-                            target_address: target,
-                            codec_id: crate::protocol::CODEC_OPUS,
-                            audio_data: audio_bytes,
-                        };
-                        if dc_inner.send(&Bytes::from(packet.encode())).await.is_err() {
-                            break;
-                        }
-                    } else if let Some(room) = session_ref.get_room_address() {
-                        let packet = ProtocolPacket::RoomGroupAudio {
-                            room_address: room,
-                            codec_id: crate::protocol::CODEC_OPUS,
-                            audio_data: audio_bytes,
-                        };
-                        if dc_inner.send(&Bytes::from(packet.encode())).await.is_err() {
-                            break;
-                        }
-                    }
-                }
-            });
-        })
-    }));
-
-    let auto_accept = config.auto_accept;
-    let allow_echoback = config.allow_echoback;
-    let dc_msg = Arc::clone(&data_channel);
-    let session_user_addr = Arc::clone(&session.user_address);
+    let target_addr_init = target_address.clone();
+    let dc_init = Arc::clone(&data_channel);
     let session_ref = session.clone();
+    let session_user_addr = Arc::clone(&session.user_address);
+    let auto_accept = config.auto_accept;
+    let mut rx_audio_opt = Some(rx_audio);
 
-    data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
-        let dc_inner = Arc::clone(&dc_msg);
-        let my_client_id = Arc::clone(&my_client_id);
-        let audio_buffer = Arc::clone(&audio_buffer);
-        let session_user_addr = Arc::clone(&session_user_addr);
-        let session_ref = session_ref.clone();
-        Box::pin(async move {
-            let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
-                return;
-            };
+    tokio::spawn(async move {
+        while let Some(event) = dc_init.poll().await {
+            match event {
+                DataChannelEvent::OnOpen => {
+                    info!("WebRTC DataChannel 'audio' successfully opened.");
 
-            match packet {
-                ProtocolPacket::ClientAssignment {
-                    client_id,
-                    user_address,
-                } => {
-                    my_client_id.store(client_id, Ordering::SeqCst);
-                    if let Ok(mut guard) = session_user_addr.lock() {
-                        *guard = Some(user_address.clone());
+                    if let Some(ref target) = target_addr_init {
+                        let init_packet = ProtocolPacket::ClientTargetedAudio {
+                            target_address: target.clone(),
+                            codec_id: crate::protocol::CODEC_OPUS,
+                            audio_data: vec![],
+                        };
+                        let _ = dc_init
+                            .send(BytesMut::from(init_packet.encode().as_slice()))
+                            .await;
                     }
-                    info!("============================================================");
-                    info!(" Assigned Temporary User ID (SHA-256): {}", user_address);
-                    info!(" Short ID: {}", user_address.short_id());
-                    info!(" Client ID: {}", client_id);
-                    info!("============================================================");
-                }
-                ProtocolPacket::BroadcastAudio {
-                    sender_id,
-                    audio_data,
-                } => {
-                    let my_id = my_client_id.load(Ordering::SeqCst);
-                    if !allow_echoback && sender_id == my_id {
-                        return;
-                    }
-                    let samples: Vec<f32> = audio_data
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .map(|chunk| f32::from_le_bytes(*chunk))
-                        .collect();
 
-                    let mut buffer = audio_buffer.lock().unwrap();
-                    for sample in samples {
-                        buffer.push_back(sample);
-                    }
-                    if buffer.len() > 4800 {
-                        let excess = buffer.len() - 4800;
-                        for _ in 0..excess {
-                            buffer.pop_front();
-                        }
-                    }
-                }
-                ProtocolPacket::ServerTargetedAudio {
-                    sender_id,
-                    sender_address,
-                    audio_data,
-                    ..
-                } => {
-                    let my_id = my_client_id.load(Ordering::SeqCst);
-                    if !allow_echoback && sender_id == my_id {
-                        return;
-                    }
-                    tracing::trace!("Received audio frame from {}", sender_address.short_id());
-                    let samples: Vec<f32> = audio_data
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
-                        .collect();
-
-                    let mut buffer = audio_buffer.lock().unwrap();
-                    for sample in samples {
-                        buffer.push_back(sample);
-                    }
-                    if buffer.len() > 4800 {
-                        let excess = buffer.len() - 4800;
-                        for _ in 0..excess {
-                            buffer.pop_front();
-                        }
-                    }
-                }
-                ProtocolPacket::CallRequest { caller_address, .. } => {
-                    let caller_bytes = caller_address.to_bytes();
-                    let caller_addr_clone = caller_address.clone();
-                    let session_inner = session_ref.clone();
-                    if let Some(incoming_tx) = session_ref.get_incoming_call_handler() {
-                        let dc_reply = Arc::clone(&dc_inner);
+                    if let Some(mut rx) = rx_audio_opt.take() {
+                        let dc_inner = Arc::clone(&dc_init);
+                        let target_opt = target_addr_init.clone();
                         tokio::spawn(async move {
-                            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<bool>();
-                            if incoming_tx
-                                .send((caller_addr_clone.clone(), reply_tx))
-                                .await
-                                .is_ok()
-                            {
-                                let accepted = reply_rx.await.unwrap_or(false);
-                                if accepted {
-                                    info!(
-                                        "Accepted incoming call request from {}",
-                                        caller_addr_clone.short_id()
-                                    );
-                                    session_inner.set_target_address(Some(caller_addr_clone.clone()));
-                                    let resp = ProtocolPacket::CallAcceptResponse {
-                                        caller_address: UserAddress::from_bytes(caller_bytes),
+                            while let Some(audio_bytes) = rx.recv().await {
+                                if let Some(ref target) = target_opt {
+                                    let packet = ProtocolPacket::ClientTargetedAudio {
+                                        target_address: target.clone(),
+                                        codec_id: crate::protocol::CODEC_OPUS,
+                                        audio_data: audio_bytes,
                                     };
-                                    let _ = dc_reply.send(&Bytes::from(resp.encode())).await;
-                                } else {
-                                    info!(
-                                        "Rejected incoming call request from {}",
-                                        caller_addr_clone.short_id()
-                                    );
-                                    let resp = ProtocolPacket::CallRejectResponse {
-                                        caller_address: UserAddress::from_bytes(caller_bytes),
-                                    };
-                                    let _ = dc_reply.send(&Bytes::from(resp.encode())).await;
+                                    if dc_inner
+                                        .send(BytesMut::from(packet.encode().as_slice()))
+                                        .await
+                                        .is_err()
+                                    {
+                                        break;
+                                    }
                                 }
                             }
                         });
-                    } else if auto_accept {
-                        info!(
-                            "Auto-accepting incoming call request from {} (Short ID: {})",
-                            caller_address,
-                            caller_address.short_id()
-                        );
-                        session_ref.set_target_address(Some(caller_address.clone()));
-                        let resp = ProtocolPacket::CallAcceptResponse { caller_address };
-                        let _ = dc_inner.send(&Bytes::from(resp.encode())).await;
-                    } else {
-                        let dc_reply = Arc::clone(&dc_inner);
+                    }
+                }
+                DataChannelEvent::OnMessage(msg) => {
+                    let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
+                        continue;
+                    };
 
-                        tokio::spawn(async move {
-                            use std::io::{self, Write};
-                            println!(
-                                "\n============================================================"
-                            );
-                            println!(" Incoming Call Request!");
-                            println!(" From: {}", caller_addr_clone);
-                            println!(" Short ID: {}", caller_addr_clone.short_id());
-                            print!(" Allow connection? [y/N]: ");
-                            let _ = io::stdout().flush();
-
-                            let mut input = String::new();
-                            let accepted = tokio::task::spawn_blocking(move || {
-                                let stdin = io::stdin();
-                                if stdin.read_line(&mut input).is_ok() {
-                                    let trimmed = input.trim().to_lowercase();
-                                    trimmed == "y" || trimmed == "yes"
-                                } else {
-                                    false
-                                }
-                            })
-                            .await
-                            .unwrap_or_default();
-
-                            if accepted {
-                                info!(
-                                    "Accepted incoming call request from {}",
-                                    caller_addr_clone.short_id()
-                                );
-                                session_inner.set_target_address(Some(caller_addr_clone.clone()));
-                                let resp = ProtocolPacket::CallAcceptResponse {
-                                    caller_address: UserAddress::from_bytes(caller_bytes),
-                                };
-                                let _ = dc_reply.send(&Bytes::from(resp.encode())).await;
-                            } else {
-                                info!(
-                                    "Rejected incoming call request from {}",
-                                    caller_addr_clone.short_id()
-                                );
-                                let resp = ProtocolPacket::CallRejectResponse {
-                                    caller_address: UserAddress::from_bytes(caller_bytes),
-                                };
-                                let _ = dc_reply.send(&Bytes::from(resp.encode())).await;
+                    match packet {
+                        ProtocolPacket::ClientAssignment {
+                            client_id,
+                            user_address,
+                        } => {
+                            my_client_id.store(client_id, Ordering::SeqCst);
+                            if let Ok(mut guard) = session_user_addr.lock() {
+                                *guard = Some(user_address.clone());
                             }
-                        });
-                    }
-                }
-                ProtocolPacket::CallRejectedNotification { target_address } => {
-                    error!("============================================================");
-                    error!(
-                        " Call Connection Error: Connection rejected by target user ({})",
-                        target_address.short_id()
-                    );
-                    error!(" Connection rejected.");
-                    error!("============================================================");
-                    session_ref.set_target_address(None);
-                    if let Some(tx) = session_ref.get_call_notification_handler() {
-                        let _ = tx
-                            .send(crate::session::CallNotification::Rejected(target_address))
-                            .await;
-                    }
-                }
-                ProtocolPacket::CallAcceptedNotification { target_address } => {
-                    info!("============================================================");
-                    info!(
-                        " Call connection accepted by target user ({})!",
-                        target_address.short_id()
-                    );
-                    info!(" Call connected.");
-                    info!("============================================================");
-                    session_ref.set_target_address(Some(target_address.clone()));
-                    if let Some(tx) = session_ref.get_call_notification_handler() {
-                        let _ = tx
-                            .send(crate::session::CallNotification::Accepted(target_address))
-                            .await;
-                    }
-                }
-                ProtocolPacket::ConnectionError { target_address } => {
-                    error!("============================================================");
-                    error!(
-                        " Call Connection Error: Target user ({}) is unavailable or in another call.",
-                        target_address.short_id()
-                    );
-                    error!(" Connection rejected.");
-                    error!("============================================================");
-                    session_ref.set_target_address(None);
-                    if let Some(tx) = session_ref.get_call_notification_handler() {
-                        let _ = tx
-                            .send(crate::session::CallNotification::Error(
-                                target_address,
-                                "Target user is unavailable or in another call".to_string(),
-                            ))
-                            .await;
-                    }
-                }
-                ProtocolPacket::CallHangup { target_address } => {
-                    info!(
-                        "Call hangup initiated for target {}",
-                        target_address.short_id()
-                    );
-                    session_ref.set_target_address(None);
-                    if let Some(tx) = session_ref.get_call_notification_handler() {
-                        let _ = tx
-                            .send(crate::session::CallNotification::Hangup(target_address))
-                            .await;
-                    }
-                }
-                ProtocolPacket::CallEndedNotification { target_address } => {
-                    info!("============================================================");
-                    info!(
-                        " Call Session Ended by peer user ({})",
-                        target_address.short_id()
-                    );
-                    info!(" Returned to Standby Mode.");
-                    info!("============================================================");
-                    session_ref.set_target_address(None);
-                    if let Some(tx) = session_ref.get_call_notification_handler() {
-                        let _ = tx
-                            .send(crate::session::CallNotification::Hangup(target_address))
-                            .await;
-                    }
-                }
-                ProtocolPacket::Ping { timestamp } => {
-                    let pong = ProtocolPacket::Pong { timestamp };
-                    let _ = dc_inner.send(&Bytes::from(pong.encode())).await;
-                }
-                ProtocolPacket::Pong { .. } => {}
-                ProtocolPacket::RoomStateNotification {
-                    room_address,
-                    participant_count,
-                } => {
-                    info!("============================================================");
-                    info!(
-                        " Room State Update for {}: {} active participant(s)",
-                        room_address.short_id(),
-                        participant_count
-                    );
-                    info!("============================================================");
-                }
-                ProtocolPacket::ActiveSpeakerNotice {
-                    room_address,
-                    speaker_addresses,
-                } => {
-                    let short_ids: Vec<&str> =
-                        speaker_addresses.iter().map(|a| a.short_id()).collect();
-                    info!(
-                        "Active speaker update in room {}: {:?}",
-                        room_address.short_id(),
-                        short_ids
-                    );
-                }
-                ProtocolPacket::RoomGroupAudio { audio_data, .. } => {
-                    let samples: Vec<f32> = audio_data
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
-                        .collect();
-
-                    let mut buffer = audio_buffer.lock().unwrap();
-                    for sample in samples {
-                        buffer.push_back(sample);
-                    }
-                    if buffer.len() > 4800 {
-                        let excess = buffer.len() - 4800;
-                        for _ in 0..excess {
-                            buffer.pop_front();
+                            info!("============================================================");
+                            info!(" Assigned Temporary User ID (SHA-256): {}", user_address);
+                            info!(" Short ID: {}", user_address.short_id());
+                            info!(" Client ID: {}", client_id);
+                            info!("============================================================");
                         }
+                        ProtocolPacket::CallRequest { caller_address, .. } => {
+                            info!("Incoming Call Request from {}", caller_address.short_id());
+                            session_ref.set_target_address(Some(caller_address.clone()));
+                            if auto_accept {
+                                info!("Auto-accepting call from {}", caller_address.short_id());
+                                let accept = ProtocolPacket::CallAcceptResponse {
+                                    caller_address: caller_address.clone(),
+                                };
+                                let _ = dc_init
+                                    .send(BytesMut::from(accept.encode().as_slice()))
+                                    .await;
+                            }
+                        }
+                        ProtocolPacket::CallAcceptResponse { caller_address } => {
+                            info!("Call accepted by {}", caller_address.short_id());
+                            session_ref.set_target_address(Some(caller_address));
+                        }
+                        ProtocolPacket::CallRejectResponse { caller_address } => {
+                            info!("Call rejected by {}", caller_address.short_id());
+                            if let Ok(mut guard) = session_user_addr.lock() {
+                                *guard = None;
+                            }
+                            session_ref.set_target_address(None);
+                        }
+                        ProtocolPacket::ServerTargetedAudio { audio_data, .. }
+                        | ProtocolPacket::PeerTargetedAudio { audio_data, .. } => {
+                            let samples: Vec<f32> = audio_data
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
+                                .collect();
+
+                            let mut buffer = audio_buffer.lock().unwrap();
+                            for sample in samples {
+                                buffer.push_back(sample);
+                            }
+                            if buffer.len() > 4800 {
+                                let excess = buffer.len() - 4800;
+                                for _ in 0..excess {
+                                    buffer.pop_front();
+                                }
+                            }
+                        }
+                        ProtocolPacket::Ping { timestamp } => {
+                            let pong = ProtocolPacket::Pong { timestamp };
+                            let _ = dc_init.send(BytesMut::from(pong.encode().as_slice())).await;
+                        }
+                        ProtocolPacket::Pong { .. } => {}
+                        _ => {}
                     }
+                }
+                DataChannelEvent::OnClose => {
+                    info!("DataChannel closed.");
+                    break;
                 }
                 _ => {}
             }
-        })
-    }));
+        }
+    });
 
     Ok(data_channel)
 }
 
-/// Create and attach 'audio' DataChannel for group room session (WPIP-08).
+/// Create and attach room 'audio' DataChannel to PeerConnection.
 pub async fn setup_room_data_channel(
-    peer_connection: &Arc<RTCPeerConnection>,
+    peer_connection: &Arc<dyn PeerConnection>,
     room_address: UserAddress,
-    mut rx_audio: mpsc::Receiver<Vec<u8>>,
-    config: &Configuration,
+    rx_audio: mpsc::Receiver<Vec<u8>>,
+    _config: &Configuration,
     session: &ClientSession,
-) -> Result<Arc<RTCDataChannel>> {
+) -> Result<Arc<dyn DataChannel>> {
     let my_client_id = Arc::clone(&session.client_id);
     let audio_buffer = Arc::clone(&session.audio_buffer);
     let data_channel = peer_connection.create_data_channel("audio", None).await?;
 
-    let dc_clone = Arc::clone(&data_channel);
-    let r_addr_clone = room_address.clone();
-    data_channel.on_open(Box::new(move || {
-        let dc_inner = Arc::clone(&dc_clone);
-        let room_addr = r_addr_clone.clone();
-        Box::pin(async move {
-            info!(
-                "WebRTC DataChannel 'audio' successfully opened for Room {}",
-                room_addr.short_id()
-            );
-
-            // 1. Send RoomJoinRequest (0x0D)
-            let join_packet = ProtocolPacket::RoomJoinRequest {
-                room_address: room_addr.clone(),
-            };
-            let _ = dc_inner.send(&Bytes::from(join_packet.encode())).await;
-
-            // 2. Forward microphone audio as RoomGroupAudio (0x10)
-            tokio::spawn(async move {
-                while let Some(audio_bytes) = rx_audio.recv().await {
-                    let packet = ProtocolPacket::RoomGroupAudio {
-                        room_address: room_addr.clone(),
-                        codec_id: crate::protocol::CODEC_OPUS,
-                        audio_data: audio_bytes,
-                    };
-                    if dc_inner.send(&Bytes::from(packet.encode())).await.is_err() {
-                        break;
-                    }
-                }
-            });
-        })
-    }));
-
-    let _allow_echoback = config.allow_echoback;
-    let dc_msg = Arc::clone(&data_channel);
+    let dc_task = Arc::clone(&data_channel);
     let session_user_addr = Arc::clone(&session.user_address);
+    let r_addr_clone = room_address.clone();
+    let mut rx_audio_opt = Some(rx_audio);
 
-    data_channel.on_message(Box::new(move |msg: DataChannelMessage| {
-        let dc_inner = Arc::clone(&dc_msg);
-        let my_client_id = Arc::clone(&my_client_id);
-        let audio_buffer = Arc::clone(&audio_buffer);
-        let session_user_addr = Arc::clone(&session_user_addr);
-        Box::pin(async move {
-            let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
-                return;
-            };
-
-            match packet {
-                ProtocolPacket::ClientAssignment {
-                    client_id,
-                    user_address,
-                } => {
-                    my_client_id.store(client_id, Ordering::SeqCst);
-                    if let Ok(mut guard) = session_user_addr.lock() {
-                        *guard = Some(user_address.clone());
-                    }
-                    info!("============================================================");
-                    info!(" Assigned Temporary User ID (SHA-256): {}", user_address);
-                    info!(" Short ID: {}", user_address.short_id());
-                    info!(" Client ID: {}", client_id);
-                    info!("============================================================");
-                }
-                ProtocolPacket::RoomStateNotification {
-                    room_address,
-                    participant_count,
-                } => {
-                    info!("============================================================");
+    tokio::spawn(async move {
+        while let Some(event) = dc_task.poll().await {
+            match event {
+                DataChannelEvent::OnOpen => {
                     info!(
-                        " Room State Update for {}: {} active participant(s)",
-                        room_address.short_id(),
-                        participant_count
+                        "WebRTC DataChannel 'audio' successfully opened for Room {}",
+                        r_addr_clone.short_id()
                     );
-                    info!("============================================================");
-                }
-                ProtocolPacket::ActiveSpeakerNotice {
-                    room_address,
-                    speaker_addresses,
-                } => {
-                    let short_ids: Vec<&str> =
-                        speaker_addresses.iter().map(|a| a.short_id()).collect();
-                    info!(
-                        "Active speaker update in room {}: {:?}",
-                        room_address.short_id(),
-                        short_ids
-                    );
-                }
-                ProtocolPacket::RoomGroupAudio { audio_data, .. } => {
-                    let samples: Vec<f32> = audio_data
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
-                        .collect();
 
-                    let mut buffer = audio_buffer.lock().unwrap();
-                    for sample in samples {
-                        buffer.push_back(sample);
+                    let join_packet = ProtocolPacket::RoomJoinRequest {
+                        room_address: r_addr_clone.clone(),
+                    };
+                    let _ = dc_task
+                        .send(BytesMut::from(join_packet.encode().as_slice()))
+                        .await;
+
+                    if let Some(mut rx) = rx_audio_opt.take() {
+                        let dc_inner = Arc::clone(&dc_task);
+                        let r_addr = r_addr_clone.clone();
+                        tokio::spawn(async move {
+                            while let Some(audio_bytes) = rx.recv().await {
+                                let packet = ProtocolPacket::RoomGroupAudio {
+                                    room_address: r_addr.clone(),
+                                    codec_id: crate::protocol::CODEC_OPUS,
+                                    audio_data: audio_bytes,
+                                };
+                                if dc_inner
+                                    .send(BytesMut::from(packet.encode().as_slice()))
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        });
                     }
-                    if buffer.len() > 4800 {
-                        let excess = buffer.len() - 4800;
-                        for _ in 0..excess {
-                            buffer.pop_front();
+                }
+                DataChannelEvent::OnMessage(msg) => {
+                    let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
+                        continue;
+                    };
+
+                    match packet {
+                        ProtocolPacket::ClientAssignment {
+                            client_id,
+                            user_address,
+                        } => {
+                            my_client_id.store(client_id, Ordering::SeqCst);
+                            if let Ok(mut guard) = session_user_addr.lock() {
+                                *guard = Some(user_address.clone());
+                            }
+                            info!("============================================================");
+                            info!(" Assigned Temporary User ID (SHA-256): {}", user_address);
+                            info!(" Short ID: {}", user_address.short_id());
+                            info!(" Client ID: {}", client_id);
+                            info!("============================================================");
                         }
+                        ProtocolPacket::RoomStateNotification {
+                            room_address,
+                            participant_count,
+                        } => {
+                            info!("============================================================");
+                            info!(
+                                " Room State Update for {}: {} active participant(s)",
+                                room_address.short_id(),
+                                participant_count
+                            );
+                            info!("============================================================");
+                        }
+                        ProtocolPacket::ActiveSpeakerNotice {
+                            room_address,
+                            speaker_addresses,
+                        } => {
+                            let short_ids: Vec<&str> =
+                                speaker_addresses.iter().map(|a| a.short_id()).collect();
+                            info!(
+                                "Active speaker update in room {}: {:?}",
+                                room_address.short_id(),
+                                short_ids
+                            );
+                        }
+                        ProtocolPacket::RoomGroupAudio { audio_data, .. } => {
+                            let samples: Vec<f32> = audio_data
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
+                                .collect();
+
+                            let mut buffer = audio_buffer.lock().unwrap();
+                            for sample in samples {
+                                buffer.push_back(sample);
+                            }
+                            if buffer.len() > 4800 {
+                                let excess = buffer.len() - 4800;
+                                for _ in 0..excess {
+                                    buffer.pop_front();
+                                }
+                            }
+                        }
+                        ProtocolPacket::Ping { timestamp } => {
+                            let pong = ProtocolPacket::Pong { timestamp };
+                            let _ = dc_task.send(BytesMut::from(pong.encode().as_slice())).await;
+                        }
+                        ProtocolPacket::Pong { .. } => {}
+                        _ => {}
                     }
                 }
-                ProtocolPacket::Ping { timestamp } => {
-                    let pong = ProtocolPacket::Pong { timestamp };
-                    let _ = dc_inner.send(&Bytes::from(pong.encode())).await;
+                DataChannelEvent::OnClose => {
+                    info!("Room DataChannel closed.");
+                    break;
                 }
-                ProtocolPacket::Pong { .. } => {}
                 _ => {}
             }
-        })
-    }));
+        }
+    });
 
     Ok(data_channel)
 }
 
 /// Perform SDP Offer creation and HTTP signaling exchange with the server.
 pub async fn perform_sdp_handshake(
-    peer_connection: &Arc<RTCPeerConnection>,
+    peer_connection: &Arc<dyn PeerConnection>,
     config: &Configuration,
     session: &ClientSession,
+    mut gather_rx: mpsc::Receiver<()>,
 ) -> Result<()> {
     let offer = peer_connection.create_offer(None).await?;
-    let mut gather_complete = peer_connection.gathering_complete_promise().await;
     peer_connection.set_local_description(offer).await?;
-    let _ = gather_complete.recv().await;
+
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), gather_rx.recv()).await;
 
     let local_desc = peer_connection
         .local_description()
@@ -568,25 +380,29 @@ pub async fn perform_sdp_handshake(
     let (_, auth_header_val) =
         crate::address::build_authorization_header(client_keypair, &local_desc.sdp);
 
-    let client = reqwest::Client::builder().build()?;
-
-    let resp = client
+    let http_client = reqwest::Client::builder().build()?;
+    let resp = http_client
         .post(&sdp_endpoint)
-        .header(reqwest::header::AUTHORIZATION, auth_header_val)
+        .header("Content-Type", "application/json")
+        .header("X-WebPhone-Sign", auth_header_val)
         .json(&local_desc)
         .send()
         .await?;
 
     if !resp.status().is_success() {
-        anyhow::bail!(
-            "Server returned error status for SDP offer: {}",
-            resp.status()
-        );
+        let status = resp.status();
+        let err_body = resp.text().await.unwrap_or_default();
+        return Err(anyhow!(
+            "Server rejected SDP offer with status {}: {}",
+            status,
+            err_body
+        ));
     }
 
     let answer: RTCSessionDescription = resp.json().await?;
+    info!("Received SDP answer from server. Setting remote description...");
     peer_connection.set_remote_description(answer).await?;
-    info!("SDP Answer successfully set on PeerConnection");
+    info!("WebRTC SDP handshake completed successfully.");
 
     Ok(())
 }

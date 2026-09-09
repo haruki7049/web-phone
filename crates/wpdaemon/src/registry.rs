@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, RwLock};
-use webrtc::data_channel::RTCDataChannel;
-use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::data_channel::DataChannel;
+use webrtc::peer_connection::PeerConnection;
 use wpapi::UserAddress;
 
 /// Global unified client registry protected by a single RwLock.
@@ -38,14 +38,14 @@ pub fn matches_address(addr: &UserAddress, key: &UserAddress) -> bool {
 /// Unified registry for managing all WebRTC client state, routing, and call approvals.
 #[derive(Default)]
 pub struct ClientRegistry {
-    /// Active WebRTC peer connections (client_id -> Arc<RTCPeerConnection>).
-    pub peer_connections: HashMap<u64, Arc<RTCPeerConnection>>,
+    /// Active WebRTC peer connections (client_id -> Arc<dyn PeerConnection>).
+    pub peer_connections: HashMap<u64, Arc<dyn PeerConnection>>,
     /// Registered client addresses (client_id -> UserAddress).
     pub addresses: HashMap<u64, UserAddress>,
     /// Registered client target addresses (client_id -> target UserAddress).
     pub targets: HashMap<u64, UserAddress>,
-    /// Active WebRTC client DataChannels (client_id -> Arc<RTCDataChannel>).
-    pub data_channels: HashMap<u64, Arc<RTCDataChannel>>,
+    /// Active WebRTC client DataChannels (client_id -> Arc<dyn DataChannel>).
+    pub data_channels: HashMap<u64, Arc<dyn DataChannel>>,
     /// Approved calls (target_client_id -> Vec<caller_UserAddress>).
     pub approved_calls: HashMap<u64, Vec<UserAddress>>,
     /// Rejected calls (target_client_id -> Vec<caller_UserAddress>).
@@ -72,7 +72,7 @@ impl ClientRegistry {
         &mut self,
         client_id: u64,
         user_address: UserAddress,
-        peer_connection: Arc<RTCPeerConnection>,
+        peer_connection: Arc<dyn PeerConnection>,
     ) {
         let now = std::time::Instant::now();
         self.peer_connections.insert(client_id, peer_connection);

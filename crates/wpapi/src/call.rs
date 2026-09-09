@@ -44,7 +44,7 @@ pub async fn start_call_with_session(
     }
 
     // 1. Create WebRTC PeerConnection
-    let peer_connection = create_peer_connection(config).await?;
+    let (peer_connection, gather_rx) = create_peer_connection(config).await?;
 
     // 2. Setup DataChannel & audio byte sender channel
     let (tx_audio, rx_audio) = mpsc::channel::<Vec<u8>>(100);
@@ -58,7 +58,7 @@ pub async fn start_call_with_session(
     .await?;
 
     // 3. Perform SDP Offer / Answer exchange with server
-    perform_sdp_handshake(&peer_connection, config, session).await?;
+    perform_sdp_handshake(&peer_connection, config, session, gather_rx).await?;
 
     // 4. Start CPAL Audio Engine (Microphone & Speaker Streams)
     let _audio_engine = AudioEngine::start(config, tx_audio, Arc::clone(&session.audio_buffer))?;
@@ -84,7 +84,7 @@ pub async fn start_call_with_session(
             target_address: target.clone(),
         };
         let _ = _data_channel
-            .send(&bytes::Bytes::from(hangup_packet.encode()))
+            .send(bytes::BytesMut::from(hangup_packet.encode().as_slice()))
             .await;
     }
 
@@ -121,7 +121,7 @@ pub async fn start_room_call_with_session(
     );
 
     // 1. Create WebRTC PeerConnection
-    let peer_connection = create_peer_connection(config).await?;
+    let (peer_connection, gather_rx) = create_peer_connection(config).await?;
 
     // 2. Setup room DataChannel & audio sender channel
     let (tx_audio, rx_audio) = mpsc::channel::<Vec<u8>>(100);
@@ -135,7 +135,7 @@ pub async fn start_room_call_with_session(
     .await?;
 
     // 3. Perform SDP Offer / Answer exchange with server
-    perform_sdp_handshake(&peer_connection, config, session).await?;
+    perform_sdp_handshake(&peer_connection, config, session, gather_rx).await?;
 
     // 4. Start CPAL Audio Engine (Microphone & Speaker Streams)
     let _audio_engine = AudioEngine::start(config, tx_audio, Arc::clone(&session.audio_buffer))?;
@@ -158,7 +158,7 @@ pub async fn start_room_call_with_session(
     // Send WPIP-08 RoomLeaveRequest (0x0F) notification
     let leave_packet = crate::protocol::ProtocolPacket::RoomLeaveRequest { room_address };
     let _ = data_channel
-        .send(&bytes::Bytes::from(leave_packet.encode()))
+        .send(bytes::BytesMut::from(leave_packet.encode().as_slice()))
         .await;
 
     let _ = peer_connection.close().await;

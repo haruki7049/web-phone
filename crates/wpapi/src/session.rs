@@ -29,7 +29,7 @@ pub type IncomingCallSender = mpsc::Sender<(
 
 use crate::address::{UserAddress, UserKeypair};
 use crate::protocol::ProtocolPacket;
-use webrtc::data_channel::RTCDataChannel;
+use webrtc::data_channel::DataChannel;
 
 /// Holds state for an active client connection session.
 #[derive(Clone)]
@@ -47,7 +47,7 @@ pub struct ClientSession {
     /// Active SFU group room address.
     pub active_room: Arc<Mutex<Option<UserAddress>>>,
     /// Active open WebRTC DataChannel.
-    pub data_channel: Arc<Mutex<Option<Arc<RTCDataChannel>>>>,
+    pub data_channel: Arc<Mutex<Option<Arc<dyn DataChannel>>>>,
     /// Optional incoming call request sender for custom UI prompting.
     pub incoming_call_tx: Arc<Mutex<Option<IncomingCallSender>>>,
     /// Optional call notification sender for session state updates.
@@ -141,15 +141,15 @@ impl ClientSession {
         self.active_room.lock().ok()?.clone()
     }
 
-    /// Set active WebRTC `RTCDataChannel`.
-    pub fn set_data_channel(&self, dc: Arc<RTCDataChannel>) {
+    /// Set active WebRTC `DataChannel`.
+    pub fn set_data_channel(&self, dc: Arc<dyn DataChannel>) {
         if let Ok(mut guard) = self.data_channel.lock() {
             *guard = Some(dc);
         }
     }
 
-    /// Get active WebRTC `RTCDataChannel` if set.
-    pub fn get_data_channel(&self) -> Option<Arc<RTCDataChannel>> {
+    /// Get active WebRTC `DataChannel` if set.
+    pub fn get_data_channel(&self) -> Option<Arc<dyn DataChannel>> {
         self.data_channel.lock().ok()?.clone()
     }
 
@@ -158,7 +158,8 @@ impl ClientSession {
         let dc = self
             .get_data_channel()
             .ok_or_else(|| anyhow::anyhow!("DataChannel is not open"))?;
-        dc.send(&bytes::Bytes::from(packet.encode())).await?;
+        dc.send(bytes::BytesMut::from(packet.encode().as_slice()))
+            .await?;
         Ok(())
     }
 

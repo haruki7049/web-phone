@@ -11,6 +11,7 @@ name = "web-phone"
 
 [workspace.dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
 axum = "0.7"
 bytes = "1.0"
 clap = { version = "4.5", features = ["derive", "string"] }
@@ -34,12 +35,13 @@ tokio = { version = "1.48", features = [
   "macros",
   "io-util",
   "time",
+  "signal",
 ] }
 toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 turn = "0.6"
-webrtc = "0.8"
+webrtc = "0.20.5"
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 
 hmac = "0.12"
