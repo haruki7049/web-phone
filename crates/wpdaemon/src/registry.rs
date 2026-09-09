@@ -18,13 +18,21 @@ pub fn matches_address(addr: &UserAddress, key: &UserAddress) -> bool {
     if addr.id == key.id {
         return true;
     }
+    if key.id.len() >= 12 && addr.id.starts_with(&key.id) {
+        return true;
+    }
+    if addr.id.len() >= 12 && key.id.starts_with(&addr.id) {
+        return true;
+    }
     let key_clean = key.id.trim_end_matches('0');
+    if key_clean.len() >= 12 && addr.id.starts_with(key_clean) {
+        return true;
+    }
     let addr_clean = addr.id.trim_end_matches('0');
-
-    (!key_clean.is_empty() && key_clean.len() <= addr.id.len() && addr.id.starts_with(key_clean))
-        || (!addr_clean.is_empty()
-            && addr_clean.len() <= key.id.len()
-            && key.id.starts_with(addr_clean))
+    if addr_clean.len() >= 12 && key.id.starts_with(addr_clean) {
+        return true;
+    }
+    false
 }
 
 /// Unified registry for managing all WebRTC client state, routing, and call approvals.

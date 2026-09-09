@@ -7,24 +7,68 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// Holds state for an active client connection session.
+use tokio::sync::mpsc;
+
+/// Call status notifications emitted by `webrtc_session`.
 #[derive(Debug, Clone)]
+pub enum CallNotification {
+    Accepted(crate::address::UserAddress),
+    Rejected(crate::address::UserAddress),
+    Error(crate::address::UserAddress, String),
+    Hangup(crate::address::UserAddress),
+}
+
+/// Type alias for call notification channel sender.
+pub type CallNotificationSender = mpsc::Sender<CallNotification>;
+
+/// Type alias for incoming call prompt channel sender.
+pub type IncomingCallSender = mpsc::Sender<(
+    crate::address::UserAddress,
+    tokio::sync::oneshot::Sender<bool>,
+)>;
+
+use crate::address::{UserAddress, UserKeypair};
+use crate::protocol::ProtocolPacket;
+use webrtc::data_channel::RTCDataChannel;
+
+/// Holds state for an active client connection session.
+#[derive(Clone)]
 pub struct ClientSession {
     /// Audio ring buffer for receiving audio data from WebRTC DataChannel.
     pub audio_buffer: Arc<Mutex<VecDeque<f32>>>,
     /// Assigned client ID received from server (u64::MAX if unassigned).
     pub client_id: Arc<AtomicU64>,
     /// Assigned temporary UserAddress received from server via ClientAssignment (0x01).
-    pub user_address: Arc<Mutex<Option<crate::address::UserAddress>>>,
+    pub user_address: Arc<Mutex<Option<UserAddress>>>,
+    /// Cryptographic identity keypair for this session.
+    pub keypair: Arc<UserKeypair>,
+    /// Active 1-to-1 call target user address.
+    pub active_target: Arc<Mutex<Option<UserAddress>>>,
+    /// Active SFU group room address.
+    pub active_room: Arc<Mutex<Option<UserAddress>>>,
+    /// Active open WebRTC DataChannel.
+    pub data_channel: Arc<Mutex<Option<Arc<RTCDataChannel>>>>,
+    /// Optional incoming call request sender for custom UI prompting.
+    pub incoming_call_tx: Arc<Mutex<Option<IncomingCallSender>>>,
+    /// Optional call notification sender for session state updates.
+    pub call_notification_tx: Arc<Mutex<Option<CallNotificationSender>>>,
+}
+
+impl std::fmt::Debug for ClientSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientSession")
+            .field("client_id", &self.client_id)
+            .field("user_address", &self.user_address)
+            .field("active_target", &self.active_target)
+            .field("active_room", &self.active_room)
+            .field("data_channel_open", &self.get_data_channel().is_some())
+            .finish()
+    }
 }
 
 impl Default for ClientSession {
     fn default() -> Self {
-        Self {
-            audio_buffer: Arc::new(Mutex::new(VecDeque::new())),
-            client_id: Arc::new(AtomicU64::new(u64::MAX)),
-            user_address: Arc::new(Mutex::new(None)),
-        }
+        Self::with_keypair(UserKeypair::generate())
     }
 }
 
@@ -34,6 +78,21 @@ impl ClientSession {
         Self::default()
     }
 
+    /// Create a `ClientSession` using a specific `UserKeypair`.
+    pub fn with_keypair(keypair: UserKeypair) -> Self {
+        Self {
+            audio_buffer: Arc::new(Mutex::new(VecDeque::new())),
+            client_id: Arc::new(AtomicU64::new(u64::MAX)),
+            user_address: Arc::new(Mutex::new(None)),
+            keypair: Arc::new(keypair),
+            active_target: Arc::new(Mutex::new(None)),
+            active_room: Arc::new(Mutex::new(None)),
+            data_channel: Arc::new(Mutex::new(None)),
+            incoming_call_tx: Arc::new(Mutex::new(None)),
+            call_notification_tx: Arc::new(Mutex::new(None)),
+        }
+    }
+
     /// Reset session state (clear buffer and reset client ID).
     pub fn reset(&self) {
         self.audio_buffer.lock().unwrap().clear();
@@ -41,6 +100,90 @@ impl ClientSession {
         if let Ok(mut guard) = self.user_address.lock() {
             *guard = None;
         }
+        if let Ok(mut guard) = self.active_target.lock() {
+            *guard = None;
+        }
+        if let Ok(mut guard) = self.active_room.lock() {
+            *guard = None;
+        }
+        if let Ok(mut guard) = self.data_channel.lock() {
+            *guard = None;
+        }
+        if let Ok(mut guard) = self.incoming_call_tx.lock() {
+            *guard = None;
+        }
+        if let Ok(mut guard) = self.call_notification_tx.lock() {
+            *guard = None;
+        }
+    }
+
+    /// Set active 1-to-1 call target address.
+    pub fn set_target_address(&self, target: Option<UserAddress>) {
+        if let Ok(mut guard) = self.active_target.lock() {
+            *guard = target;
+        }
+    }
+
+    /// Get active 1-to-1 call target address if set.
+    pub fn get_target_address(&self) -> Option<UserAddress> {
+        self.active_target.lock().ok()?.clone()
+    }
+
+    /// Set active SFU group room address.
+    pub fn set_room_address(&self, room: Option<UserAddress>) {
+        if let Ok(mut guard) = self.active_room.lock() {
+            *guard = room;
+        }
+    }
+
+    /// Get active SFU group room address if set.
+    pub fn get_room_address(&self) -> Option<UserAddress> {
+        self.active_room.lock().ok()?.clone()
+    }
+
+    /// Set active WebRTC `RTCDataChannel`.
+    pub fn set_data_channel(&self, dc: Arc<RTCDataChannel>) {
+        if let Ok(mut guard) = self.data_channel.lock() {
+            *guard = Some(dc);
+        }
+    }
+
+    /// Get active WebRTC `RTCDataChannel` if set.
+    pub fn get_data_channel(&self) -> Option<Arc<RTCDataChannel>> {
+        self.data_channel.lock().ok()?.clone()
+    }
+
+    /// Send a `ProtocolPacket` over the active WebRTC DataChannel.
+    pub async fn send_packet(&self, packet: &ProtocolPacket) -> anyhow::Result<()> {
+        let dc = self
+            .get_data_channel()
+            .ok_or_else(|| anyhow::anyhow!("DataChannel is not open"))?;
+        dc.send(&bytes::Bytes::from(packet.encode())).await?;
+        Ok(())
+    }
+
+    /// Set an incoming call handler sender.
+    pub fn set_incoming_call_handler(&self, tx: IncomingCallSender) {
+        if let Ok(mut guard) = self.incoming_call_tx.lock() {
+            *guard = Some(tx);
+        }
+    }
+
+    /// Get current incoming call handler sender if set.
+    pub fn get_incoming_call_handler(&self) -> Option<IncomingCallSender> {
+        self.incoming_call_tx.lock().ok()?.clone()
+    }
+
+    /// Set a call notification handler sender.
+    pub fn set_call_notification_handler(&self, tx: CallNotificationSender) {
+        if let Ok(mut guard) = self.call_notification_tx.lock() {
+            *guard = Some(tx);
+        }
+    }
+
+    /// Get current call notification handler sender if set.
+    pub fn get_call_notification_handler(&self) -> Option<CallNotificationSender> {
+        self.call_notification_tx.lock().ok()?.clone()
     }
 
     /// Get current client ID if assigned by server.

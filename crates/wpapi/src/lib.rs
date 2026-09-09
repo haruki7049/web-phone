@@ -9,7 +9,7 @@ pub mod resample;
 pub mod session;
 pub mod webrtc_session;
 
-pub use address::UserAddress;
+pub use address::{UserAddress, UserKeypair};
 pub use audio::AudioEngine;
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 pub use protocol::{ProtocolError, ProtocolPacket};

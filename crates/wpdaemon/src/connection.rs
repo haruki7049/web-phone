@@ -479,54 +479,65 @@ async fn handle_client_targeted_audio(
         return;
     }
 
-    if let Some(target_cid) = find_client_by_address(&target_address)
-        && target_cid != client_id
-    {
-        let caller_user_addr = sender_addr.clone().unwrap_or_default();
+    if let Some(target_cid) = find_client_by_address(&target_address) {
+        if target_cid != client_id {
+            let caller_user_addr = sender_addr.clone().unwrap_or_default();
 
-        let target_explicit_target = CLIENT_REGISTRY
-            .read()
-            .unwrap()
-            .targets
-            .get(&target_cid)
-            .cloned();
-        let is_mutual = target_explicit_target
-            .as_ref()
-            .is_some_and(|t| matches_address(t, &caller_user_addr));
+            let target_explicit_target = CLIENT_REGISTRY
+                .read()
+                .unwrap()
+                .targets
+                .get(&target_cid)
+                .cloned();
+            let is_mutual = target_explicit_target
+                .as_ref()
+                .is_some_and(|t| matches_address(t, &caller_user_addr));
 
-        if is_call_rejected(target_cid, &caller_user_addr) {
-            let err_packet = ProtocolPacket::CallRejectedNotification {
-                target_address: target_address.clone(),
-            };
-            let _ = dc.send(&Bytes::from(err_packet.encode())).await;
-            return;
-        }
-
-        if !is_mutual && !is_call_approved(target_cid, &caller_user_addr) {
-            if !has_been_notified(target_cid, client_id) {
-                mark_notified(target_cid, client_id);
-                let target_dc = CLIENT_REGISTRY
-                    .read()
-                    .unwrap()
-                    .data_channels
-                    .get(&target_cid)
-                    .cloned();
-                if let Some(target_dc) = target_dc {
-                    let req_packet = ProtocolPacket::CallRequest {
-                        caller_id: client_id,
-                        caller_address: caller_user_addr.clone(),
-                    };
-                    let _ = target_dc.send(&Bytes::from(req_packet.encode())).await;
-                    info!(
-                        "Sent call request notification to Client {} for caller Client {} ({})",
-                        target_cid,
-                        client_id,
-                        caller_user_addr.short_id()
-                    );
-                }
+            if is_call_rejected(target_cid, &caller_user_addr) {
+                let err_packet = ProtocolPacket::CallRejectedNotification {
+                    target_address: target_address.clone(),
+                };
+                let _ = dc.send(&Bytes::from(err_packet.encode())).await;
+                return;
             }
-            return;
+
+            if !is_mutual && !is_call_approved(target_cid, &caller_user_addr) {
+                if !has_been_notified(target_cid, client_id) {
+                    mark_notified(target_cid, client_id);
+                    let target_dc = CLIENT_REGISTRY
+                        .read()
+                        .unwrap()
+                        .data_channels
+                        .get(&target_cid)
+                        .cloned();
+                    if let Some(target_dc) = target_dc {
+                        let req_packet = ProtocolPacket::CallRequest {
+                            caller_id: client_id,
+                            caller_address: caller_user_addr.clone(),
+                        };
+                        let _ = target_dc.send(&Bytes::from(req_packet.encode())).await;
+                        info!(
+                            "Sent call request notification to Client {} for caller Client {} ({})",
+                            target_cid,
+                            client_id,
+                            caller_user_addr.short_id()
+                        );
+                    }
+                }
+                return;
+            }
         }
+    } else {
+        warn!(
+            "Rejecting Client {} connection to target {}: target user not found or offline",
+            client_id,
+            target_address.short_id()
+        );
+        let err_packet = ProtocolPacket::ConnectionError {
+            target_address: target_address.clone(),
+        };
+        let _ = dc.send(&Bytes::from(err_packet.encode())).await;
+        return;
     }
 
     CLIENT_REGISTRY
@@ -535,13 +546,15 @@ async fn handle_client_targeted_audio(
         .targets
         .insert(client_id, target_address.clone());
 
-    let _ = AUDIO_BROADCAST.send(AudioMessage {
-        sender_id: client_id,
-        sender_address: sender_addr,
-        target_address,
-        origin_node: my_node_id,
-        data: payload,
-    });
+    if !payload.is_empty() {
+        let _ = AUDIO_BROADCAST.send(AudioMessage {
+            sender_id: client_id,
+            sender_address: sender_addr,
+            target_address,
+            origin_node: my_node_id,
+            data: payload,
+        });
+    }
 }
 
 async fn handle_call_accept_response(client_id: u64, caller_address: UserAddress) {

@@ -18,7 +18,7 @@ tracing-subscriber.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 futures.workspace = true
-
+cpal.workspace = true
 
 
 [dev-dependencies]

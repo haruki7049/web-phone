@@ -99,11 +99,14 @@ fn hex_encode(bytes: &[u8]) -> String {
 /// Helper function to decode hex string into a fixed-size byte slice.
 fn hex_decode_into(hex_str: &str, out: &mut [u8]) -> bool {
     let bytes = hex_str.as_bytes();
-    for (i, byte) in out.iter_mut().enumerate() {
-        if i * 2 + 1 < bytes.len()
-            && let Ok(val) = u8::from_str_radix(&hex_str[i * 2..i * 2 + 2], 16)
-        {
-            *byte = val;
+    out.fill(0);
+    let hex_len = bytes.len() - (bytes.len() % 2);
+    if hex_len == 0 {
+        return false;
+    }
+    for i in 0..(hex_len / 2).min(out.len()) {
+        if let Ok(val) = u8::from_str_radix(&hex_str[i * 2..i * 2 + 2], 16) {
+            out[i] = val;
         } else {
             return false;
         }
@@ -124,7 +127,15 @@ impl UserKeypair {
         let signing_key = ed25519_dalek::SigningKey::generate(&mut rng);
         Self { signing_key }
     }
+}
 
+impl Clone for UserKeypair {
+    fn clone(&self) -> Self {
+        Self::from_bytes(&self.to_bytes())
+    }
+}
+
+impl UserKeypair {
     /// Construct `UserKeypair` from raw 32-byte secret key.
     pub fn from_bytes(bytes: &[u8; 32]) -> Self {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(bytes);
@@ -315,6 +326,16 @@ mod tests {
     fn test_user_address_short_id_short_length() {
         let addr = UserAddress::new("short");
         assert_eq!(addr.short_id(), "short");
+    }
+
+    #[test]
+    fn test_short_id_to_bytes_roundtrip() {
+        let short_addr = UserAddress::new("59ced0911ce1");
+        let bytes = short_addr.to_bytes();
+        assert_ne!(bytes, [0u8; 32]);
+        assert_eq!(&bytes[..6], &[0x59, 0xce, 0xd0, 0x91, 0x1c, 0xe1]);
+        let re_addr = UserAddress::from_bytes(bytes);
+        assert!(re_addr.id.starts_with("59ced0911ce1"));
     }
 
     #[test]

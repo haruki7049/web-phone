@@ -1,14 +1,9 @@
-//! WebRTC audio client TUI application entry point.
-//!
-//! This binary provides an interactive Terminal User Interface (Ratatui)
-//! for the web-phone audio client.
-
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use tracing::info;
-use wpapi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
+use wpapi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, UserAddress};
 
 /// Command-line arguments for the audio client TUI.
 #[derive(Debug, Parser)]
@@ -41,6 +36,37 @@ struct CLIArgs {
     /// Output device (speaker) name or substring override.
     #[arg(long, short = 'o')]
     output_device: Option<String>,
+
+    /// Automatically accept incoming calls without interactive prompt.
+    #[arg(long, short = 'y')]
+    auto_accept: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// Start a 1-to-1 call session or standby mode
+    Call {
+        /// Target SHA-256 User ID or Short ID to call
+        #[arg(long, short = 't')]
+        to: Option<String>,
+
+        /// Automatically accept incoming call requests without prompting
+        #[arg(long, short = 'y')]
+        auto_accept: bool,
+    },
+    /// Join an SFU group audio room
+    Room {
+        /// SFU Room ID to join
+        #[arg(long)]
+        id: String,
+    },
+    /// List all registered peer user addresses connected to the daemon
+    ListAddresses,
+    /// List available audio input and output devices
+    ListDevices,
 }
 
 /// Main entry point for the audio client TUI.
@@ -70,15 +96,83 @@ async fn main() -> Result<()> {
     if let Some(output_device) = args.output_device {
         loaded_config.output_device = Some(output_device);
     }
+    if args.auto_accept {
+        loaded_config.auto_accept = true;
+    }
 
-    CONFIGURATION.set(loaded_config).unwrap();
+    CONFIGURATION.set(loaded_config.clone()).unwrap();
 
-    let config: &Configuration = CONFIGURATION
-        .get()
-        .ok_or_else(|| anyhow::anyhow!("Failed to get Configuration"))?;
+    match args.command {
+        Some(Commands::Call { to, auto_accept }) => {
+            if auto_accept {
+                loaded_config.auto_accept = true;
+            }
+            if let Some(target) = to {
+                info!("Starting direct call to target: {}", target);
+                wpapi::call::start_call(&loaded_config, Some(UserAddress::new(target))).await?;
+            } else {
+                wpclient::tui::run_tui(loaded_config).await?;
+            }
+        }
+        Some(Commands::Room { id }) => {
+            info!("Joining room: {}", id);
+            wpapi::call::start_room_call(&loaded_config, UserAddress::new(id)).await?;
+        }
+        Some(Commands::ListAddresses) => {
+            list_registered_addresses(&loaded_config).await?;
+        }
+        Some(Commands::ListDevices) => {
+            list_audio_devices()?;
+        }
+        None => {
+            wpclient::tui::run_tui(loaded_config).await?;
+        }
+    }
 
-    // Launch Ratatui TUI directly
-    wpclient::tui::run_tui(config.clone()).await?;
+    Ok(())
+}
 
+fn list_audio_devices() -> Result<()> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    println!("Audio Input Devices (Microphones):");
+    if let Ok(devices) = host.input_devices() {
+        for dev in devices {
+            if let Ok(name) = dev.name() {
+                println!("  • {}", name);
+            }
+        }
+    }
+    println!("\nAudio Output Devices (Speakers):");
+    if let Ok(devices) = host.output_devices() {
+        for dev in devices {
+            if let Ok(name) = dev.name() {
+                println!("  • {}", name);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn list_registered_addresses(config: &Configuration) -> Result<()> {
+    let endpoint = format!(
+        "http://{}:{}/addresses",
+        config.server_ip, config.server_port
+    );
+    println!(
+        "Fetching registered addresses from daemon at {}...",
+        endpoint
+    );
+    let client = reqwest::Client::new();
+    let resp = client.get(&endpoint).send().await?;
+    if resp.status().is_success() {
+        let addrs: Vec<UserAddress> = resp.json().await?;
+        println!("Registered User Addresses (Total: {}):", addrs.len());
+        for addr in addrs {
+            println!("  • Short ID: {} | Full: {}", addr.short_id(), addr);
+        }
+    } else {
+        println!("Server returned status code: {}", resp.status());
+    }
     Ok(())
 }

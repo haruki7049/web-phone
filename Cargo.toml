@@ -46,5 +46,3 @@ rand = "0.8"
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
 futures = "0.3"
-
-

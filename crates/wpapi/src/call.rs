@@ -58,7 +58,7 @@ pub async fn start_call_with_session(
     .await?;
 
     // 3. Perform SDP Offer / Answer exchange with server
-    perform_sdp_handshake(&peer_connection, config).await?;
+    perform_sdp_handshake(&peer_connection, config, session).await?;
 
     // 4. Start CPAL Audio Engine (Microphone & Speaker Streams)
     let _audio_engine = AudioEngine::start(config, tx_audio, Arc::clone(&session.audio_buffer))?;
@@ -135,7 +135,7 @@ pub async fn start_room_call_with_session(
     .await?;
 
     // 3. Perform SDP Offer / Answer exchange with server
-    perform_sdp_handshake(&peer_connection, config).await?;
+    perform_sdp_handshake(&peer_connection, config, session).await?;
 
     // 4. Start CPAL Audio Engine (Microphone & Speaker Streams)
     let _audio_engine = AudioEngine::start(config, tx_audio, Arc::clone(&session.audio_buffer))?;
