@@ -36,6 +36,10 @@ ______________________________________________________________________
 | [WPIP-14](WPIP-14.md) | Client Key Store Encryption & Passphrase Key Derivation | Experimental | Argon2id & AES-256-GCM encrypted client identity key store format |
 | [WPIP-15](WPIP-15.md) | Optional Security Mechanisms & DoS Protections | Optional | Standardized Rate Limiting (Token Bucket), Request Authorization, and DoS Protections |
 | [WPIP-16](WPIP-16.md) | Secp256k1 & Nostr Identity Authentication Support | Optional | BIP-340 Schnorr signature authentication and Nostr public key identity support |
+| [WPIP-17](WPIP-17.md) | Inter-Daemon Mutual TLS (mTLS) Mesh Authentication | Experimental | Self-signed Ed25519 node X.509 certificates and mutual TLS inter-daemon mesh authentication |
+| [WPIP-18](WPIP-18.md) | Dynamic IP Blacklisting & Automated Abuse Mitigation | Experimental | Dynamic IP blacklisting and Fail2ban penalty tracking for abuse mitigation |
+| [WPIP-19](WPIP-19.md) | Direct Client-to-Client ICE Transport Negotiation | Experimental | Direct client-to-client ICE transport negotiation and daemon bypass mode |
+| [WPIP-20](WPIP-20.md) | Screen Sharing & Video Track Protocol Extension | Experimental | ProtocolPacket tag ID `0x14` extension for VP8/H.264/AV1 screen sharing and video streaming |
 
 ______________________________________________________________________
 
