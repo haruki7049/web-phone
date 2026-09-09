@@ -92,7 +92,19 @@ pub struct TuiApp {
 
 impl TuiApp {
     pub fn new(config: Configuration, event_tx: mpsc::Sender<AppEvent>) -> Self {
-        let session = ClientSession::new();
+        Self::with_keypair(config, event_tx, None)
+    }
+
+    pub fn with_keypair(
+        config: Configuration,
+        event_tx: mpsc::Sender<AppEvent>,
+        keypair: Option<wpapi::UserKeypair>,
+    ) -> Self {
+        let session = if let Some(kp) = keypair {
+            ClientSession::with_keypair(kp)
+        } else {
+            ClientSession::new()
+        };
         let mut app = Self {
             config,
             input_mode: InputMode::Normal,
@@ -167,6 +179,14 @@ impl TuiApp {
 
 /// Run the main TUI loop.
 pub async fn run_tui(config: Configuration) -> Result<()> {
+    run_tui_with_keypair(config, None).await
+}
+
+/// Run the main TUI loop with an optional pre-loaded UserKeypair.
+pub async fn run_tui_with_keypair(
+    config: Configuration,
+    keypair: Option<wpapi::UserKeypair>,
+) -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -183,7 +203,7 @@ pub async fn run_tui(config: Configuration) -> Result<()> {
     }));
 
     let (event_tx, mut event_rx) = mpsc::channel::<AppEvent>(100);
-    let mut app = TuiApp::new(config, event_tx.clone());
+    let mut app = TuiApp::with_keypair(config, event_tx.clone(), keypair);
 
     let mut event_stream = EventStream::new();
     let mut tick_interval = tokio::time::interval(Duration::from_millis(50));

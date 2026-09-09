@@ -47,6 +47,9 @@ sha1 = "0.10"
 base64 = "0.22"
 hex = "0.4"
 k256 = { version = "0.13", features = ["schnorr"] }
+argon2 = "0.5"
+aes-gcm = "0.10"
+tempfile = "3.8"
 rand = "0.8"
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }

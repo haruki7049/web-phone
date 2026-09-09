@@ -41,6 +41,14 @@ struct CLIArgs {
     #[arg(long, short = 'y')]
     auto_accept: bool,
 
+    /// Anonymous mode: use disposable temporary key pair in memory (alias: --ephemeral).
+    #[arg(long, alias = "ephemeral")]
+    anonymous: bool,
+
+    /// Passphrase for decrypting or creating WPIP-14 encrypted keystore.
+    #[arg(long)]
+    passphrase: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -56,17 +64,79 @@ enum Commands {
         /// Automatically accept incoming call requests without prompting
         #[arg(long, short = 'y')]
         auto_accept: bool,
+
+        /// Anonymous mode: use disposable temporary key pair in memory (alias: --ephemeral)
+        #[arg(long, alias = "ephemeral")]
+        anonymous: bool,
+
+        /// Passphrase for decrypting or creating WPIP-14 encrypted keystore
+        #[arg(long)]
+        passphrase: Option<String>,
     },
     /// Join an SFU group audio room
     Room {
         /// SFU Room ID to join
         #[arg(long)]
         id: String,
+
+        /// Anonymous mode: use disposable temporary key pair in memory (alias: --ephemeral)
+        #[arg(long, alias = "ephemeral")]
+        anonymous: bool,
+
+        /// Passphrase for decrypting or creating WPIP-14 encrypted keystore
+        #[arg(long)]
+        passphrase: Option<String>,
     },
     /// List all registered peer user addresses connected to the daemon
     ListAddresses,
     /// List available audio input and output devices
     ListDevices,
+}
+
+fn load_or_create_client_keypair(
+    anonymous: bool,
+    passphrase_override: Option<&str>,
+) -> wpapi::UserKeypair {
+    if anonymous {
+        info!("Running in anonymous/ephemeral mode with temporary Ed25519 identity key...");
+        return wpapi::UserKeypair::generate();
+    }
+
+    let keystore_path = wpapi::get_default_keystore_path();
+    let passphrase = passphrase_override
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("WPCLIENT_PASSPHRASE").ok())
+        .unwrap_or_else(|| "default_wpclient_passphrase_key_12345".to_string());
+
+    if keystore_path.exists() {
+        match wpapi::load_encrypted_keystore(&passphrase, &keystore_path) {
+            Ok(keypair) => {
+                info!(
+                    "Loaded persistent UserAddress from encrypted keystore: {}",
+                    keypair.public_key_address()
+                );
+                keypair
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to decrypt keystore ({}), falling back to temporary keypair...",
+                    err
+                );
+                wpapi::UserKeypair::generate()
+            }
+        }
+    } else {
+        let keypair = wpapi::UserKeypair::generate();
+        if let Err(e) = wpapi::save_encrypted_keystore(&keypair, &passphrase, &keystore_path) {
+            tracing::warn!("Failed to save new encrypted keystore: {}", e);
+        } else {
+            info!(
+                "Created new WPIP-14 encrypted keystore at {}",
+                keystore_path.display()
+            );
+        }
+        keypair
+    }
 }
 
 /// Main entry point for the audio client TUI.
@@ -102,20 +172,43 @@ async fn main() -> Result<()> {
 
     CONFIGURATION.set(loaded_config.clone()).unwrap();
 
+    let global_anonymous = args.anonymous;
+    let global_passphrase = args.passphrase.as_deref();
+
     match args.command {
-        Some(Commands::Call { to, auto_accept }) => {
+        Some(Commands::Call {
+            to,
+            auto_accept,
+            anonymous,
+            passphrase,
+        }) => {
             if auto_accept {
                 loaded_config.auto_accept = true;
             }
+            let is_anon = global_anonymous || anonymous;
+            let pass = passphrase.as_deref().or(global_passphrase);
+            let keypair = load_or_create_client_keypair(is_anon, pass);
+
             if let Some(target) = to {
                 info!("Starting direct call to target: {}", target);
                 wpapi::call::start_call(&loaded_config, Some(UserAddress::new(target))).await?;
             } else {
-                wpclient::tui::run_tui(loaded_config).await?;
+                wpclient::tui::run_tui_with_keypair(loaded_config, Some(keypair)).await?;
             }
         }
-        Some(Commands::Room { id }) => {
-            info!("Joining room: {}", id);
+        Some(Commands::Room {
+            id,
+            anonymous,
+            passphrase,
+        }) => {
+            let is_anon = global_anonymous || anonymous;
+            let pass = passphrase.as_deref().or(global_passphrase);
+            let keypair = load_or_create_client_keypair(is_anon, pass);
+            info!(
+                "Joining room: {} with address {}",
+                id,
+                keypair.public_key_address()
+            );
             wpapi::call::start_room_call(&loaded_config, UserAddress::new(id)).await?;
         }
         Some(Commands::ListAddresses) => {
@@ -125,7 +218,8 @@ async fn main() -> Result<()> {
             list_audio_devices()?;
         }
         None => {
-            wpclient::tui::run_tui(loaded_config).await?;
+            let keypair = load_or_create_client_keypair(global_anonymous, global_passphrase);
+            wpclient::tui::run_tui_with_keypair(loaded_config, Some(keypair)).await?;
         }
     }
 
