@@ -20,5 +20,8 @@ pub mod stun;
 // Re-export commonly used types
 pub use broadcast::{AUDIO_BROADCAST, AudioMessage};
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
-pub use rate_limit::{GLOBAL_RATE_LIMITER, RateLimiter, rate_limit_middleware};
+pub use rate_limit::{
+    DATACHANNEL_RATE_LIMITER, DataChannelRateLimiter, GLOBAL_RATE_LIMITER, RateLimiter,
+    rate_limit_middleware,
+};
 pub use registry::{CLIENT_REGISTRY, ClientRegistry, matches_address};

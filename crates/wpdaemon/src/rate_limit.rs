@@ -112,6 +112,57 @@ pub async fn rate_limit_middleware(req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
+/// DataChannel packet rate limiter (client_id -> TokenBucket).
+pub struct DataChannelRateLimiter {
+    refill_rate: f64,
+    max_tokens: f64,
+    buckets: Mutex<HashMap<u64, TokenBucket>>,
+}
+
+impl DataChannelRateLimiter {
+    pub fn new(refill_rate: f64, max_tokens: f64) -> Self {
+        Self {
+            refill_rate,
+            max_tokens,
+            buckets: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn check_and_consume(&self, client_id: u64) -> bool {
+        let now = Instant::now();
+        let mut buckets = self.buckets.lock().unwrap();
+
+        if buckets.len() > 2000 {
+            buckets.retain(|_, b| now.duration_since(b.last_update) < Duration::from_secs(60));
+        }
+
+        let bucket = buckets.entry(client_id).or_insert_with(|| TokenBucket {
+            tokens: self.max_tokens,
+            last_update: now,
+        });
+
+        let elapsed = now.duration_since(bucket.last_update).as_secs_f64();
+        bucket.tokens = (bucket.tokens + elapsed * self.refill_rate).min(self.max_tokens);
+        bucket.last_update = now;
+
+        if bucket.tokens >= 1.0 {
+            bucket.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn remove_client(&self, client_id: u64) {
+        let mut buckets = self.buckets.lock().unwrap();
+        buckets.remove(&client_id);
+    }
+}
+
+/// Global DataChannel rate limiter: 100 packets/sec, max burst of 200 packets.
+pub static DATACHANNEL_RATE_LIMITER: LazyLock<Arc<DataChannelRateLimiter>> =
+    LazyLock::new(|| Arc::new(DataChannelRateLimiter::new(100.0, 200.0)));
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +189,18 @@ mod tests {
         );
         let ip = extract_ip(&headers, None);
         assert_eq!(ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)));
+    }
+
+    #[test]
+    fn test_datachannel_rate_limiter() {
+        let limiter = DataChannelRateLimiter::new(1.0, 2.0);
+        let cid = 42u64;
+
+        assert!(limiter.check_and_consume(cid));
+        assert!(limiter.check_and_consume(cid));
+        assert!(!limiter.check_and_consume(cid));
+
+        limiter.remove_client(cid);
+        assert!(limiter.check_and_consume(cid));
     }
 }
