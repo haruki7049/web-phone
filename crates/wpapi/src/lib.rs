@@ -4,6 +4,7 @@ pub mod address;
 pub mod audio;
 pub mod call;
 pub mod config;
+pub mod error;
 pub mod keystore;
 pub mod protocol;
 pub mod resample;
@@ -21,6 +22,7 @@ pub use address::{
 };
 pub use audio::AudioEngine;
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
+pub use error::WpapiError;
 pub use keystore::{
     EncryptedKeyStore, KeyStoreError, get_default_keystore_path, load_encrypted_keystore,
     save_encrypted_keystore,
