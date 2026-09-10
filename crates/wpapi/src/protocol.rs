@@ -12,6 +12,13 @@ pub const CODEC_PCM_F32LE: u8 = 0x00;
 /// PCM 16-bit signed integer LE Codec ID.
 pub const CODEC_PCM_S16LE: u8 = 0x02;
 
+/// Maximum allowable total packet size (64 KiB) to prevent memory allocation DoS attacks.
+pub const MAX_PACKET_SIZE: usize = 65536;
+/// Maximum allowable audio payload size (16 KiB).
+pub const MAX_AUDIO_PAYLOAD_SIZE: usize = 16384;
+/// Maximum allowable active speaker addresses per notice.
+pub const MAX_SPEAKER_ADDRESSES: usize = 64;
+
 use thiserror::Error;
 
 /// Errors that can occur during protocol packet decoding.
@@ -20,6 +27,15 @@ pub enum ProtocolError {
     /// Packet data is empty.
     #[error("Packet data is empty")]
     EmptyPacket,
+    /// Packet size exceeds maximum allowable limit.
+    #[error("Packet size {actual} exceeds maximum limit of {max} bytes")]
+    PacketTooLarge { actual: usize, max: usize },
+    /// Audio payload size exceeds maximum allowable limit.
+    #[error("Audio payload size {actual} exceeds maximum limit of {max} bytes")]
+    AudioPayloadTooLarge { actual: usize, max: usize },
+    /// Active speaker count exceeds limit.
+    #[error("Active speaker count {actual} exceeds limit of {max}")]
+    TooManySpeakers { actual: usize, max: usize },
     /// Unknown or unsupported packet header byte.
     #[error("Unknown packet type: 0x{0:02x}")]
     UnknownPacketType(u8),
@@ -119,6 +135,12 @@ impl ProtocolPacket {
         if data.is_empty() {
             return Err(ProtocolError::EmptyPacket);
         }
+        if data.len() > MAX_PACKET_SIZE {
+            return Err(ProtocolError::PacketTooLarge {
+                actual: data.len(),
+                max: MAX_PACKET_SIZE,
+            });
+        }
 
         let msg_type = data[0];
         match msg_type {
@@ -166,6 +188,12 @@ impl ProtocolPacket {
                 let target_address = UserAddress::from_bytes(target_bytes);
                 let codec_id = data[33];
                 let audio_data = data[34..].to_vec();
+                if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
+                    return Err(ProtocolError::AudioPayloadTooLarge {
+                        actual: audio_data.len(),
+                        max: MAX_AUDIO_PAYLOAD_SIZE,
+                    });
+                }
 
                 Ok(Self::ClientTargetedAudio {
                     target_address,
@@ -191,6 +219,12 @@ impl ProtocolPacket {
                     let sender_address = UserAddress::from_bytes(sender_bytes);
                     let codec_id = data[73];
                     let audio_data = data[74..].to_vec();
+                    if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
+                        return Err(ProtocolError::AudioPayloadTooLarge {
+                            actual: audio_data.len(),
+                            max: MAX_AUDIO_PAYLOAD_SIZE,
+                        });
+                    }
 
                     Ok(Self::ServerTargetedAudio {
                         target_address,
@@ -202,6 +236,12 @@ impl ProtocolPacket {
                 } else {
                     // Fallback parse without codec_id byte
                     let audio_data = data[33..].to_vec();
+                    if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
+                        return Err(ProtocolError::AudioPayloadTooLarge {
+                            actual: audio_data.len(),
+                            max: MAX_AUDIO_PAYLOAD_SIZE,
+                        });
+                    }
                     Ok(Self::ClientTargetedAudio {
                         target_address,
                         codec_id: CODEC_OPUS,
@@ -221,6 +261,12 @@ impl ProtocolPacket {
                     let codec_id = data[81];
                     let ttl = data[82];
                     let audio_data = data[83..].to_vec();
+                    if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
+                        return Err(ProtocolError::AudioPayloadTooLarge {
+                            actual: audio_data.len(),
+                            max: MAX_AUDIO_PAYLOAD_SIZE,
+                        });
+                    }
 
                     Ok(Self::PeerTargetedAudio {
                         sender_id,
@@ -417,6 +463,12 @@ impl ProtocolPacket {
                 let room_address = UserAddress::from_bytes(bytes);
                 let codec_id = data[33];
                 let audio_data = data[34..].to_vec();
+                if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
+                    return Err(ProtocolError::AudioPayloadTooLarge {
+                        actual: audio_data.len(),
+                        max: MAX_AUDIO_PAYLOAD_SIZE,
+                    });
+                }
                 Ok(Self::RoomGroupAudio {
                     room_address,
                     codec_id,
@@ -434,6 +486,15 @@ impl ProtocolPacket {
                 }
                 let bytes: [u8; 32] = data[1..33].try_into().unwrap();
                 let room_address = UserAddress::from_bytes(bytes);
+
+                let remaining_bytes = data.len() - 33;
+                let speaker_count = remaining_bytes / 32;
+                if speaker_count > MAX_SPEAKER_ADDRESSES {
+                    return Err(ProtocolError::TooManySpeakers {
+                        actual: speaker_count,
+                        max: MAX_SPEAKER_ADDRESSES,
+                    });
+                }
 
                 let mut speaker_addresses = Vec::new();
                 let mut offset = 33;
@@ -810,6 +871,27 @@ mod tests {
         assert_eq!(
             ProtocolPacket::decode(&[0x99]),
             Err(ProtocolError::UnknownPacketType(0x99))
+        );
+
+        // Test total packet size overflow (> 64 KiB)
+        let huge_packet = vec![0x02u8; MAX_PACKET_SIZE + 1];
+        assert_eq!(
+            ProtocolPacket::decode(&huge_packet),
+            Err(ProtocolError::PacketTooLarge {
+                actual: MAX_PACKET_SIZE + 1,
+                max: MAX_PACKET_SIZE,
+            })
+        );
+
+        // Test audio payload size overflow (> 16 KiB)
+        let mut oversized_audio_packet = vec![0x02u8; 34]; // ClientTargetedAudio header
+        oversized_audio_packet.extend(vec![0xAAu8; MAX_AUDIO_PAYLOAD_SIZE + 1]);
+        assert_eq!(
+            ProtocolPacket::decode(&oversized_audio_packet),
+            Err(ProtocolError::AudioPayloadTooLarge {
+                actual: MAX_AUDIO_PAYLOAD_SIZE + 1,
+                max: MAX_AUDIO_PAYLOAD_SIZE,
+            })
         );
     }
 }
