@@ -173,6 +173,19 @@ mod tests {
         assert_eq!(&resp[8..20], &transaction_id);
         // Verify family byte for IPv6
         assert_eq!(resp[25], 0x02);
+
+        // Verify IPv6 address XOR unmasking
+        let mut xor_mask = [0u8; 16];
+        xor_mask[0..4].copy_from_slice(&STUN_MAGIC_COOKIE.to_be_bytes());
+        xor_mask[4..16].copy_from_slice(&transaction_id);
+
+        let xored_ip = &resp[28..44];
+        let mut unmasked_ip = [0u8; 16];
+        for i in 0..16 {
+            unmasked_ip[i] = xored_ip[i] ^ xor_mask[i];
+        }
+        let expected_ip: std::net::Ipv6Addr = "2001:db8::1".parse().unwrap();
+        assert_eq!(unmasked_ip, expected_ip.octets());
     }
 
     #[test]

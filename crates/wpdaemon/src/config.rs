@@ -182,4 +182,15 @@ mod tests {
         assert_eq!(config.peers, vec!["http://192.168.1.2:15000"]);
         assert_eq!(config.node_id, 42);
     }
+
+    #[test]
+    fn test_generate_random_turn_secret() {
+        let secret1 = generate_random_turn_secret();
+        let secret2 = generate_random_turn_secret();
+
+        assert_eq!(secret1.len(), 64);
+        assert_eq!(secret2.len(), 64);
+        assert_ne!(secret1, secret2);
+        assert!(secret1.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }

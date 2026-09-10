@@ -201,4 +201,73 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Decryption failed"));
     }
+
+    #[test]
+    fn test_load_encrypted_keystore_invalid_version_and_cipher() {
+        let dir = tempdir().expect("Failed to create tempdir");
+        let path = dir.path().join("invalid_ver.json");
+
+        let mut store = EncryptedKeyStore {
+            version: 99,
+            user_address: "a1b2c3d4e5f6".into(),
+            crypto: CryptoMeta {
+                kdf: "argon2id".into(),
+                kdf_params: KdfParams {
+                    salt: "AAAA".into(),
+                    mem_limit_kib: 65536,
+                    ops_limit: 3,
+                    parallelism: 4,
+                },
+                cipher: "aes-256-gcm".into(),
+                nonce: "AAAA".into(),
+                ciphertext: "AAAA".into(),
+            },
+        };
+
+        fs::write(&path, serde_json::to_string(&store).unwrap()).unwrap();
+        assert!(load_encrypted_keystore("pass", &path).is_err());
+
+        store.version = 1;
+        store.crypto.kdf = "pbkdf2".into();
+        fs::write(&path, serde_json::to_string(&store).unwrap()).unwrap();
+        assert!(load_encrypted_keystore("pass", &path).is_err());
+
+        store.crypto.kdf = "argon2id".into();
+        store.crypto.cipher = "chacha20-poly1305".into();
+        fs::write(&path, serde_json::to_string(&store).unwrap()).unwrap();
+        assert!(load_encrypted_keystore("pass", &path).is_err());
+    }
+
+    #[test]
+    fn test_load_encrypted_keystore_corrupted_json_and_invalid_base64() {
+        let dir = tempdir().expect("Failed to create tempdir");
+        let path = dir.path().join("bad.json");
+
+        // Non-existent file
+        assert!(load_encrypted_keystore("pass", &dir.path().join("non_existent.json")).is_err());
+
+        // Corrupted JSON
+        fs::write(&path, "{ invalid json }").unwrap();
+        assert!(load_encrypted_keystore("pass", &path).is_err());
+
+        // Invalid Base64 in salt
+        let bad_store = EncryptedKeyStore {
+            version: 1,
+            user_address: "a1b2c3d4e5f6".into(),
+            crypto: CryptoMeta {
+                kdf: "argon2id".into(),
+                kdf_params: KdfParams {
+                    salt: "!!!not_base64!!!".into(),
+                    mem_limit_kib: 65536,
+                    ops_limit: 3,
+                    parallelism: 4,
+                },
+                cipher: "aes-256-gcm".into(),
+                nonce: "AAAA".into(),
+                ciphertext: "AAAA".into(),
+            },
+        };
+        fs::write(&path, serde_json::to_string(&bad_store).unwrap()).unwrap();
+        assert!(load_encrypted_keystore("pass", &path).is_err());
+    }
 }
