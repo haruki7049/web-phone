@@ -68,7 +68,8 @@ pub(crate) async fn handle_client_datachannel_events(
                                     if audio_msg.sender_id == client_id {
                                         continue;
                                     }
-                                    if matches_address_prefix(&user_addr, &audio_msg.target_address) {
+                                    if matches_address_prefix(&user_addr, &audio_msg.target_address)
+                                    {
                                         let packet = ProtocolPacket::ServerTargetedAudio {
                                             target_address: user_addr.clone(),
                                             sender_id: audio_msg.sender_id,
