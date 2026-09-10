@@ -19,6 +19,11 @@
 #define MAX_TIMESTAMP_DRIFT_SECS 300
 
 /**
+ * Maximum allowed entries in the anti-replay signature cache.
+ */
+#define MAX_ANTI_REPLAY_CACHE_SIZE 10000
+
+/**
  * Default Opus Codec ID as defined in WPIP-04.
  */
 #define CODEC_OPUS 1
@@ -160,6 +165,9 @@ int wpapi_list_addresses(const struct WPAPIConfig *config, char **out_json);
 
 /**
  * Retrieve the last thread-local error message string.
+ *
+ * # Safety
+ * The returned pointer is thread-local and valid until the next FFI error call on the current thread.
  */
 const char *wpapi_last_error_message(void);
 

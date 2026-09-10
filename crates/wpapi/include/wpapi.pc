@@ -5,6 +5,6 @@ includedir=${prefix}/include
 
 Name: wpapi
 Description: Core client engine and C API bindings for web-phone WebRTC audio system
-Version: 0.2.0
+Version: 0.3.0
 Libs: -L${libdir} -lwpapi
 Cflags: -I${includedir}
