@@ -40,9 +40,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}/wpdaemon
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=ref,event=tag
             type=semver,pattern={{version}}
-            type=semver,pattern=v{{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
 
