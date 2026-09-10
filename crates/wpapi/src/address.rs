@@ -655,6 +655,29 @@ pub fn verify_secp256k1_authorization_header(
     )
 }
 
+/// Verify HTTP `Authorization` header value per WPIP-02 / WPIP-16 with a specific Anti-Replay cache, automatically detecting scheme.
+pub fn verify_any_authorization_header_with_cache(
+    header_val: &str,
+    sdp_offer: &str,
+    cache: &AntiReplayCache,
+) -> Result<UserAddress, AuthError> {
+    if header_val.starts_with("WP-Secp256k1 ") {
+        verify_secp256k1_authorization_header_with_cache(header_val, sdp_offer, cache)
+    } else if header_val.starts_with("WP-Ed25519 ") {
+        verify_authorization_header_with_cache(header_val, sdp_offer, cache)
+    } else {
+        Err(AuthError::InvalidScheme(header_val.to_string()))
+    }
+}
+
+/// Verify HTTP `Authorization` header value per WPIP-02 / WPIP-16 using the global Anti-Replay cache, automatically detecting scheme.
+pub fn verify_any_authorization_header(
+    header_val: &str,
+    sdp_offer: &str,
+) -> Result<UserAddress, AuthError> {
+    verify_any_authorization_header_with_cache(header_val, sdp_offer, &GLOBAL_ANTI_REPLAY_CACHE)
+}
+
 impl Default for UserAddress {
     fn default() -> Self {
         Self::generate_from_time()
@@ -894,5 +917,31 @@ mod tests {
         // Replay attempt: Rejected
         let err = verify_authorization_header_with_cache(&header, sdp, &cache).unwrap_err();
         assert_eq!(err, AuthError::ReplayDetected);
+    }
+
+    #[test]
+    fn test_verify_any_authorization_header() {
+        let cache = AntiReplayCache::new();
+        let ed_kp = UserKeypair::generate();
+        let sdp = "v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\n";
+        let (_, ed_hdr) = build_authorization_header(&ed_kp, sdp);
+        assert_eq!(
+            verify_any_authorization_header_with_cache(&ed_hdr, sdp, &cache).unwrap(),
+            ed_kp.public_key_address()
+        );
+
+        let secp_kp = UserKeypair::from_nostr_key(
+            "3bf0e6984b71239c4a86161427a206a1ed93ee14e04ed96f2a893339f4ad1600",
+        )
+        .unwrap();
+        let (_, secp_hdr) = build_authorization_header(&secp_kp, sdp);
+        assert_eq!(
+            verify_any_authorization_header_with_cache(&secp_hdr, sdp, &cache).unwrap(),
+            secp_kp.public_key_address()
+        );
+
+        let err = verify_any_authorization_header_with_cache("WP-Unknown 123:456:789", sdp, &cache)
+            .unwrap_err();
+        assert!(matches!(err, AuthError::InvalidScheme(_)));
     }
 }

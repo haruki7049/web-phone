@@ -418,30 +418,14 @@ pub async fn handle_sdp_offer(
         .and_then(|v| v.to_str().ok());
 
     let user_address = if let Some(auth_val) = auth_header {
-        if auth_val.starts_with("WP-Secp256k1 ") {
-            match wpapi::verify_secp256k1_authorization_header(auth_val, &offer.sdp) {
-                Ok(addr) => {
-                    info!(
-                        "Verified client secp256k1/Nostr Schnorr identity signature: {}",
-                        addr
-                    );
-                    addr
-                }
-                Err(err) => {
-                    error!("secp256k1 authorization verification failed: {}", err);
-                    return Err(SignalingError::Unauthorized(err));
-                }
+        match wpapi::verify_any_authorization_header(auth_val, &offer.sdp) {
+            Ok(addr) => {
+                info!("Verified client identity signature: {}", addr);
+                addr
             }
-        } else {
-            match wpapi::verify_authorization_header(auth_val, &offer.sdp) {
-                Ok(addr) => {
-                    info!("Verified client Ed25519 identity signature: {}", addr);
-                    addr
-                }
-                Err(err) => {
-                    error!("Ed25519 authorization verification failed: {}", err);
-                    return Err(SignalingError::Unauthorized(err));
-                }
+            Err(err) => {
+                error!("Authorization verification failed: {}", err);
+                return Err(SignalingError::Unauthorized(err));
             }
         }
     } else {

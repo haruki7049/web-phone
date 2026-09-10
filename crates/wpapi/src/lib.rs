@@ -13,7 +13,8 @@ pub mod webrtc_session;
 
 pub use address::{
     AntiReplayCache, AuthError, GLOBAL_ANTI_REPLAY_CACHE, MAX_TIMESTAMP_DRIFT_SECS, UserAddress,
-    UserKeypair, build_authorization_header, verify_authorization_header,
+    UserKeypair, build_authorization_header, verify_any_authorization_header,
+    verify_any_authorization_header_with_cache, verify_authorization_header,
     verify_authorization_header_with_cache, verify_secp256k1_authorization_header,
     verify_secp256k1_authorization_header_with_cache,
 };
