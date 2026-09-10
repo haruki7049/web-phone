@@ -6,7 +6,10 @@ use wpapi::{Configuration, UserAddress};
 /// List all registered peer user addresses connected to the daemon.
 pub async fn list_registered_addresses(config: &Configuration) -> Result<()> {
     let endpoint = format!("{}/addresses", config.server_url());
-    println!("Fetching registered addresses from daemon at {}...", endpoint);
+    println!(
+        "Fetching registered addresses from daemon at {}...",
+        endpoint
+    );
     let client = reqwest::Client::new();
     let keypair = wpapi::UserKeypair::generate();
     let (_, auth_hdr) = wpapi::build_authorization_header(&keypair, "");

@@ -83,7 +83,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/sdp", post(wpdaemon::handlers::handle_sdp_offer))
         .route("/peer/sdp", post(wpdaemon::handlers::handle_peer_sdp))
         .layer(middleware::from_fn(rate_limit_middleware))
-        .route("/addresses", axum::routing::get(wpdaemon::handlers::list_registered_addresses))
+        .route(
+            "/addresses",
+            axum::routing::get(wpdaemon::handlers::list_registered_addresses),
+        )
         .route(
             "/addresses/:id",
             axum::routing::get(wpdaemon::handlers::resolve_registered_address),

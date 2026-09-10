@@ -19,7 +19,8 @@ thread_local! {
 }
 
 pub(crate) fn set_last_error(err: impl std::fmt::Display) {
-    let cstr = CString::new(err.to_string()).unwrap_or_else(|_| CString::new("Unknown error").unwrap());
+    let cstr =
+        CString::new(err.to_string()).unwrap_or_else(|_| CString::new("Unknown error").unwrap());
     LAST_ERROR.with(|cell| {
         *cell.borrow_mut() = Some(cstr);
     });
@@ -38,5 +39,3 @@ pub unsafe extern "C" fn wpapi_get_last_error() -> *const c_char {
             .unwrap_or(std::ptr::null())
     })
 }
-
-

@@ -24,8 +24,8 @@ pub mod stun;
 pub use broadcast::{AUDIO_BROADCAST, AudioMessage};
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 pub use constants::*;
-pub use handlers::*;
 pub use error::SignalingError;
+pub use handlers::*;
 pub use rate_limit::{
     DATACHANNEL_RATE_LIMITER, DataChannelRateLimiter, GLOBAL_RATE_LIMITER, RateLimiter,
     rate_limit_middleware, sanitize_ip,
