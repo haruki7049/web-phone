@@ -63,7 +63,7 @@ pub async fn run_stun_server(
         if !STUN_RATE_LIMITER.check_and_consume(src.ip()) {
             warn!(
                 "STUN packet rate limit exceeded for IP: {}, dropping",
-                src.ip()
+                crate::rate_limit::sanitize_ip(&src.ip().to_string())
             );
             continue;
         }
@@ -72,7 +72,10 @@ pub async fn run_stun_server(
         let magic_cookie = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
 
         if msg_type == STUN_BINDING_REQUEST && magic_cookie == STUN_MAGIC_COOKIE {
-            trace!("Received STUN Binding Request from {}", src);
+            trace!(
+                "Received STUN Binding Request from {}",
+                crate::rate_limit::sanitize_ip(&src.to_string())
+            );
             let transaction_id = &buf[8..20];
 
             if let Ok(response) = build_stun_binding_response(src, transaction_id) {

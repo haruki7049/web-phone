@@ -26,6 +26,6 @@ pub use constants::*;
 pub use error::SignalingError;
 pub use rate_limit::{
     DATACHANNEL_RATE_LIMITER, DataChannelRateLimiter, GLOBAL_RATE_LIMITER, RateLimiter,
-    rate_limit_middleware,
+    rate_limit_middleware, sanitize_ip,
 };
 pub use registry::{CLIENT_REGISTRY, ClientRegistry, matches_address};

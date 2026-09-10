@@ -420,7 +420,7 @@ pub async fn handle_sdp_offer(
     let user_address = if let Some(auth_val) = auth_header {
         match wpapi::verify_any_authorization_header(auth_val, &offer.sdp) {
             Ok(addr) => {
-                info!("Verified client identity signature: {}", addr);
+                info!("Verified client identity signature: {}", addr.short_id());
                 addr
             }
             Err(err) => {

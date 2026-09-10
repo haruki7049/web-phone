@@ -338,4 +338,24 @@ mod tests {
         fs::write(&path, serde_json::to_string(&bad_store).unwrap()).unwrap();
         assert!(load_encrypted_keystore("pass", &path).is_err());
     }
+
+    #[test]
+    fn test_keystore_plaintext_secret_key_non_leakage() {
+        let dir = tempdir().expect("Failed to create tempdir");
+        let path = dir.path().join("keystore.json");
+        let keypair = UserKeypair::generate();
+        let secret_bytes = keypair.to_bytes();
+        let secret_hex = hex::encode(secret_bytes);
+
+        save_encrypted_keystore(&keypair, "strong_passphrase", &path).unwrap();
+
+        let json_content = fs::read_to_string(&path).unwrap();
+
+        // Verify Argon2id + AES-256-GCM metadata presence per WPIP-14
+        assert!(json_content.contains("argon2id"));
+        assert!(json_content.contains("aes-256-gcm"));
+
+        // Verify plaintext secret key bytes/hex string are absent from encrypted keystore.json
+        assert!(!json_content.contains(&secret_hex));
+    }
 }

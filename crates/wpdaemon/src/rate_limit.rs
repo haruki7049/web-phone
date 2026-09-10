@@ -99,6 +99,24 @@ pub fn extract_ip(headers: &HeaderMap, req_ip: Option<IpAddr>) -> IpAddr {
     req_ip.unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
 }
 
+/// Mask IP address to prevent logging full IP address in plain text.
+pub fn sanitize_ip(ip_str: &str) -> String {
+    if let Ok(ip) = ip_str.parse::<IpAddr>() {
+        match ip {
+            IpAddr::V4(v4) => {
+                let octets = v4.octets();
+                format!("{}.{}.x.x", octets[0], octets[1])
+            }
+            IpAddr::V6(v6) => {
+                let segments = v6.segments();
+                format!("{:x}:{:x}:x:x:x:x:x:x", segments[0], segments[1])
+            }
+        }
+    } else {
+        "x.x.x.x".to_string()
+    }
+}
+
 /// Axum middleware for IP-based rate limiting on HTTP routes.
 pub async fn rate_limit_middleware(req: Request, next: Next) -> Response {
     let headers = req.headers().clone();
@@ -110,7 +128,7 @@ pub async fn rate_limit_middleware(req: Request, next: Next) -> Response {
     let ip = extract_ip(&headers, socket_ip);
 
     if !GLOBAL_RATE_LIMITER.check_and_consume(ip) {
-        warn!("Rate limit exceeded for IP: {}", ip);
+        warn!("Rate limit exceeded for IP: {}", sanitize_ip(&ip.to_string()));
         return (
             StatusCode::TOO_MANY_REQUESTS,
             "429 Too Many Requests: Rate limit exceeded\n",
@@ -241,5 +259,12 @@ mod tests {
         }
         // 201st packet in burst exceeded capacity -> blocked
         assert!(!limiter.check_and_consume(client_id));
+    }
+
+    #[test]
+    fn test_sanitize_ip() {
+        assert_eq!(sanitize_ip("192.168.1.100"), "192.168.x.x");
+        assert_eq!(sanitize_ip("10.0.0.1"), "10.0.x.x");
+        assert_eq!(sanitize_ip("invalid_ip"), "x.x.x.x");
     }
 }
