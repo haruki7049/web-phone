@@ -137,11 +137,70 @@ mod tests {
     #[test]
     fn test_sfu_and_ping_pong_roundtrips() {
         let addr = UserAddress::generate_from_time();
+        let speaker1 = UserAddress::generate_from_time();
+        let speaker2 = UserAddress::generate_from_time();
 
         let join = ProtocolPacket::RoomJoinRequest {
             room_address: addr.clone(),
         };
         assert_eq!(ProtocolPacket::decode(&join.encode()).unwrap(), join);
+
+        let room_state = ProtocolPacket::RoomStateNotification {
+            room_address: addr.clone(),
+            participant_count: 5,
+        };
+        assert_eq!(
+            ProtocolPacket::decode(&room_state.encode()).unwrap(),
+            room_state
+        );
+
+        let leave = ProtocolPacket::RoomLeaveRequest {
+            room_address: addr.clone(),
+        };
+        assert_eq!(ProtocolPacket::decode(&leave.encode()).unwrap(), leave);
+
+        let group_audio = ProtocolPacket::RoomGroupAudio {
+            room_address: addr.clone(),
+            codec_id: CODEC_OPUS,
+            audio_data: vec![1, 2, 3, 4, 5],
+        };
+        assert_eq!(
+            ProtocolPacket::decode(&group_audio.encode()).unwrap(),
+            group_audio
+        );
+
+        let speaker_notice = ProtocolPacket::ActiveSpeakerNotice {
+            room_address: addr.clone(),
+            speaker_addresses: vec![speaker1, speaker2],
+        };
+        assert_eq!(
+            ProtocolPacket::decode(&speaker_notice.encode()).unwrap(),
+            speaker_notice
+        );
+
+        let video_frame = ProtocolPacket::VideoFrameData {
+            target_address: addr.clone(),
+            video_codec_id: 0x01,
+            frame_data: vec![0xFF, 0xD8, 0xFF, 0xE0],
+        };
+        assert_eq!(
+            ProtocolPacket::decode(&video_frame.encode()).unwrap(),
+            video_frame
+        );
+
+        let peer_audio = ProtocolPacket::PeerTargetedAudio {
+            sender_id: 10,
+            origin_node: 20,
+            target_address: addr.clone(),
+            sender_address: addr.clone(),
+            codec_id: CODEC_OPUS,
+            ttl: 5,
+            audio_data: vec![11, 22, 33],
+        };
+        assert_eq!(
+            ProtocolPacket::decode(&peer_audio.encode()).unwrap(),
+            peer_audio
+        );
 
         let ping = ProtocolPacket::Ping {
             timestamp: 987654321,

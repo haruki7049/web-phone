@@ -136,3 +136,43 @@ impl std::fmt::Debug for AudioRingBuffer {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ring_buffer_push_pop_clear() {
+        let ring = AudioRingBuffer::new(1024);
+        assert!(ring.is_empty());
+        assert_eq!(ring.len(), 0);
+
+        assert!(ring.push(0.123));
+        assert!(ring.push(0.456));
+        assert_eq!(ring.len(), 2);
+        assert!(!ring.is_empty());
+
+        assert_eq!(ring.pop(), Some(0.123));
+        assert_eq!(ring.pop(), Some(0.456));
+        assert_eq!(ring.pop(), None);
+        assert!(ring.is_empty());
+
+        ring.push(0.789);
+        assert_eq!(ring.len(), 1);
+        ring.clear();
+        assert_eq!(ring.len(), 0);
+        assert_eq!(ring.pop(), None);
+    }
+
+    #[test]
+    fn test_ring_buffer_slice_and_latency_capping() {
+        let ring = AudioRingBuffer::new(1024);
+        let samples: Vec<f32> = (0..500).map(|i| i as f32).collect();
+        ring.push_slice(&samples);
+        assert_eq!(ring.len(), 500);
+
+        ring.cap_latency(400, 100);
+        assert_eq!(ring.len(), 100);
+        assert_eq!(ring.pop(), Some(400.0));
+    }
+}
