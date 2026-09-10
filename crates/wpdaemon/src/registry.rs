@@ -206,12 +206,14 @@ impl ClientRegistry {
         let my_target = self.targets.get(&client_id);
 
         if let Some(addr) = my_addr
-            && matches_address(addr, room_key)
+            && (matches_address(addr, room_key) || matches_address_prefix(addr, room_key))
         {
             return true;
         }
         if let Some(target) = my_target
-            && matches_address(target, room_key)
+            && (matches_address(target, room_key)
+                || matches_address_prefix(target, room_key)
+                || matches_address_prefix(room_key, target))
         {
             return true;
         }
@@ -224,7 +226,12 @@ impl ClientRegistry {
         for (&cid, addr) in self.addresses.iter() {
             let target = self.targets.get(&cid);
             if matches_address(addr, room_key)
-                || target.is_some_and(|t| matches_address(t, room_key))
+                || matches_address_prefix(addr, room_key)
+                || target.is_some_and(|t| {
+                    matches_address(t, room_key)
+                        || matches_address_prefix(t, room_key)
+                        || matches_address_prefix(room_key, t)
+                })
             {
                 count += 1;
             }
@@ -244,9 +251,11 @@ impl ClientRegistry {
         };
 
         for (&cid, addr) in self.addresses.iter() {
-            if matches_address(addr, target_key)
+            if (matches_address(addr, target_key) || matches_address_prefix(addr, target_key))
                 && let Some(other_target) = self.targets.get(&cid)
-                && matches_address(other_target, my_addr)
+                && (matches_address(other_target, my_addr)
+                    || matches_address_prefix(my_addr, other_target)
+                    || matches_address_prefix(other_target, my_addr))
             {
                 return true;
             }
@@ -261,9 +270,10 @@ impl ClientRegistry {
         }
 
         for (&cid, addr) in self.addresses.iter() {
-            if matches_address(addr, target_key)
+            if (matches_address(addr, target_key) || matches_address_prefix(addr, target_key))
                 && let Some(other_room) = self.targets.get(&cid)
                 && !matches_address(other_room, target_key)
+                && !matches_address_prefix(other_room, target_key)
                 && self.get_participant_count_for_room(other_room) >= 2
             {
                 return true;
@@ -509,7 +519,10 @@ mod tests {
         let zero_padded_target = UserAddress::new(
             "39f8adc7bf930000000000000000000000000000000000000000000000000000".to_string(),
         );
-        assert_eq!(registry.find_client_by_address(&zero_padded_target), Some(1));
+        assert_eq!(
+            registry.find_client_by_address(&zero_padded_target),
+            Some(1)
+        );
 
         let invalid_short = UserAddress::new("39f8adc7".to_string());
         assert_eq!(registry.find_client_by_address(&invalid_short), None);

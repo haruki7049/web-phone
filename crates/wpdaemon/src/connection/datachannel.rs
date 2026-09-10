@@ -2,7 +2,7 @@
 
 use crate::broadcast::{AUDIO_BROADCAST, AudioMessage};
 use crate::constants::{DEFAULT_INITIAL_TTL, MAX_MESSAGE_SIZE};
-use crate::registry::{CLIENT_REGISTRY, matches_address};
+use crate::registry::{CLIENT_REGISTRY, matches_address_prefix};
 use bytes::BytesMut;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -68,7 +68,7 @@ pub(crate) async fn handle_client_datachannel_events(
                                     if audio_msg.sender_id == client_id {
                                         continue;
                                     }
-                                    if matches_address(&audio_msg.target_address, &user_addr) {
+                                    if matches_address_prefix(&user_addr, &audio_msg.target_address) {
                                         let packet = ProtocolPacket::ServerTargetedAudio {
                                             target_address: user_addr.clone(),
                                             sender_id: audio_msg.sender_id,
@@ -222,7 +222,7 @@ async fn handle_client_targeted_audio(
             .unwrap()
             .targets
             .get(&target_cid)
-            .map(|addr| matches_address(addr, &caller_user_addr))
+            .map(|addr| matches_address_prefix(addr, &caller_user_addr))
             .unwrap_or(false);
 
         if !is_in_same_call && !is_mutual && super::is_room_or_target_full(&target_address) {

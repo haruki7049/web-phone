@@ -91,6 +91,9 @@ pub async fn execute_action(app: &mut TuiApp, action: AppAction) -> Result<bool>
         }
         AppAction::ToggleMute => {
             app.is_muted = !app.is_muted;
+            if let Some(ref session) = app.session {
+                session.set_muted(app.is_muted);
+            }
             let status = if app.is_muted { "Muted" } else { "Unmuted" };
             app.add_log(format!("Microphone is now {}", status));
         }

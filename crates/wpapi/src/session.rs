@@ -4,7 +4,7 @@
 //! to allow multiple independent client instances within a single process.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
@@ -52,6 +52,12 @@ pub struct ClientSession {
     pub incoming_call_tx: Arc<Mutex<Option<IncomingCallSender>>>,
     /// Optional call notification sender for session state updates.
     pub call_notification_tx: Arc<Mutex<Option<CallNotificationSender>>>,
+    /// Atomic input audio energy level (0.0..=1.0 stored as f32::to_bits).
+    pub input_level: Arc<AtomicU32>,
+    /// Atomic output audio energy level (0.0..=1.0 stored as f32::to_bits).
+    pub output_level: Arc<AtomicU32>,
+    /// Mute toggle flag for audio input capture.
+    pub is_muted: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for ClientSession {
@@ -90,6 +96,9 @@ impl ClientSession {
             data_channel: Arc::new(Mutex::new(None)),
             incoming_call_tx: Arc::new(Mutex::new(None)),
             call_notification_tx: Arc::new(Mutex::new(None)),
+            input_level: Arc::new(AtomicU32::new(0)),
+            output_level: Arc::new(AtomicU32::new(0)),
+            is_muted: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -115,6 +124,39 @@ impl ClientSession {
         if let Ok(mut guard) = self.call_notification_tx.lock() {
             *guard = None;
         }
+        self.input_level.store(0, Ordering::Relaxed);
+        self.output_level.store(0, Ordering::Relaxed);
+        self.is_muted.store(false, Ordering::Relaxed);
+    }
+
+    /// Set current input audio energy level.
+    pub fn set_input_level(&self, level: f32) {
+        self.input_level.store(level.to_bits(), Ordering::Relaxed);
+    }
+
+    /// Get current input audio energy level.
+    pub fn get_input_level(&self) -> f32 {
+        f32::from_bits(self.input_level.load(Ordering::Relaxed))
+    }
+
+    /// Set current output audio energy level.
+    pub fn set_output_level(&self, level: f32) {
+        self.output_level.store(level.to_bits(), Ordering::Relaxed);
+    }
+
+    /// Get current output audio energy level.
+    pub fn get_output_level(&self) -> f32 {
+        f32::from_bits(self.output_level.load(Ordering::Relaxed))
+    }
+
+    /// Set microphone mute state.
+    pub fn set_muted(&self, muted: bool) {
+        self.is_muted.store(muted, Ordering::Relaxed);
+    }
+
+    /// Check if microphone is muted.
+    pub fn is_muted(&self) -> bool {
+        self.is_muted.load(Ordering::Relaxed)
     }
 
     /// Set active 1-to-1 call target address.

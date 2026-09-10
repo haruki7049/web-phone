@@ -107,12 +107,12 @@ pub async fn setup_data_channel(
 
                     if let Some(mut rx) = rx_audio_opt.take() {
                         let dc_inner = Arc::clone(&dc_init);
-                        let target_opt = target_addr_init.clone();
+                        let sess_target = session_ref.clone();
                         tokio::spawn(async move {
                             while let Some(audio_bytes) = rx.recv().await {
-                                if let Some(ref target) = target_opt {
+                                if let Some(target) = sess_target.get_target_address() {
                                     let packet = ProtocolPacket::ClientTargetedAudio {
-                                        target_address: target.clone(),
+                                        target_address: target,
                                         codec_id: crate::protocol::CODEC_OPUS,
                                         audio_data: audio_bytes,
                                     };
@@ -159,6 +159,27 @@ pub async fn setup_data_channel(
                                 let _ = dc_init
                                     .send(BytesMut::from(accept.encode().as_slice()))
                                     .await;
+                            } else if let Some(tx) = session_ref.get_incoming_call_handler() {
+                                let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                                let dc_reply = Arc::clone(&dc_init);
+                                let caller_addr = caller_address.clone();
+                                tokio::spawn(async move {
+                                    if let Ok(accepted) = resp_rx.await {
+                                        let packet = if accepted {
+                                            ProtocolPacket::CallAcceptResponse {
+                                                caller_address: caller_addr,
+                                            }
+                                        } else {
+                                            ProtocolPacket::CallRejectResponse {
+                                                caller_address: caller_addr,
+                                            }
+                                        };
+                                        let _ = dc_reply
+                                            .send(BytesMut::from(packet.encode().as_slice()))
+                                            .await;
+                                    }
+                                });
+                                let _ = tx.send((caller_address, resp_tx)).await;
                             }
                         }
                         ProtocolPacket::CallAcceptResponse { caller_address } => {

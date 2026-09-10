@@ -8,7 +8,6 @@ use crate::config::Configuration;
 use crate::session::ClientSession;
 use crate::webrtc_session::{create_peer_connection, perform_sdp_handshake, setup_data_channel};
 use anyhow::Result;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -61,7 +60,7 @@ pub async fn start_call_with_session(
     perform_sdp_handshake(&peer_connection, config, session, gather_rx).await?;
 
     // 4. Start CPAL Audio Engine (Microphone & Speaker Streams)
-    let _audio_engine = AudioEngine::start(config, tx_audio, Arc::clone(&session.audio_buffer))?;
+    let _audio_engine = AudioEngine::start(config, tx_audio, session)?;
 
     // 5. Keep call running until interrupted or cancelled
     if let Some(rx) = cancel_rx.as_mut() {
@@ -138,7 +137,7 @@ pub async fn start_room_call_with_session(
     perform_sdp_handshake(&peer_connection, config, session, gather_rx).await?;
 
     // 4. Start CPAL Audio Engine (Microphone & Speaker Streams)
-    let _audio_engine = AudioEngine::start(config, tx_audio, Arc::clone(&session.audio_buffer))?;
+    let _audio_engine = AudioEngine::start(config, tx_audio, session)?;
 
     // 5. Keep call running until interrupted or cancelled
     if let Some(rx) = cancel_rx.as_mut() {

@@ -56,8 +56,13 @@ pub async fn run_tui_with_keypair(
 
         tokio::select! {
             _ = tick_interval.tick() => {
-                app.input_level = (app.input_level * 0.85).max(0.0);
-                app.output_level = (app.output_level * 0.85).max(0.0);
+                if let Some(ref session) = app.session {
+                    app.input_level = session.get_input_level();
+                    app.output_level = session.get_output_level();
+                } else {
+                    app.input_level = (app.input_level * 0.85).max(0.0);
+                    app.output_level = (app.output_level * 0.85).max(0.0);
+                }
             }
             Some(evt) = event_rx.recv() => {
                 handle_app_event(&mut app, evt);

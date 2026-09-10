@@ -100,8 +100,7 @@ pub fn find_output_device(host: &cpal::Host, name_opt: Option<&str>) -> Result<c
 use crate::config::Configuration;
 use cpal::traits::StreamTrait;
 use cpal::{Stream, StreamConfig};
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -117,12 +116,14 @@ pub struct AudioEngine {
 unsafe impl Send for AudioEngine {}
 unsafe impl Sync for AudioEngine {}
 
+use crate::session::ClientSession;
+
 impl AudioEngine {
     /// Start microphone input and speaker output streams based on the provided `Configuration`.
     pub fn start(
         config: &Configuration,
         tx_audio: mpsc::Sender<Vec<u8>>,
-        audio_buffer: Arc<Mutex<VecDeque<f32>>>,
+        session: &ClientSession,
     ) -> Result<Self> {
         let host = cpal::default_host();
 
@@ -155,12 +156,28 @@ impl AudioEngine {
         // Build Input Stream (Microphone -> Resampler -> tx_audio)
         let (input_stream, _actual_input_rate, _actual_input_channels) = {
             let tx_audio_clone = tx_audio.clone();
+            let session_input = session.clone();
             let build = |cfg: &StreamConfig, rate: u32, ch: u16| {
                 let mut resampler = crate::resample::Resampler::new(rate, net_sample_rate);
                 let tx = tx_audio_clone.clone();
+                let sess = session_input.clone();
                 input_device.build_input_stream(
                     *cfg,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        if sess.is_muted() {
+                            sess.set_input_level(0.0);
+                            return;
+                        }
+
+                        let sum_sq: f32 = data.iter().map(|&s| s * s).sum();
+                        let rms = if !data.is_empty() {
+                            (sum_sq / data.len() as f32).sqrt()
+                        } else {
+                            0.0
+                        };
+                        let level = (rms * 5.0).clamp(0.0, 1.0);
+                        sess.set_input_level(level);
+
                         let channels = ch as usize;
                         let num_frames = data.len() / channels;
                         if num_frames == 0 {
@@ -212,11 +229,13 @@ impl AudioEngine {
         };
 
         let (output_stream, _actual_output_rate, _actual_output_channels) = {
+            let session_output = session.clone();
             let build = |cfg: &StreamConfig, rate: u32, ch: u16| {
                 let mut output_resampler = crate::resample::Resampler::new(net_sample_rate, rate);
                 let mut leftover: Vec<f32> = Vec::new();
                 let channels = ch as usize;
-                let audio_buf = Arc::clone(&audio_buffer);
+                let audio_buf = Arc::clone(&session_output.audio_buffer);
+                let sess = session_output.clone();
 
                 output_device.build_output_stream(
                     *cfg,
@@ -264,6 +283,15 @@ impl AudioEngine {
 
                         let drain_len = frames_needed.min(leftover.len());
                         leftover.drain(0..drain_len);
+
+                        let sum_sq: f32 = data.iter().map(|&s| s * s).sum();
+                        let rms = if !data.is_empty() {
+                            (sum_sq / data.len() as f32).sqrt()
+                        } else {
+                            0.0
+                        };
+                        let level = (rms * 5.0).clamp(0.0, 1.0);
+                        sess.set_output_level(level);
                     },
                     |err| error!("Output stream error: {}", err),
                     None,
