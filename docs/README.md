@@ -40,6 +40,7 @@ ______________________________________________________________________
 | [WPIP-18](WPIP-18.md) | Dynamic IP Blacklisting & Automated Abuse Mitigation | Experimental | Dynamic IP blacklisting and Fail2ban penalty tracking for abuse mitigation |
 | [WPIP-19](WPIP-19.md) | Direct Client-to-Client ICE Transport Negotiation | Experimental | Direct client-to-client ICE transport negotiation and daemon bypass mode |
 | [WPIP-20](WPIP-20.md) | Screen Sharing & Video Track Protocol Extension | Experimental | ProtocolPacket tag ID `0x14` extension for VP8/H.264/AV1 screen sharing and video streaming |
+| [WPIP-21](WPIP-21.md) | Decentralized Repository-Local Specification Standard | Optional | Standard for maintaining WPIP specs locally within each web-phone repository |
 
 ______________________________________________________________________
 
