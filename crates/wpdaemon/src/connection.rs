@@ -33,7 +33,7 @@ pub fn calculate_audio_energy(audio_data: &[u8]) -> f64 {
 }
 
 /// Find client ID matching a given UserAddress.
-fn find_client_by_address(target_key: &UserAddress) -> Option<u64> {
+pub fn find_client_by_address(target_key: &UserAddress) -> crate::registry::AddressSearchResult {
     CLIENT_REGISTRY
         .read()
         .unwrap()
@@ -114,6 +114,16 @@ fn is_room_or_target_full(target_key: &UserAddress) -> bool {
 /// Get currently registered wpclient addresses across active connections.
 pub fn get_registered_addresses() -> Vec<UserAddress> {
     CLIENT_REGISTRY.read().unwrap().get_registered_addresses()
+}
+
+/// Get client UserAddress by client_id.
+pub fn get_client_address(client_id: u64) -> Option<UserAddress> {
+    CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .addresses
+        .get(&client_id)
+        .cloned()
 }
 
 #[cfg(test)]

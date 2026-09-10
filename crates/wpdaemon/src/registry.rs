@@ -13,6 +13,17 @@ use wpapi::UserAddress;
 pub static CLIENT_REGISTRY: LazyLock<RwLock<ClientRegistry>> =
     LazyLock::new(|| RwLock::new(ClientRegistry::default()));
 
+/// Result of searching for a client by address or Short ID prefix (WPIP-02 Section 5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AddressSearchResult {
+    /// Exactly one client matches the target address or prefix.
+    Found(u64),
+    /// No client matches the target address or prefix.
+    NotFound,
+    /// Multiple active clients match the Short ID prefix (Ambiguous match).
+    Ambiguous,
+}
+
 /// Helper to check if address matches room key or peer target using exact identity equality (Issue #37).
 pub fn matches_address(addr: &UserAddress, key: &UserAddress) -> bool {
     addr.id == key.id
@@ -105,10 +116,10 @@ impl ClientRegistry {
     }
 
     /// Find client ID matching a given UserAddress (exact or prefix match per WPIP-02 Section 5).
-    pub fn find_client_by_address(&self, target_key: &UserAddress) -> Option<u64> {
+    pub fn find_client_by_address(&self, target_key: &UserAddress) -> AddressSearchResult {
         let clean_id = target_key.id.trim_end_matches('0');
         if clean_id.len() < 12 && target_key.id.len() < 12 {
-            return None;
+            return AddressSearchResult::NotFound;
         }
 
         let mut matches = Vec::new();
@@ -117,11 +128,10 @@ impl ClientRegistry {
                 matches.push(cid);
             }
         }
-        // Ambiguity Rule: MUST NOT select arbitrarily if multiple matches exist
-        if matches.len() == 1 {
-            Some(matches[0])
-        } else {
-            None
+        match matches.len() {
+            1 => AddressSearchResult::Found(matches[0]),
+            0 => AddressSearchResult::NotFound,
+            _ => AddressSearchResult::Ambiguous,
         }
     }
 
@@ -185,7 +195,7 @@ impl ClientRegistry {
             list.retain(|a| !matches_address(a, target_key));
         }
 
-        if let Some(t_cid) = target_cid {
+        if let AddressSearchResult::Found(t_cid) = target_cid {
             if let Some(list) = self.approved_calls.get_mut(&t_cid)
                 && let Some(ref addr) = my_addr
             {
@@ -514,17 +524,30 @@ mod tests {
 
         let short_target = UserAddress::new("39f8adc7bf93".to_string());
         let found = registry.find_client_by_address(&short_target);
-        assert_eq!(found, Some(1));
+        assert_eq!(found, AddressSearchResult::Found(1));
 
         let zero_padded_target = UserAddress::new(
             "39f8adc7bf930000000000000000000000000000000000000000000000000000".to_string(),
         );
         assert_eq!(
             registry.find_client_by_address(&zero_padded_target),
-            Some(1)
+            AddressSearchResult::Found(1)
         );
 
         let invalid_short = UserAddress::new("39f8adc7".to_string());
-        assert_eq!(registry.find_client_by_address(&invalid_short), None);
+        assert_eq!(
+            registry.find_client_by_address(&invalid_short),
+            AddressSearchResult::NotFound
+        );
+
+        // Ambiguous match test (WPIP-02 Section 5)
+        let full_addr2 = UserAddress::new(
+            "39f8adc7bf93ffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string(),
+        );
+        registry.addresses.insert(2, full_addr2);
+        assert_eq!(
+            registry.find_client_by_address(&short_target),
+            AddressSearchResult::Ambiguous
+        );
     }
 }

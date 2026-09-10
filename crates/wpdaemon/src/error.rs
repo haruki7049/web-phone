@@ -25,6 +25,12 @@ pub enum SignalingError {
     #[error("500 Internal Server Error: {0}")]
     InternalError(String),
 
+    #[error("409 Conflict: Address prefix is ambiguous (matches multiple active clients)")]
+    AddressAmbiguous,
+
+    #[error("404 Not Found: {0}")]
+    NotFound(String),
+
     #[error("429 Too Many Requests: Rate limit exceeded")]
     RateLimitExceeded,
 }
@@ -38,6 +44,8 @@ impl SignalingError {
             }
             SignalingError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             SignalingError::InvalidSdpOffer(_) => StatusCode::BAD_REQUEST,
+            SignalingError::AddressAmbiguous => StatusCode::CONFLICT,
+            SignalingError::NotFound(_) => StatusCode::NOT_FOUND,
             SignalingError::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             SignalingError::RateLimitExceeded => StatusCode::TOO_MANY_REQUESTS,
         }

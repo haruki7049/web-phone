@@ -34,9 +34,9 @@
 #define CODEC_PCM_S16LE 2
 
 /**
- * Maximum allowable total packet size (64 KiB) to prevent memory allocation DoS attacks.
+ * Maximum allowable total packet size (1 MB / 1,048,576 bytes) to prevent memory allocation DoS attacks.
  */
-#define MAX_PACKET_SIZE 65536
+#define MAX_PACKET_SIZE 1048576
 
 /**
  * Maximum allowable audio payload size (16 KiB).

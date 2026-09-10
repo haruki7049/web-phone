@@ -83,7 +83,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/sdp", post(handle_sdp_offer))
         .route("/peer/sdp", post(handle_peer_sdp))
         .layer(middleware::from_fn(rate_limit_middleware))
-        .route("/addresses", axum::routing::get(list_registered_addresses));
+        .route("/addresses", axum::routing::get(list_registered_addresses))
+        .route("/addresses/:id", axum::routing::get(resolve_registered_address));
 
     let listener = tokio::net::TcpListener::bind(address).await?;
     info!(
@@ -132,6 +133,26 @@ async fn list_registered_addresses(
     Ok(axum::extract::Json(
         wpdaemon::connection::get_registered_addresses(),
     ))
+}
+
+/// Handler to resolve a client UserAddress by Short ID prefix (WPIP-02 Section 5).
+async fn resolve_registered_address(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<axum::extract::Json<wpapi::UserAddress>, wpdaemon::error::SignalingError> {
+    let dummy_addr = wpapi::UserAddress::new(id);
+    match wpdaemon::connection::find_client_by_address(&dummy_addr) {
+        wpdaemon::registry::AddressSearchResult::Found(cid) => {
+            let addr = wpdaemon::connection::get_client_address(cid)
+                .ok_or_else(|| wpdaemon::error::SignalingError::NotFound("Client address not found".into()))?;
+            Ok(axum::extract::Json(addr))
+        }
+        wpdaemon::registry::AddressSearchResult::Ambiguous => {
+            Err(wpdaemon::error::SignalingError::AddressAmbiguous)
+        }
+        wpdaemon::registry::AddressSearchResult::NotFound => {
+            Err(wpdaemon::error::SignalingError::NotFound("Address prefix not found".into()))
+        }
+    }
 }
 
 /// Command-line arguments for the audio server daemon.

@@ -13,8 +13,8 @@ pub const CODEC_PCM_F32LE: u8 = 0x00;
 /// PCM 16-bit signed integer LE Codec ID.
 pub const CODEC_PCM_S16LE: u8 = 0x02;
 
-/// Maximum allowable total packet size (64 KiB) to prevent memory allocation DoS attacks.
-pub const MAX_PACKET_SIZE: usize = 65536;
+/// Maximum allowable total packet size (1 MB / 1,048,576 bytes) per WPIP-04.
+pub const MAX_PACKET_SIZE: usize = 1048576;
 /// Maximum allowable audio payload size (16 KiB).
 pub const MAX_AUDIO_PAYLOAD_SIZE: usize = 16384;
 /// Maximum allowable active speaker addresses per notice.
@@ -43,6 +43,7 @@ pub const MIN_LEN_CALL_REQUEST: usize = 1 + LEN_CLIENT_ID + LEN_USER_ADDR; // 41
 pub const MIN_LEN_ADDRESS_ONLY_PACKET: usize = 1 + LEN_USER_ADDR; // 33
 pub const MIN_LEN_ROOM_STATE_NOTIFICATION: usize = 1 + LEN_USER_ADDR + LEN_PARTICIPANT_COUNT; // 37
 pub const MIN_LEN_PING_PONG: usize = 1 + LEN_TIMESTAMP; // 9
+pub const MIN_LEN_VIDEO_FRAME_DATA: usize = 1 + LEN_USER_ADDR + 1; // 34
 
 /// Errors that can occur during protocol packet decoding.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -148,6 +149,12 @@ pub enum ProtocolPacket {
     Ping { timestamp: u64 },
     /// 0x13: Pong [0x13, timestamp (8b LE)]
     Pong { timestamp: u64 },
+    /// 0x14: Video Frame Data (WPIP-20) [0x14, target_address (32b raw), video_codec_id (1b), frame_data...]
+    VideoFrameData {
+        target_address: UserAddress,
+        video_codec_id: u8,
+        frame_data: Vec<u8>,
+    },
     /// Legacy Broadcast Audio [Broadcast tag, sender_id (8b LE), audio_data...]
     BroadcastAudio { sender_id: u64, audio_data: Vec<u8> },
 }
@@ -186,6 +193,7 @@ impl ProtocolPacket {
             0x11 => decode_active_speaker_notice(data),
             0x12 => decode_ping(data),
             0x13 => decode_pong(data),
+            0x14 => decode_video_frame_data(data),
             unknown => Err(ProtocolError::UnknownPacketType(unknown)),
         }
     }
@@ -361,6 +369,18 @@ impl ProtocolPacket {
                 let mut buf = Vec::with_capacity(MIN_LEN_PING_PONG);
                 buf.push(0x13);
                 buf.extend_from_slice(&timestamp.to_le_bytes());
+                buf
+            }
+            Self::VideoFrameData {
+                target_address,
+                video_codec_id,
+                frame_data,
+            } => {
+                let mut buf = Vec::with_capacity(1 + LEN_USER_ADDR + 1 + frame_data.len());
+                buf.push(0x14);
+                buf.extend_from_slice(&target_address.to_bytes());
+                buf.push(*video_codec_id);
+                buf.extend_from_slice(frame_data);
                 buf
             }
             Self::BroadcastAudio {
@@ -760,6 +780,25 @@ fn decode_pong(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
     }
     let timestamp = u64::from_le_bytes(data[1..9].try_into().unwrap());
     Ok(ProtocolPacket::Pong { timestamp })
+}
+
+fn decode_video_frame_data(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_VIDEO_FRAME_DATA {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x14,
+            actual: data.len(),
+            expected: MIN_LEN_VIDEO_FRAME_DATA,
+        });
+    }
+    let bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let target_address = UserAddress::from_bytes(bytes);
+    let video_codec_id = data[33];
+    let frame_data = data[34..].to_vec();
+    Ok(ProtocolPacket::VideoFrameData {
+        target_address,
+        video_codec_id,
+        frame_data,
+    })
 }
 
 #[cfg(test)]

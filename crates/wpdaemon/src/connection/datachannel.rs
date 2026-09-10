@@ -201,7 +201,9 @@ async fn handle_client_targeted_audio(
 
     if super::is_client_in_room(client_id, &target_address) {
         // Group call mode
-    } else if let Some(target_cid) = super::find_client_by_address(&target_address) {
+    } else if let crate::registry::AddressSearchResult::Found(target_cid) =
+        super::find_client_by_address(&target_address)
+    {
         if super::is_call_rejected(target_cid, &caller_user_addr) {
             warn!(
                 "Rejecting Client {} call to {}: call rejected by recipient",
@@ -316,14 +318,18 @@ async fn handle_call_accept_response(client_id: u64, caller_address: UserAddress
             .or_insert_with(|| caller_address.clone());
     }
 
-    let caller_dc = super::find_client_by_address(&caller_address).and_then(|caller_cid| {
+    let caller_dc = if let crate::registry::AddressSearchResult::Found(caller_cid) =
+        super::find_client_by_address(&caller_address)
+    {
         CLIENT_REGISTRY
             .read()
             .unwrap()
             .data_channels
             .get(&caller_cid)
             .cloned()
-    });
+    } else {
+        None
+    };
 
     if let Some(caller_dc) = caller_dc {
         let my_addr = CLIENT_REGISTRY
@@ -350,14 +356,18 @@ async fn handle_call_reject_response(client_id: u64, caller_address: UserAddress
     );
     super::mark_call_rejected(client_id, caller_address.clone());
 
-    let caller_dc = super::find_client_by_address(&caller_address).and_then(|caller_cid| {
+    let caller_dc = if let crate::registry::AddressSearchResult::Found(caller_cid) =
+        super::find_client_by_address(&caller_address)
+    {
         CLIENT_REGISTRY
             .read()
             .unwrap()
             .data_channels
             .get(&caller_cid)
             .cloned()
-    });
+    } else {
+        None
+    };
 
     if let Some(caller_dc) = caller_dc {
         let my_addr = CLIENT_REGISTRY
@@ -393,14 +403,18 @@ async fn handle_call_hangup(
         .unwrap()
         .clear_call_session(client_id, &target_address);
 
-    let target_dc = super::find_client_by_address(&target_address).and_then(|target_cid| {
+    let target_dc = if let crate::registry::AddressSearchResult::Found(target_cid) =
+        super::find_client_by_address(&target_address)
+    {
         CLIENT_REGISTRY
             .read()
             .unwrap()
             .data_channels
             .get(&target_cid)
             .cloned()
-    });
+    } else {
+        None
+    };
 
     if let Some(target_dc) = target_dc {
         let ended_pkt = ProtocolPacket::CallEndedNotification {
