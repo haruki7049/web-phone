@@ -71,3 +71,16 @@ When persisting a Nostr secp256k1 identity key to `keystore.json` via WPIP-14:
 
 - The JSON structure MUST include `"key_type": "secp256k1"`.
 - The raw 32-byte secret key MUST be encrypted using Argon2id key derivation and AES-256-GCM authenticated encryption.
+
+______________________________________________________________________
+
+## 5. Security Considerations & Non-Transmission Proof
+
+### 5.1 Non-Transmission of Secret Keys (`nsec`)
+
+- **Strict Client-Side Signature Generation**: Secret keys (`nsec` or raw secp256k1 private keys) MUST NEVER be transmitted over the network or sent to `wpdaemon`.
+- **Zero-Knowledge Signature Scheme**: Authentication relies exclusively on BIP-340 Schnorr signatures over the string payload `${Timestamp}:${sdp_offer}`.
+- **Proof of Non-Transmission**:
+  1. **Cryptographic Proof**: Under the Elliptic Curve Discrete Logarithm Problem (ECDLP), it is computationally intractable to derive the secret key $d$ from the signature $(R, s)$ and public key $P$.
+  1. **Specification Proof**: The HTTP `Authorization` header specified in Section 2 (`WP-Secp256k1 <NostrPubKeyHex>:<Timestamp>:<SchnorrSignatureHex>`) contains only public identifiers and signatures.
+  1. **Auditability**: Packet capture tools (such as Wireshark or `tcpdump`) and source code audits can independently confirm that raw 32-byte secret key bytes do not appear in HTTP headers or POST payloads.
