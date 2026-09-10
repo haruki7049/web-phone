@@ -29,6 +29,72 @@ struct MeshPeerEventHandler {
     gather_tx: mpsc::Sender<()>,
 }
 
+/// Helper to handle audio broadcast relay to a peer DataChannel (WPIP-05).
+async fn process_peer_audio_send_loop(
+    dc: Arc<dyn DataChannel>,
+    mut rx: tokio::sync::broadcast::Receiver<AudioMessage>,
+    my_node_id: u64,
+) {
+    while let Ok(audio_msg) = rx.recv().await {
+        if audio_msg.origin_node != my_node_id && audio_msg.ttl == 0 {
+            continue;
+        }
+        let target_addr = audio_msg.target_address.clone();
+        let sender_addr = audio_msg.sender_address.unwrap_or_default();
+
+        let packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+            sender_id: audio_msg.sender_id,
+            origin_node: audio_msg.origin_node,
+            target_address: target_addr,
+            sender_address: sender_addr,
+            codec_id: wpapi::protocol::CODEC_OPUS,
+            ttl: audio_msg.ttl,
+            audio_data: audio_msg.data,
+        };
+
+        if dc
+            .send(BytesMut::from(packet.encode().as_slice()))
+            .await
+            .is_err()
+        {
+            break;
+        }
+    }
+}
+
+/// Helper to handle incoming PeerTargetedAudio packets with WPIP-05 loop prevention and TTL checks.
+fn handle_peer_incoming_message(msg_data: &[u8], my_node_id: u64) {
+    if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+        sender_id,
+        origin_node,
+        target_address,
+        sender_address,
+        ttl,
+        audio_data,
+        ..
+    }) = wpapi::protocol::ProtocolPacket::decode(msg_data)
+    {
+        // WPIP-05 Loop prevention & TTL expiration checks
+        if origin_node != my_node_id && ttl > 0 {
+            let next_ttl = ttl - 1;
+            let _ = AUDIO_BROADCAST.send(AudioMessage {
+                sender_id,
+                sender_address: Some(sender_address),
+                target_address,
+                origin_node,
+                ttl: next_ttl,
+                data: audio_data,
+            });
+        } else {
+            warn!(
+                "Dropped PeerTargetedAudio: origin_node loop ({}) or TTL expired ({})",
+                origin_node == my_node_id,
+                ttl == 0
+            );
+        }
+    }
+}
+
 #[async_trait]
 impl PeerConnectionEventHandler for MeshPeerEventHandler {
     async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
@@ -45,87 +111,17 @@ impl PeerConnectionEventHandler for MeshPeerEventHandler {
                 match event {
                     DataChannelEvent::OnOpen => {
                         info!("Inbound peer wpdaemon DataChannel opened");
-                        if let Some(mut rx) = audio_rx_opt.take() {
+                        if let Some(rx) = audio_rx_opt.take() {
                             let dc_inner = Arc::clone(&dc_task);
                             tokio::spawn(async move {
                                 let config = CONFIGURATION.get().cloned().unwrap_or_default();
-                                let my_node_id = config.node_id;
-                                loop {
-                                    match rx.recv().await {
-                                        Ok(audio_msg) => {
-                                            if audio_msg.origin_node != my_node_id
-                                                && audio_msg.ttl == 0
-                                            {
-                                                continue;
-                                            }
-                                            let target_addr = audio_msg.target_address.clone();
-                                            let sender_addr =
-                                                audio_msg.sender_address.unwrap_or_default();
-
-                                            let packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
-                                                sender_id: audio_msg.sender_id,
-                                                origin_node: audio_msg.origin_node,
-                                                target_address: target_addr,
-                                                sender_address: sender_addr,
-                                                codec_id: wpapi::protocol::CODEC_OPUS,
-                                                ttl: audio_msg.ttl,
-                                                audio_data: audio_msg.data,
-                                            };
-
-                                            if dc_inner
-                                                .send(BytesMut::from(packet.encode().as_slice()))
-                                                .await
-                                                .is_err()
-                                            {
-                                                break;
-                                            }
-                                        }
-                                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                                            break;
-                                        }
-                                        Err(tokio::sync::broadcast::error::RecvError::Lagged(
-                                            _,
-                                        )) => {
-                                            continue;
-                                        }
-                                    }
-                                }
+                                process_peer_audio_send_loop(dc_inner, rx, config.node_id).await;
                             });
                         }
                     }
                     DataChannelEvent::OnMessage(msg) => {
                         let config = CONFIGURATION.get().cloned().unwrap_or_default();
-                        let my_node_id = config.node_id;
-
-                        if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
-                            sender_id,
-                            origin_node,
-                            target_address,
-                            sender_address,
-                            ttl,
-                            audio_data,
-                            ..
-                        }) = wpapi::protocol::ProtocolPacket::decode(&msg.data)
-                        {
-                            // WPIP-05 Loop prevention & TTL expiration checks
-                            if origin_node != my_node_id && ttl > 0 {
-                                let next_ttl = ttl - 1;
-                                let _ = AUDIO_BROADCAST.send(AudioMessage {
-                                    sender_id,
-                                    sender_address: Some(sender_address),
-                                    target_address,
-                                    origin_node,
-                                    ttl: next_ttl,
-                                    data: audio_data,
-                                });
-                            } else {
-                                warn!(
-                                    "Dropped PeerTargetedAudio: origin_node loop ({}) or TTL expired ({})",
-                                    origin_node == my_node_id,
-                                    ttl == 0
-                                );
-                            }
-                        }
+                        handle_peer_incoming_message(&msg.data, config.node_id);
                     }
                     DataChannelEvent::OnClose => break,
                     _ => {}
@@ -230,9 +226,6 @@ pub async fn handle_peer_sdp(
 pub async fn connect_to_peer(
     peer_url: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let config = CONFIGURATION.get().cloned().unwrap_or_default();
-    let my_node_id = config.node_id;
-
     info!("Connecting to peer wpdaemon at {}...", peer_url);
 
     let (gather_tx, mut gather_rx) = mpsc::channel(1);
@@ -261,80 +254,17 @@ pub async fn connect_to_peer(
             match event {
                 DataChannelEvent::OnOpen => {
                     info!("Outbound peer DataChannel opened to {}", peer_url_log);
-                    if let Some(mut rx) = audio_rx_opt.take() {
+                    if let Some(rx) = audio_rx_opt.take() {
                         let dc_inner = Arc::clone(&dc_task);
                         tokio::spawn(async move {
                             let config = CONFIGURATION.get().cloned().unwrap_or_default();
-                            let my_node_id = config.node_id;
-                            loop {
-                                match rx.recv().await {
-                                    Ok(audio_msg) => {
-                                        if audio_msg.origin_node != my_node_id && audio_msg.ttl == 0
-                                        {
-                                            continue;
-                                        }
-                                        let target_addr = audio_msg.target_address.clone();
-                                        let sender_addr =
-                                            audio_msg.sender_address.unwrap_or_default();
-
-                                        let packet =
-                                            wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
-                                                sender_id: audio_msg.sender_id,
-                                                origin_node: audio_msg.origin_node,
-                                                target_address: target_addr,
-                                                sender_address: sender_addr,
-                                                codec_id: wpapi::protocol::CODEC_OPUS,
-                                                ttl: audio_msg.ttl,
-                                                audio_data: audio_msg.data,
-                                            };
-
-                                        if dc_inner
-                                            .send(BytesMut::from(packet.encode().as_slice()))
-                                            .await
-                                            .is_err()
-                                        {
-                                            break;
-                                        }
-                                    }
-                                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                                        continue;
-                                    }
-                                }
-                            }
+                            process_peer_audio_send_loop(dc_inner, rx, config.node_id).await;
                         });
                     }
                 }
                 DataChannelEvent::OnMessage(msg) => {
-                    if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
-                        sender_id,
-                        origin_node,
-                        target_address,
-                        sender_address,
-                        ttl,
-                        audio_data,
-                        ..
-                    }) = wpapi::protocol::ProtocolPacket::decode(&msg.data)
-                    {
-                        // WPIP-05 Loop prevention & TTL expiration checks
-                        if origin_node != my_node_id && ttl > 0 {
-                            let next_ttl = ttl - 1;
-                            let _ = AUDIO_BROADCAST.send(AudioMessage {
-                                sender_id,
-                                sender_address: Some(sender_address),
-                                target_address,
-                                origin_node,
-                                ttl: next_ttl,
-                                data: audio_data,
-                            });
-                        } else {
-                            warn!(
-                                "Dropped PeerTargetedAudio: origin_node loop ({}) or TTL expired ({})",
-                                origin_node == my_node_id,
-                                ttl == 0
-                            );
-                        }
-                    }
+                    let config = CONFIGURATION.get().cloned().unwrap_or_default();
+                    handle_peer_incoming_message(&msg.data, config.node_id);
                 }
                 DataChannelEvent::OnClose => break,
                 _ => {}
@@ -395,22 +325,7 @@ mod tests {
             audio_data: vec![1, 2, 3],
         };
         let encoded_loop = loop_packet.encode();
-
-        if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
-            origin_node, ttl, ..
-        }) = wpapi::protocol::ProtocolPacket::decode(&encoded_loop)
-        {
-            if origin_node != my_node_id && ttl > 0 {
-                let _ = AUDIO_BROADCAST.send(AudioMessage {
-                    sender_id: 1,
-                    sender_address: None,
-                    target_address: UserAddress::new("target_addr_12345"),
-                    origin_node,
-                    ttl: ttl - 1,
-                    data: vec![1, 2, 3],
-                });
-            }
-        }
+        handle_peer_incoming_message(&encoded_loop, my_node_id);
         assert!(rx.try_recv().is_err());
 
         // 2. Packet with TTL == 0: Should be dropped
@@ -424,22 +339,7 @@ mod tests {
             audio_data: vec![4, 5, 6],
         };
         let encoded_zero = ttl_zero_packet.encode();
-
-        if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
-            origin_node, ttl, ..
-        }) = wpapi::protocol::ProtocolPacket::decode(&encoded_zero)
-        {
-            if origin_node != my_node_id && ttl > 0 {
-                let _ = AUDIO_BROADCAST.send(AudioMessage {
-                    sender_id: 2,
-                    sender_address: None,
-                    target_address: UserAddress::new("target_addr_12345"),
-                    origin_node,
-                    ttl: ttl - 1,
-                    data: vec![4, 5, 6],
-                });
-            }
-        }
+        handle_peer_incoming_message(&encoded_zero, my_node_id);
         assert!(rx.try_recv().is_err());
 
         // 3. Valid peer packet (origin_node != my_node_id, ttl = 8): Should decrement TTL to 7 and broadcast
@@ -453,29 +353,7 @@ mod tests {
             audio_data: vec![7, 8, 9],
         };
         let encoded_valid = valid_packet.encode();
-
-        if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
-            sender_id,
-            origin_node,
-            target_address,
-            sender_address,
-            ttl,
-            audio_data,
-            ..
-        }) = wpapi::protocol::ProtocolPacket::decode(&encoded_valid)
-        {
-            if origin_node != my_node_id && ttl > 0 {
-                let next_ttl = ttl - 1;
-                let _ = AUDIO_BROADCAST.send(AudioMessage {
-                    sender_id,
-                    sender_address: Some(sender_address),
-                    target_address,
-                    origin_node,
-                    ttl: next_ttl,
-                    data: audio_data,
-                });
-            }
-        }
+        handle_peer_incoming_message(&encoded_valid, my_node_id);
 
         let recv_msg = rx.recv().await.expect("Should receive broadcasted message");
         assert_eq!(recv_msg.origin_node, 300u64);
