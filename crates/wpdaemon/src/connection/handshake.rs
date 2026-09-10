@@ -108,19 +108,10 @@ pub async fn handle_sdp_offer(
     let daemon_config = CONFIGURATION.get().cloned().unwrap_or_default();
     let my_node_id = daemon_config.node_id;
 
-    let active_connections = CLIENT_REGISTRY.read().unwrap().peer_connections.len();
-    if active_connections >= daemon_config.max_connections {
-        warn!(
-            "Rejected SDP offer: active connections ({}) reached max limit ({})",
-            active_connections, daemon_config.max_connections
-        );
-        return Err(SignalingError::MaxConnectionsReached(
-            daemon_config.max_connections,
-        ));
-    }
-
+    // 1. Mandatory Identity Authentication check (WPIP-02 / Security Audit)
     let auth_header = headers
         .get(axum::http::header::AUTHORIZATION)
+        .or_else(|| headers.get("X-WebPhone-Sign"))
         .and_then(|v| v.to_str().ok());
 
     let user_address = if let Some(auth_val) = auth_header {
@@ -134,14 +125,29 @@ pub async fn handle_sdp_offer(
                 return Err(SignalingError::Unauthorized(err));
             }
         }
-    } else {
+    } else if daemon_config.allow_anonymous {
         let addr = UserAddress::generate_from_time();
         info!(
-            "No Authorization header present. Generated temporary User ID: {}",
+            "No Authorization header present (allow_anonymous=true). Generated temporary User ID: {}",
             addr
         );
         addr
+    } else {
+        warn!("Rejected unauthenticated SDP offer: Authorization header is required.");
+        return Err(SignalingError::Unauthorized(wpapi::AuthError::MissingHeader));
     };
+
+    // 2. Active Connection limits check
+    let active_connections = CLIENT_REGISTRY.read().unwrap().peer_connections.len();
+    if active_connections >= daemon_config.max_connections {
+        warn!(
+            "Rejected SDP offer: active connections ({}) reached max limit ({})",
+            active_connections, daemon_config.max_connections
+        );
+        return Err(SignalingError::MaxConnectionsReached(
+            daemon_config.max_connections,
+        ));
+    }
 
     let client_id = CLIENT_COUNT.fetch_add(1, Ordering::SeqCst);
     let (gather_tx, mut gather_rx) = mpsc::channel(1);
@@ -223,7 +229,7 @@ pub async fn handle_sdp_offer(
     })?;
 
     let ice_servers = if daemon_config.turn_enabled {
-        let cred = generate_turn_credentials_for_client(&user_address, 86400);
+        let cred = generate_turn_credentials_for_client(&user_address, daemon_config.turn_credential_ttl);
         Some(vec![cred])
     } else {
         None
@@ -234,4 +240,30 @@ pub async fn handle_sdp_offer(
         sdp: local_desc.sdp,
         ice_servers,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+    use webrtc::peer_connection::RTCSessionDescription;
+
+    #[tokio::test]
+    async fn test_handle_sdp_offer_auth_enforcement() {
+        let dummy_offer = RTCSessionDescription::offer(
+            "v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n".to_string(),
+        )
+        .unwrap();
+
+        // Missing Authorization header when allow_anonymous = false (default)
+        let empty_headers = HeaderMap::new();
+        let res = handle_sdp_offer(empty_headers, Json(dummy_offer.clone())).await;
+        assert!(matches!(res, Err(SignalingError::Unauthorized(wpapi::AuthError::MissingHeader))));
+
+        // Invalid Authorization header format
+        let mut bad_headers = HeaderMap::new();
+        bad_headers.insert(axum::http::header::AUTHORIZATION, HeaderValue::from_static("Bearer invalid_token"));
+        let res = handle_sdp_offer(bad_headers, Json(dummy_offer.clone())).await;
+        assert!(matches!(res, Err(SignalingError::Unauthorized(_))));
+    }
 }

@@ -93,14 +93,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
     let listener = tokio::net::TcpListener::bind(address).await?;
+    let scheme = if config.tls_cert.is_some() { "https" } else { "http" };
+
+    if config.tls_cert.is_none() && !config.ip.is_loopback() {
+        tracing::warn!(
+            "SECURITY WARNING: WebRTC audio daemon node {} is binding to public/external IP {} over unencrypted HTTP! HTTPS/TLS termination is strongly recommended for production deployments.",
+            config.node_id,
+            address
+        );
+    }
+
     info!(
-        "WebRTC audio daemon node {} running on http://{} (max_connections: {})",
-        config.node_id, &address, config.max_connections
+        "WebRTC audio daemon node {} running on {}://{} (max_connections: {}, allow_anonymous: {})",
+        config.node_id, scheme, &address, config.max_connections, config.allow_anonymous
     );
     if config.turn_enabled {
         info!(
-            "STUN/TURN server running on UDP {}",
-            SocketAddr::new(config.ip, config.stun_port)
+            "STUN/TURN server running on UDP {} (TTL: {}s)",
+            SocketAddr::new(config.ip, config.stun_port),
+            config.turn_credential_ttl
         );
     }
     info!("Waiting for wpclient audio calls & peer daemon mesh connections...");

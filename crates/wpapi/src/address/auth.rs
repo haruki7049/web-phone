@@ -56,7 +56,13 @@ pub enum AuthError {
 
     #[error("Invalid Base64 encoding in TURN credential")]
     InvalidTurnBase64,
+
+    #[error("Authorization header required")]
+    MissingHeader,
 }
+
+/// Maximum allowed entries in the anti-replay signature cache.
+pub const MAX_ANTI_REPLAY_CACHE_SIZE: usize = 10_000;
 
 /// Anti-replay signature cache to prevent handshake replay attacks within the valid timestamp window.
 #[derive(Debug, Clone, Default)]
@@ -87,6 +93,16 @@ impl AntiReplayCache {
 
         if map.contains_key(signature) {
             return Err(AuthError::ReplayDetected);
+        }
+
+        // Bound cache size to prevent memory exhaustion DoS attacks
+        if map.len() >= MAX_ANTI_REPLAY_CACHE_SIZE {
+            let mut entries: Vec<(String, u64)> = map.drain().collect();
+            entries.sort_by_key(|(_, ts)| *ts);
+            let keep_count = MAX_ANTI_REPLAY_CACHE_SIZE / 2;
+            for (sig, ts) in entries.into_iter().skip(keep_count) {
+                map.insert(sig, ts);
+            }
         }
 
         map.insert(signature.to_string(), timestamp);

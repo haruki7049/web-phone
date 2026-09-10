@@ -448,6 +448,7 @@ pub async fn perform_sdp_handshake(
     let resp = http_client
         .post(&sdp_endpoint)
         .header("Content-Type", "application/json")
+        .header(reqwest::header::AUTHORIZATION, auth_header_val.clone())
         .header("X-WebPhone-Sign", auth_header_val)
         .json(&local_desc)
         .send()

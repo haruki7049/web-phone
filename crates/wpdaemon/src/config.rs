@@ -76,10 +76,29 @@ pub struct Configuration {
     /// Maximum allowed members per group room.
     #[serde(default = "default_max_room_members")]
     pub max_room_members: usize,
+    /// Whether unauthenticated SDP connections are allowed (defaults to false for security).
+    #[serde(default)]
+    pub allow_anonymous: bool,
+    /// Shared secret or auth token for inter-daemon mesh authentication.
+    #[serde(default)]
+    pub peer_secret: Option<String>,
+    /// Path to TLS certificate file for HTTPS signaling.
+    #[serde(default)]
+    pub tls_cert: Option<PathBuf>,
+    /// Path to TLS private key file for HTTPS signaling.
+    #[serde(default)]
+    pub tls_key: Option<PathBuf>,
+    /// Time-To-Live (seconds) for Ephemeral TURN credentials (default: 900s / 15m).
+    #[serde(default = "default_turn_ttl")]
+    pub turn_credential_ttl: u64,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_turn_ttl() -> u64 {
+    900 // 15 minutes
 }
 
 /// Generate a cryptographically secure 256-bit random hex secret for TURN authentication.
@@ -127,6 +146,11 @@ impl Default for Configuration {
             max_connections: default_max_connections(),
             max_mesh_peers: default_max_mesh_peers(),
             max_room_members: default_max_room_members(),
+            allow_anonymous: false,
+            peer_secret: None,
+            tls_cert: None,
+            tls_key: None,
+            turn_credential_ttl: default_turn_ttl(),
         }
     }
 }
