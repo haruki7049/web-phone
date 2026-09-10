@@ -13,9 +13,16 @@ use wpapi::UserAddress;
 pub static CLIENT_REGISTRY: LazyLock<RwLock<ClientRegistry>> =
     LazyLock::new(|| RwLock::new(ClientRegistry::default()));
 
-/// Helper to check if address matches room key or peer target using exact identity equality.
+/// Helper to check if address matches room key or peer target using exact identity equality (Issue #37).
 pub fn matches_address(addr: &UserAddress, key: &UserAddress) -> bool {
     addr.id == key.id
+}
+
+/// Helper to check if address matches target key using prefix match (min 12 chars) for address resolution / routing (WPIP-02 Section 5).
+pub fn matches_address_prefix(addr: &UserAddress, key: &UserAddress) -> bool {
+    addr.id == key.id
+        || (key.id.len() >= 12 && addr.id.starts_with(&key.id))
+        || (addr.id.len() >= 12 && key.id.starts_with(&addr.id))
 }
 
 /// Unified registry for managing all WebRTC client state, routing, and call approvals.
@@ -94,7 +101,7 @@ impl ClientRegistry {
 
         let mut matches = Vec::new();
         for (&cid, addr) in self.addresses.iter() {
-            if matches_address(addr, target_key) {
+            if matches_address_prefix(addr, target_key) {
                 matches.push(cid);
             }
         }
@@ -473,5 +480,21 @@ mod tests {
         registry.update_last_pong(client_id);
         let stale_after_pong = registry.get_stale_clients(30);
         assert!(stale_after_pong.is_empty());
+    }
+
+    #[test]
+    fn test_find_client_by_short_id_prefix() {
+        let mut registry = ClientRegistry::new();
+        let full_addr = UserAddress::new(
+            "39f8adc7bf93a9a611f6cc7a472ec242328d3a2f86274eb098323634db34e829".to_string(),
+        );
+        registry.addresses.insert(1, full_addr);
+
+        let short_target = UserAddress::new("39f8adc7bf93".to_string());
+        let found = registry.find_client_by_address(&short_target);
+        assert_eq!(found, Some(1));
+
+        let invalid_short = UserAddress::new("39f8adc7".to_string());
+        assert_eq!(registry.find_client_by_address(&invalid_short), None);
     }
 }

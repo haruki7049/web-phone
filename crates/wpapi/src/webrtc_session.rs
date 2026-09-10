@@ -6,7 +6,7 @@
 use crate::address::UserAddress;
 use crate::config::Configuration;
 use crate::protocol::ProtocolPacket;
-use crate::session::ClientSession;
+use crate::session::{CallNotification, ClientSession};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use bytes::BytesMut;
@@ -163,14 +163,61 @@ pub async fn setup_data_channel(
                         }
                         ProtocolPacket::CallAcceptResponse { caller_address } => {
                             info!("Call accepted by {}", caller_address.short_id());
-                            session_ref.set_target_address(Some(caller_address));
+                            session_ref.set_target_address(Some(caller_address.clone()));
+                            if let Some(tx) = session_ref.get_call_notification_handler() {
+                                let _ = tx.send(CallNotification::Accepted(caller_address)).await;
+                            }
                         }
                         ProtocolPacket::CallRejectResponse { caller_address } => {
                             info!("Call rejected by {}", caller_address.short_id());
-                            if let Ok(mut guard) = session_user_addr.lock() {
-                                *guard = None;
-                            }
                             session_ref.set_target_address(None);
+                            if let Some(tx) = session_ref.get_call_notification_handler() {
+                                let _ = tx.send(CallNotification::Rejected(caller_address)).await;
+                            }
+                        }
+                        ProtocolPacket::CallAcceptedNotification { target_address } => {
+                            info!(
+                                "Call accepted notification for {}",
+                                target_address.short_id()
+                            );
+                            session_ref.set_target_address(Some(target_address.clone()));
+                            if let Some(tx) = session_ref.get_call_notification_handler() {
+                                let _ = tx.send(CallNotification::Accepted(target_address)).await;
+                            }
+                        }
+                        ProtocolPacket::CallRejectedNotification { target_address } => {
+                            info!(
+                                "Call rejected notification for {}",
+                                target_address.short_id()
+                            );
+                            session_ref.set_target_address(None);
+                            if let Some(tx) = session_ref.get_call_notification_handler() {
+                                let _ = tx.send(CallNotification::Rejected(target_address)).await;
+                            }
+                        }
+                        ProtocolPacket::ConnectionError { target_address } => {
+                            info!("Connection error for target {}", target_address.short_id());
+                            session_ref.set_target_address(None);
+                            if let Some(tx) = session_ref.get_call_notification_handler() {
+                                let _ = tx
+                                    .send(CallNotification::Error(
+                                        target_address,
+                                        "Target user not found or offline".to_string(),
+                                    ))
+                                    .await;
+                            }
+                        }
+                        ProtocolPacket::CallEndedNotification { target_address } => {
+                            info!("Call ended notification from {}", target_address.short_id());
+                            session_ref.set_target_address(None);
+                            if let Some(tx) = session_ref.get_call_notification_handler() {
+                                let _ = tx
+                                    .send(CallNotification::Error(
+                                        target_address,
+                                        "Call ended by remote user".to_string(),
+                                    ))
+                                    .await;
+                            }
                         }
                         ProtocolPacket::ServerTargetedAudio { audio_data, .. }
                         | ProtocolPacket::PeerTargetedAudio { audio_data, .. } => {
