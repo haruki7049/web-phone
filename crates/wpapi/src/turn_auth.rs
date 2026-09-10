@@ -85,7 +85,10 @@ pub fn verify_ephemeral_turn_credential(
         .decode(credential)
         .map_err(|_| AuthError::InvalidTurnBase64)?;
 
-    if expected_mac.as_slice() != provided_mac.as_slice() {
+    use subtle::ConstantTimeEq;
+
+    let is_equal: bool = expected_mac.as_slice().ct_eq(provided_mac.as_slice()).into();
+    if !is_equal {
         return Err(AuthError::InvalidTurnSignature);
     }
 

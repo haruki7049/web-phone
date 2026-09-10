@@ -34,6 +34,7 @@ hex.workspace = true
 argon2.workspace = true
 aes-gcm.workspace = true
 rand.workspace = true
+subtle.workspace = true
 
 [dev-dependencies]
 toml.workspace = true
