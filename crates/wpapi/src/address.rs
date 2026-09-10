@@ -450,6 +450,51 @@ pub fn build_authorization_header(keypair: &UserKeypair, sdp_offer: &str) -> (u6
 /// Maximum allowable time drift (±300 seconds) for Authorization header timestamps (WPIP-02 / WPIP-16).
 pub const MAX_TIMESTAMP_DRIFT_SECS: u64 = 300;
 
+use thiserror::Error;
+
+/// Authentication and authorization errors per WPIP-02 / WPIP-10 / WPIP-16.
+#[derive(Debug, Error, PartialEq, Eq, Clone)]
+pub enum AuthError {
+    #[error("Invalid authorization scheme: {0}")]
+    InvalidScheme(String),
+
+    #[error("Invalid authorization header format (expected PubKey:Timestamp:Sig)")]
+    InvalidHeaderFormat,
+
+    #[error("Invalid timestamp in authorization header")]
+    InvalidTimestamp,
+
+    #[error("Authorization timestamp drift too large ({diff}s > {max}s)")]
+    TimestampDrift { diff: u64, max: u64 },
+
+    #[error("Invalid Ed25519 cryptographic signature")]
+    InvalidEd25519Signature,
+
+    #[error("Invalid secp256k1 public key format")]
+    InvalidSecp256k1Key,
+
+    #[error("Invalid secp256k1 Schnorr cryptographic signature")]
+    InvalidSecp256k1Signature,
+
+    #[error("Invalid hex encoding: {0}")]
+    InvalidHex(String),
+
+    #[error("Replay attack detected: signature already used")]
+    ReplayDetected,
+
+    #[error("Invalid TURN username format (expected timestamp:user_address_hex)")]
+    InvalidTurnUsernameFormat,
+
+    #[error("TURN credential expired (expired at {expired_at}, current time {current_time})")]
+    TurnCredentialExpired { expired_at: u64, current_time: u64 },
+
+    #[error("Invalid TURN credential signature")]
+    InvalidTurnSignature,
+
+    #[error("Invalid Base64 encoding in TURN credential")]
+    InvalidTurnBase64,
+}
+
 /// Anti-replay signature cache to prevent handshake replay attacks within the valid timestamp window.
 #[derive(Debug, Clone, Default)]
 pub struct AntiReplayCache {
@@ -465,20 +510,20 @@ impl AntiReplayCache {
 
     /// Check if a signature has already been used within the acceptable time window.
     /// If signature is unique, records it and returns `Ok(())`.
-    /// Otherwise returns `Err("Replay attack detected: signature already used")`.
+    /// Otherwise returns `Err(AuthError::ReplayDetected)`.
     pub fn check_and_insert(
         &self,
         signature: &str,
         timestamp: u64,
         now: u64,
-    ) -> Result<(), String> {
+    ) -> Result<(), AuthError> {
         let mut map = self.signatures.write().unwrap();
 
         // Retain entries within 300s window relative to current time `now`
         map.retain(|_, &mut ts| now.abs_diff(ts) <= MAX_TIMESTAMP_DRIFT_SECS);
 
         if map.contains_key(signature) {
-            return Err("Replay attack detected: signature already used".to_string());
+            return Err(AuthError::ReplayDetected);
         }
 
         map.insert(signature.to_string(), timestamp);
@@ -501,18 +546,16 @@ pub fn verify_authorization_header_with_cache(
     header_val: &str,
     sdp_offer: &str,
     cache: &AntiReplayCache,
-) -> Result<UserAddress, String> {
+) -> Result<UserAddress, AuthError> {
     let val = header_val
         .strip_prefix("WP-Ed25519 ")
-        .ok_or("Invalid authorization scheme")?;
+        .ok_or_else(|| AuthError::InvalidScheme(header_val.to_string()))?;
     let parts: Vec<&str> = val.split(':').collect();
     if parts.len() != 3 {
-        return Err("Invalid authorization header format (expected PubKey:Timestamp:Sig)".into());
+        return Err(AuthError::InvalidHeaderFormat);
     }
     let pubkey_hex = parts[0];
-    let timestamp: u64 = parts[1]
-        .parse()
-        .map_err(|_| "Invalid timestamp in authorization header")?;
+    let timestamp: u64 = parts[1].parse().map_err(|_| AuthError::InvalidTimestamp)?;
     let sig_hex = parts[2];
 
     let now = SystemTime::now()
@@ -521,16 +564,16 @@ pub fn verify_authorization_header_with_cache(
         .as_secs();
     let diff = now.abs_diff(timestamp);
     if diff > MAX_TIMESTAMP_DRIFT_SECS {
-        return Err(format!(
-            "Authorization timestamp drift too large ({}s > {}s)",
-            diff, MAX_TIMESTAMP_DRIFT_SECS
-        ));
+        return Err(AuthError::TimestampDrift {
+            diff,
+            max: MAX_TIMESTAMP_DRIFT_SECS,
+        });
     }
 
     let addr = UserAddress::new(pubkey_hex);
     let payload = format!("{}:{}", timestamp, sdp_offer);
     if !UserKeypair::verify(&addr, payload.as_bytes(), sig_hex) {
-        return Err("Invalid Ed25519 cryptographic signature".into());
+        return Err(AuthError::InvalidEd25519Signature);
     }
 
     cache.check_and_insert(sig_hex, timestamp, now)?;
@@ -542,7 +585,7 @@ pub fn verify_authorization_header_with_cache(
 pub fn verify_authorization_header(
     header_val: &str,
     sdp_offer: &str,
-) -> Result<UserAddress, String> {
+) -> Result<UserAddress, AuthError> {
     verify_authorization_header_with_cache(header_val, sdp_offer, &GLOBAL_ANTI_REPLAY_CACHE)
 }
 
@@ -555,18 +598,16 @@ pub fn verify_secp256k1_authorization_header_with_cache(
     header_val: &str,
     sdp_offer: &str,
     cache: &AntiReplayCache,
-) -> Result<UserAddress, String> {
+) -> Result<UserAddress, AuthError> {
     let val = header_val
         .strip_prefix("WP-Secp256k1 ")
-        .ok_or("Invalid authorization scheme (expected WP-Secp256k1)")?;
+        .ok_or_else(|| AuthError::InvalidScheme(header_val.to_string()))?;
     let parts: Vec<&str> = val.split(':').collect();
     if parts.len() != 3 {
-        return Err("Invalid authorization header format (expected PubKey:Timestamp:Sig)".into());
+        return Err(AuthError::InvalidHeaderFormat);
     }
     let pubkey_hex = parts[0];
-    let timestamp: u64 = parts[1]
-        .parse()
-        .map_err(|_| "Invalid timestamp in authorization header")?;
+    let timestamp: u64 = parts[1].parse().map_err(|_| AuthError::InvalidTimestamp)?;
     let sig_hex = parts[2];
 
     let now = SystemTime::now()
@@ -575,27 +616,26 @@ pub fn verify_secp256k1_authorization_header_with_cache(
         .as_secs();
     let diff = now.abs_diff(timestamp);
     if diff > MAX_TIMESTAMP_DRIFT_SECS {
-        return Err(format!(
-            "Authorization timestamp drift too large ({}s > {}s)",
-            diff, MAX_TIMESTAMP_DRIFT_SECS
-        ));
+        return Err(AuthError::TimestampDrift {
+            diff,
+            max: MAX_TIMESTAMP_DRIFT_SECS,
+        });
     }
 
-    let pubkey_bytes =
-        hex::decode(pubkey_hex).map_err(|_| "Invalid hex in secp256k1 public key")?;
+    let pubkey_bytes = hex::decode(pubkey_hex).map_err(|e| AuthError::InvalidHex(e.to_string()))?;
     let verifying_key = SchnorrVerifyingKey::from_bytes(&pubkey_bytes)
-        .map_err(|_| "Invalid secp256k1 public key format")?;
+        .map_err(|_| AuthError::InvalidSecp256k1Key)?;
 
-    let sig_bytes = hex::decode(sig_hex).map_err(|_| "Invalid hex in Schnorr signature")?;
+    let sig_bytes = hex::decode(sig_hex).map_err(|e| AuthError::InvalidHex(e.to_string()))?;
     let signature = SchnorrSignature::try_from(sig_bytes.as_slice())
-        .map_err(|_| "Invalid Schnorr signature bytes")?;
+        .map_err(|_| AuthError::InvalidSecp256k1Signature)?;
 
     let payload = format!("{}:{}", timestamp, sdp_offer);
     if verifying_key
         .verify(payload.as_bytes(), &signature)
         .is_err()
     {
-        return Err("Invalid secp256k1 Schnorr cryptographic signature".into());
+        return Err(AuthError::InvalidSecp256k1Signature);
     }
 
     cache.check_and_insert(sig_hex, timestamp, now)?;
@@ -607,7 +647,7 @@ pub fn verify_secp256k1_authorization_header_with_cache(
 pub fn verify_secp256k1_authorization_header(
     header_val: &str,
     sdp_offer: &str,
-) -> Result<UserAddress, String> {
+) -> Result<UserAddress, AuthError> {
     verify_secp256k1_authorization_header_with_cache(
         header_val,
         sdp_offer,
@@ -798,7 +838,7 @@ mod tests {
         );
         let err_past =
             verify_authorization_header_with_cache(&header_past, sdp, &cache).unwrap_err();
-        assert!(err_past.contains("timestamp drift too large"));
+        assert!(matches!(err_past, AuthError::TimestampDrift { .. }));
 
         // Expired in future (-301s drift)
         let future_ts = now + 301;
@@ -812,7 +852,7 @@ mod tests {
         );
         let err_future =
             verify_authorization_header_with_cache(&header_future, sdp, &cache).unwrap_err();
-        assert!(err_future.contains("timestamp drift too large"));
+        assert!(matches!(err_future, AuthError::TimestampDrift { .. }));
 
         // Valid boundary (-300s drift)
         let valid_past_ts = now.saturating_sub(300);
@@ -838,7 +878,7 @@ mod tests {
 
         let err =
             verify_authorization_header_with_cache(&header, tampered_sdp, &cache).unwrap_err();
-        assert!(err.contains("Invalid Ed25519 cryptographic signature"));
+        assert_eq!(err, AuthError::InvalidEd25519Signature);
     }
 
     #[test]
@@ -853,6 +893,6 @@ mod tests {
 
         // Replay attempt: Rejected
         let err = verify_authorization_header_with_cache(&header, sdp, &cache).unwrap_err();
-        assert!(err.contains("Replay attack detected"));
+        assert_eq!(err, AuthError::ReplayDetected);
     }
 }

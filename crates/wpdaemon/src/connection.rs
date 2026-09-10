@@ -6,10 +6,7 @@
 use crate::broadcast::{AUDIO_BROADCAST, AudioMessage};
 use crate::config::CONFIGURATION;
 use crate::registry::{CLIENT_REGISTRY, matches_address};
-use axum::{
-    extract::Json,
-    http::{HeaderMap, StatusCode},
-};
+use axum::{extract::Json, http::HeaderMap};
 use bytes::BytesMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -395,11 +392,13 @@ async fn handle_client_datachannel_events(
     }
 }
 
-/// Handle an SDP offer from a WebRTC client.
+use crate::error::SignalingError;
+
+/// Handle incoming SDP offer from a WebRTC client.
 pub async fn handle_sdp_offer(
     headers: HeaderMap,
     Json(offer): Json<RTCSessionDescription>,
-) -> Result<Json<RTCSessionDescription>, (StatusCode, String)> {
+) -> Result<Json<RTCSessionDescription>, SignalingError> {
     let daemon_config = CONFIGURATION.get().cloned().unwrap_or_default();
     let my_node_id = daemon_config.node_id;
 
@@ -409,12 +408,8 @@ pub async fn handle_sdp_offer(
             "Rejected SDP offer: active connections ({}) reached max limit ({})",
             active_connections, daemon_config.max_connections
         );
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!(
-                "503 Service Unavailable: Maximum concurrent connections reached ({})",
-                daemon_config.max_connections
-            ),
+        return Err(SignalingError::MaxConnectionsReached(
+            daemon_config.max_connections,
         ));
     }
 
@@ -432,12 +427,9 @@ pub async fn handle_sdp_offer(
                     );
                     addr
                 }
-                Err(err_msg) => {
-                    error!("secp256k1 authorization verification failed: {}", err_msg);
-                    return Err((
-                        StatusCode::UNAUTHORIZED,
-                        format!("401 Unauthorized: {}", err_msg),
-                    ));
+                Err(err) => {
+                    error!("secp256k1 authorization verification failed: {}", err);
+                    return Err(SignalingError::Unauthorized(err));
                 }
             }
         } else {
@@ -446,12 +438,9 @@ pub async fn handle_sdp_offer(
                     info!("Verified client Ed25519 identity signature: {}", addr);
                     addr
                 }
-                Err(err_msg) => {
-                    error!("Ed25519 authorization verification failed: {}", err_msg);
-                    return Err((
-                        StatusCode::UNAUTHORIZED,
-                        format!("401 Unauthorized: {}", err_msg),
-                    ));
+                Err(err) => {
+                    error!("Ed25519 authorization verification failed: {}", err);
+                    return Err(SignalingError::Unauthorized(err));
                 }
             }
         }
@@ -483,10 +472,7 @@ pub async fn handle_sdp_offer(
         .build()
         .await
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to build PeerConnection: {}", e),
-            )
+            SignalingError::InternalError(format!("Failed to build PeerConnection: {}", e))
         })?;
 
     let peer_connection: Arc<dyn PeerConnection> = Arc::new(pc);
@@ -527,32 +513,23 @@ pub async fn handle_sdp_offer(
     peer_connection
         .set_remote_description(offer)
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid SDP offer: {}", e)))?;
+        .map_err(|e| SignalingError::InvalidSdpOffer(e.to_string()))?;
 
     let answer = peer_connection.create_answer(None).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to create SDP answer: {}", e),
-        )
+        SignalingError::InternalError(format!("Failed to create SDP answer: {}", e))
     })?;
 
     peer_connection
         .set_local_description(answer)
         .await
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to set local description: {}", e),
-            )
+            SignalingError::InternalError(format!("Failed to set local description: {}", e))
         })?;
 
     let _ = tokio::time::timeout(ICE_GATHER_TIMEOUT, gather_rx.recv()).await;
 
     let local_desc = peer_connection.local_description().await.ok_or_else(|| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "No local description available".to_string(),
-        )
+        SignalingError::InternalError("No local description available".to_string())
     })?;
 
     Ok(Json(local_desc))
@@ -959,7 +936,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_sdp_offer_auth_failures() {
-        use axum::http::HeaderMap;
+        use axum::http::{HeaderMap, StatusCode};
 
         let keypair = wpapi::UserKeypair::generate();
         let sdp_text = "v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n";
@@ -990,9 +967,12 @@ mod tests {
 
         let res = handle_sdp_offer(headers, Json(offer.clone())).await;
         assert!(res.is_err());
-        let (status, msg) = res.unwrap_err();
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert!(msg.contains("timestamp drift too large"));
+        let err = res.unwrap_err();
+        assert_eq!(err.status_code(), StatusCode::UNAUTHORIZED);
+        assert!(matches!(
+            err,
+            SignalingError::Unauthorized(wpapi::AuthError::TimestampDrift { .. })
+        ));
 
         // 2. Tampered SDP payload signature
         let tampered_sdp_text = "v=0\r\no=- 99999 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n";
@@ -1004,9 +984,12 @@ mod tests {
         );
         let res = handle_sdp_offer(headers, Json(tampered_offer)).await;
         assert!(res.is_err());
-        let (status, msg) = res.unwrap_err();
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert!(msg.contains("Invalid Ed25519 cryptographic signature"));
+        let err = res.unwrap_err();
+        assert_eq!(err.status_code(), StatusCode::UNAUTHORIZED);
+        assert!(matches!(
+            err,
+            SignalingError::Unauthorized(wpapi::AuthError::InvalidEd25519Signature)
+        ));
 
         // 3. First valid attempt: OK (or fails later at PeerConnection creation if SDP invalid, but auth passes)
         let mut headers = HeaderMap::new();
@@ -1024,8 +1007,11 @@ mod tests {
         );
         let res = handle_sdp_offer(headers, Json(offer)).await;
         assert!(res.is_err());
-        let (status, msg) = res.unwrap_err();
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert!(msg.contains("Replay attack detected"));
+        let err = res.unwrap_err();
+        assert_eq!(err.status_code(), StatusCode::UNAUTHORIZED);
+        assert!(matches!(
+            err,
+            SignalingError::Unauthorized(wpapi::AuthError::ReplayDetected)
+        ));
     }
 }

@@ -9,7 +9,7 @@ use crate::config::CONFIGURATION;
 use crate::constants::ICE_GATHER_TIMEOUT;
 use crate::registry::CLIENT_REGISTRY;
 use async_trait::async_trait;
-use axum::{extract::Json, http::StatusCode};
+use axum::extract::Json;
 use bytes::BytesMut;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -131,10 +131,12 @@ impl PeerConnectionEventHandler for MeshPeerEventHandler {
     }
 }
 
+use crate::error::SignalingError;
+
 /// Handle incoming SDP offer from another peer wpdaemon node.
 pub async fn handle_peer_sdp(
     Json(offer): Json<RTCSessionDescription>,
-) -> Result<Json<RTCSessionDescription>, (StatusCode, String)> {
+) -> Result<Json<RTCSessionDescription>, SignalingError> {
     let config = CONFIGURATION.get().cloned().unwrap_or_default();
 
     let active_connections = CLIENT_REGISTRY.read().unwrap().peer_connections.len();
@@ -143,12 +145,8 @@ pub async fn handle_peer_sdp(
             "Rejected peer SDP offer: active connections ({}) reached max limit ({})",
             active_connections, config.max_connections
         );
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!(
-                "503 Service Unavailable: Maximum concurrent connections reached ({})",
-                config.max_connections
-            ),
+        return Err(SignalingError::MaxConnectionsReached(
+            config.max_connections,
         ));
     }
 
@@ -158,13 +156,7 @@ pub async fn handle_peer_sdp(
             "Rejected peer SDP offer: mesh peer connections ({}) reached max limit ({})",
             current_peers, config.max_mesh_peers
         );
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!(
-                "503 Service Unavailable: Maximum mesh peer connections reached ({})",
-                config.max_mesh_peers
-            ),
-        ));
+        return Err(SignalingError::MaxMeshPeersReached(config.max_mesh_peers));
     }
 
     let (gather_tx, mut gather_rx) = mpsc::channel(1);
@@ -178,10 +170,7 @@ pub async fn handle_peer_sdp(
         .build()
         .await
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create PeerConnection: {}", e),
-            )
+            SignalingError::InternalError(format!("Failed to create PeerConnection: {}", e))
         })?;
 
     let peer_connection: Arc<dyn PeerConnection> = Arc::new(pc);
@@ -191,32 +180,24 @@ pub async fn handle_peer_sdp(
     peer_connection
         .set_remote_description(offer)
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid offer SDP: {}", e)))?;
+        .map_err(|e| SignalingError::InvalidSdpOffer(e.to_string()))?;
 
-    let answer = peer_connection.create_answer(None).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to create answer: {}", e),
-        )
-    })?;
+    let answer = peer_connection
+        .create_answer(None)
+        .await
+        .map_err(|e| SignalingError::InternalError(format!("Failed to create answer: {}", e)))?;
 
     peer_connection
         .set_local_description(answer)
         .await
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to set local description: {}", e),
-            )
+            SignalingError::InternalError(format!("Failed to set local description: {}", e))
         })?;
 
     let _ = tokio::time::timeout(ICE_GATHER_TIMEOUT, gather_rx.recv()).await;
 
     let local_desc = peer_connection.local_description().await.ok_or_else(|| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "No local description available".to_string(),
-        )
+        SignalingError::InternalError("No local description available".to_string())
     })?;
 
     Ok(Json(local_desc))
@@ -314,6 +295,9 @@ mod tests {
         let my_node_id = 100u64;
         let mut rx = AUDIO_BROADCAST.subscribe();
 
+        // Drain any messages sent by other concurrent tests
+        while rx.try_recv().is_ok() {}
+
         // 1. Packet originating from my_node_id: Should be dropped (loop prevention)
         let loop_packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
             sender_id: 1,
@@ -326,7 +310,9 @@ mod tests {
         };
         let encoded_loop = loop_packet.encode();
         handle_peer_incoming_message(&encoded_loop, my_node_id);
-        assert!(rx.try_recv().is_err());
+        while let Ok(msg) = rx.try_recv() {
+            assert_ne!(msg.sender_id, 1, "Loop packet should not be re-broadcasted");
+        }
 
         // 2. Packet with TTL == 0: Should be dropped
         let ttl_zero_packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
@@ -340,7 +326,12 @@ mod tests {
         };
         let encoded_zero = ttl_zero_packet.encode();
         handle_peer_incoming_message(&encoded_zero, my_node_id);
-        assert!(rx.try_recv().is_err());
+        while let Ok(msg) = rx.try_recv() {
+            assert_ne!(
+                msg.sender_id, 2,
+                "TTL 0 packet should not be re-broadcasted"
+            );
+        }
 
         // 3. Valid peer packet (origin_node != my_node_id, ttl = 8): Should decrement TTL to 7 and broadcast
         let valid_packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
@@ -355,8 +346,18 @@ mod tests {
         let encoded_valid = valid_packet.encode();
         handle_peer_incoming_message(&encoded_valid, my_node_id);
 
-        let recv_msg = rx.recv().await.expect("Should receive broadcasted message");
-        assert_eq!(recv_msg.origin_node, 300u64);
-        assert_eq!(recv_msg.ttl, 7); // Decremented from 8 to 7
+        let mut found_valid = false;
+        while let Ok(recv_msg) = rx.try_recv() {
+            if recv_msg.sender_id == 3 {
+                assert_eq!(recv_msg.origin_node, 300u64);
+                assert_eq!(recv_msg.ttl, 7); // Decremented from 8 to 7
+                found_valid = true;
+                break;
+            }
+        }
+        assert!(
+            found_valid,
+            "Valid packet should be broadcasted with decremented TTL"
+        );
     }
 }

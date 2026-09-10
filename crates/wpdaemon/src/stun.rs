@@ -8,13 +8,13 @@ use std::net::SocketAddr;
 use std::sync::{Arc, LazyLock};
 use tokio::net::UdpSocket;
 use tracing::{error, info, trace, warn};
-use wpapi::{UserAddress, verify_ephemeral_turn_credential};
+use wpapi::{AuthError, UserAddress, verify_ephemeral_turn_credential};
 
 /// Verify incoming TURN Allocation credentials against configured server secret (WPIP-10).
 pub fn verify_turn_allocation_credentials(
     username: &str,
     credential: &str,
-) -> Result<UserAddress, String> {
+) -> Result<UserAddress, AuthError> {
     let secret_bytes = crate::config::get_turn_server_secret();
     verify_ephemeral_turn_credential(&secret_bytes, username, credential)
 }

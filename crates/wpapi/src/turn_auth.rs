@@ -48,20 +48,20 @@ pub fn generate_ephemeral_turn_credential(
     }
 }
 
+use crate::address::AuthError;
+
 /// Verify an ephemeral TURN credential against the server secret and current time.
 pub fn verify_ephemeral_turn_credential(
     server_secret: &[u8],
     username: &str,
     credential: &str,
-) -> Result<UserAddress, String> {
+) -> Result<UserAddress, AuthError> {
     let parts: Vec<&str> = username.splitn(2, ':').collect();
     if parts.len() != 2 {
-        return Err("Invalid TURN username format (expected timestamp:user_address_hex)".into());
+        return Err(AuthError::InvalidTurnUsernameFormat);
     }
 
-    let exp_timestamp: u64 = parts[0]
-        .parse()
-        .map_err(|_| "Invalid timestamp in TURN username")?;
+    let exp_timestamp: u64 = parts[0].parse().map_err(|_| AuthError::InvalidTimestamp)?;
     let user_address_hex = parts[1];
 
     let now = SystemTime::now()
@@ -70,10 +70,10 @@ pub fn verify_ephemeral_turn_credential(
         .as_secs();
 
     if now > exp_timestamp {
-        return Err(format!(
-            "TURN credential expired (expired at {}, current time {})",
-            exp_timestamp, now
-        ));
+        return Err(AuthError::TurnCredentialExpired {
+            expired_at: exp_timestamp,
+            current_time: now,
+        });
     }
 
     let mut mac =
@@ -83,10 +83,10 @@ pub fn verify_ephemeral_turn_credential(
 
     let provided_mac = BASE64_STANDARD
         .decode(credential)
-        .map_err(|_| "Invalid Base64 in TURN credential")?;
+        .map_err(|_| AuthError::InvalidTurnBase64)?;
 
     if expected_mac.as_slice() != provided_mac.as_slice() {
-        return Err("Invalid TURN credential signature".into());
+        return Err(AuthError::InvalidTurnSignature);
     }
 
     Ok(UserAddress::new(user_address_hex))
@@ -131,8 +131,10 @@ mod tests {
         let credential = BASE64_STANDARD.encode(mac.finalize().into_bytes());
 
         let result = verify_ephemeral_turn_credential(secret, &username, &credential);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("TURN credential expired"));
+        assert!(matches!(
+            result,
+            Err(AuthError::TurnCredentialExpired { .. })
+        ));
     }
 
     #[test]
@@ -143,11 +145,6 @@ mod tests {
 
         let cred = generate_ephemeral_turn_credential(secret1, &user_addr, vec![], 600);
         let result = verify_ephemeral_turn_credential(secret2, &cred.username, &cred.credential);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Invalid TURN credential signature")
-        );
+        assert_eq!(result, Err(AuthError::InvalidTurnSignature));
     }
 }

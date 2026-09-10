@@ -13,6 +13,7 @@ pub mod broadcast;
 pub mod config;
 pub mod connection;
 pub mod constants;
+pub mod error;
 pub mod peer;
 pub mod rate_limit;
 pub mod registry;
@@ -22,6 +23,7 @@ pub mod stun;
 pub use broadcast::{AUDIO_BROADCAST, AudioMessage};
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 pub use constants::*;
+pub use error::SignalingError;
 pub use rate_limit::{
     DATACHANNEL_RATE_LIMITER, DataChannelRateLimiter, GLOBAL_RATE_LIMITER, RateLimiter,
     rate_limit_middleware,
