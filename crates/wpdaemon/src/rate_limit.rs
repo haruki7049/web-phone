@@ -203,4 +203,30 @@ mod tests {
         limiter.remove_client(cid);
         assert!(limiter.check_and_consume(cid));
     }
+
+    #[test]
+    fn test_wpip15_http_sdp_rate_limit_spec() {
+        // WPIP-15 1.1 HTTP SDP limit: 5.0 tokens/sec, capacity 10.0
+        let limiter = RateLimiter::new(5.0, 10.0);
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+
+        for _ in 0..10 {
+            assert!(limiter.check_and_consume(ip));
+        }
+        // 11th request in burst exceeded capacity -> blocked
+        assert!(!limiter.check_and_consume(ip));
+    }
+
+    #[test]
+    fn test_wpip15_datachannel_rate_limit_spec() {
+        // WPIP-15 1.3 DataChannel packet limit: 100.0 packets/sec, capacity 200.0
+        let limiter = DataChannelRateLimiter::new(100.0, 200.0);
+        let client_id = 999u64;
+
+        for _ in 0..200 {
+            assert!(limiter.check_and_consume(client_id));
+        }
+        // 201st packet in burst exceeded capacity -> blocked
+        assert!(!limiter.check_and_consume(client_id));
+    }
 }

@@ -18,6 +18,8 @@ pub struct AudioMessage {
     pub target_address: UserAddress,
     /// ID of the daemon node where this audio originated.
     pub origin_node: u64,
+    /// Time-to-Live (TTL) hop limit for peer mesh routing (default 8).
+    pub ttl: u8,
     /// Raw audio data bytes (PCM f32 LE).
     pub data: Vec<u8>,
 }
@@ -39,11 +41,13 @@ mod tests {
             sender_address: None,
             target_address: UserAddress::new("target_id_12345"),
             origin_node: 1,
+            ttl: 8,
             data: vec![1, 2, 3, 4],
         };
         assert_eq!(msg.sender_id, 42);
         assert_eq!(msg.target_address.id, "target_id_12345");
         assert_eq!(msg.origin_node, 1);
+        assert_eq!(msg.ttl, 8);
         assert_eq!(msg.data, vec![1, 2, 3, 4]);
     }
 
@@ -57,6 +61,7 @@ mod tests {
             sender_address: None,
             target_address: UserAddress::new("target_id_12345"),
             origin_node: 10,
+            ttl: 8,
             data: vec![100, 200],
         };
 
@@ -65,6 +70,7 @@ mod tests {
         assert_eq!(received.sender_id, 1);
         assert_eq!(received.target_address.id, "target_id_12345");
         assert_eq!(received.origin_node, 10);
+        assert_eq!(received.ttl, 8);
         assert_eq!(received.data, vec![100, 200]);
     }
 }

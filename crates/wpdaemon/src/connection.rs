@@ -321,6 +321,14 @@ async fn handle_client_datachannel_events(
                 }
             }
             DataChannelEvent::OnMessage(msg) => {
+                if !crate::rate_limit::DATACHANNEL_RATE_LIMITER.check_and_consume(client_id) {
+                    warn!(
+                        "Client {} exceeded WebRTC DataChannel packet rate limit (WPIP-15), dropping packet",
+                        client_id
+                    );
+                    continue;
+                }
+
                 let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
                     continue;
                 };
@@ -665,6 +673,7 @@ async fn handle_client_targeted_audio(
             sender_address: sender_addr,
             target_address,
             origin_node: my_node_id,
+            ttl: 8, // Initial TTL per WPIP-05 Section 3.1
             data: payload,
         });
     }

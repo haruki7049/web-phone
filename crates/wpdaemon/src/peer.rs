@@ -47,9 +47,16 @@ impl PeerConnectionEventHandler for MeshPeerEventHandler {
                         if let Some(mut rx) = audio_rx_opt.take() {
                             let dc_inner = Arc::clone(&dc_task);
                             tokio::spawn(async move {
+                                let config = CONFIGURATION.get().cloned().unwrap_or_default();
+                                let my_node_id = config.node_id;
                                 loop {
                                     match rx.recv().await {
                                         Ok(audio_msg) => {
+                                            if audio_msg.origin_node != my_node_id
+                                                && audio_msg.ttl == 0
+                                            {
+                                                continue;
+                                            }
                                             let target_addr = audio_msg.target_address.clone();
                                             let sender_addr =
                                                 audio_msg.sender_address.unwrap_or_default();
@@ -60,7 +67,7 @@ impl PeerConnectionEventHandler for MeshPeerEventHandler {
                                                 target_address: target_addr,
                                                 sender_address: sender_addr,
                                                 codec_id: wpapi::protocol::CODEC_OPUS,
-                                                ttl: 8, // WPIP-05 Initial TTL = 8
+                                                ttl: audio_msg.ttl,
                                                 audio_data: audio_msg.data,
                                             };
 
@@ -101,13 +108,21 @@ impl PeerConnectionEventHandler for MeshPeerEventHandler {
                         {
                             // WPIP-05 Loop prevention & TTL expiration checks
                             if origin_node != my_node_id && ttl > 0 {
+                                let next_ttl = ttl - 1;
                                 let _ = AUDIO_BROADCAST.send(AudioMessage {
                                     sender_id,
                                     sender_address: Some(sender_address),
                                     target_address,
                                     origin_node,
+                                    ttl: next_ttl,
                                     data: audio_data,
                                 });
+                            } else {
+                                warn!(
+                                    "Dropped PeerTargetedAudio: origin_node loop ({}) or TTL expired ({})",
+                                    origin_node == my_node_id,
+                                    ttl == 0
+                                );
                             }
                         }
                     }
@@ -248,9 +263,15 @@ pub async fn connect_to_peer(
                     if let Some(mut rx) = audio_rx_opt.take() {
                         let dc_inner = Arc::clone(&dc_task);
                         tokio::spawn(async move {
+                            let config = CONFIGURATION.get().cloned().unwrap_or_default();
+                            let my_node_id = config.node_id;
                             loop {
                                 match rx.recv().await {
                                     Ok(audio_msg) => {
+                                        if audio_msg.origin_node != my_node_id && audio_msg.ttl == 0
+                                        {
+                                            continue;
+                                        }
                                         let target_addr = audio_msg.target_address.clone();
                                         let sender_addr =
                                             audio_msg.sender_address.unwrap_or_default();
@@ -262,7 +283,7 @@ pub async fn connect_to_peer(
                                                 target_address: target_addr,
                                                 sender_address: sender_addr,
                                                 codec_id: wpapi::protocol::CODEC_OPUS,
-                                                ttl: 8, // WPIP-05 Initial TTL = 8
+                                                ttl: audio_msg.ttl,
                                                 audio_data: audio_msg.data,
                                             };
 
@@ -296,13 +317,21 @@ pub async fn connect_to_peer(
                     {
                         // WPIP-05 Loop prevention & TTL expiration checks
                         if origin_node != my_node_id && ttl > 0 {
+                            let next_ttl = ttl - 1;
                             let _ = AUDIO_BROADCAST.send(AudioMessage {
                                 sender_id,
                                 sender_address: Some(sender_address),
                                 target_address,
                                 origin_node,
+                                ttl: next_ttl,
                                 data: audio_data,
                             });
+                        } else {
+                            warn!(
+                                "Dropped PeerTargetedAudio: origin_node loop ({}) or TTL expired ({})",
+                                origin_node == my_node_id,
+                                ttl == 0
+                            );
                         }
                     }
                 }
@@ -342,4 +371,113 @@ pub async fn connect_to_peer(
     info!("Successfully interconnected with peer wpdaemon");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wpapi::UserAddress;
+
+    #[tokio::test]
+    async fn test_peer_loop_prevention_origin_and_ttl() {
+        let my_node_id = 100u64;
+        let mut rx = AUDIO_BROADCAST.subscribe();
+
+        // 1. Packet originating from my_node_id: Should be dropped (loop prevention)
+        let loop_packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+            sender_id: 1,
+            origin_node: my_node_id,
+            target_address: UserAddress::new("target_addr_12345"),
+            sender_address: UserAddress::new("sender_addr_12345"),
+            codec_id: wpapi::protocol::CODEC_OPUS,
+            ttl: 8,
+            audio_data: vec![1, 2, 3],
+        };
+        let encoded_loop = loop_packet.encode();
+
+        if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+            origin_node, ttl, ..
+        }) = wpapi::protocol::ProtocolPacket::decode(&encoded_loop)
+        {
+            if origin_node != my_node_id && ttl > 0 {
+                let _ = AUDIO_BROADCAST.send(AudioMessage {
+                    sender_id: 1,
+                    sender_address: None,
+                    target_address: UserAddress::new("target_addr_12345"),
+                    origin_node,
+                    ttl: ttl - 1,
+                    data: vec![1, 2, 3],
+                });
+            }
+        }
+        assert!(rx.try_recv().is_err());
+
+        // 2. Packet with TTL == 0: Should be dropped
+        let ttl_zero_packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+            sender_id: 2,
+            origin_node: 200u64,
+            target_address: UserAddress::new("target_addr_12345"),
+            sender_address: UserAddress::new("sender_addr_12345"),
+            codec_id: wpapi::protocol::CODEC_OPUS,
+            ttl: 0,
+            audio_data: vec![4, 5, 6],
+        };
+        let encoded_zero = ttl_zero_packet.encode();
+
+        if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+            origin_node, ttl, ..
+        }) = wpapi::protocol::ProtocolPacket::decode(&encoded_zero)
+        {
+            if origin_node != my_node_id && ttl > 0 {
+                let _ = AUDIO_BROADCAST.send(AudioMessage {
+                    sender_id: 2,
+                    sender_address: None,
+                    target_address: UserAddress::new("target_addr_12345"),
+                    origin_node,
+                    ttl: ttl - 1,
+                    data: vec![4, 5, 6],
+                });
+            }
+        }
+        assert!(rx.try_recv().is_err());
+
+        // 3. Valid peer packet (origin_node != my_node_id, ttl = 8): Should decrement TTL to 7 and broadcast
+        let valid_packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+            sender_id: 3,
+            origin_node: 300u64,
+            target_address: UserAddress::new("target_addr_12345"),
+            sender_address: UserAddress::new("sender_addr_12345"),
+            codec_id: wpapi::protocol::CODEC_OPUS,
+            ttl: 8,
+            audio_data: vec![7, 8, 9],
+        };
+        let encoded_valid = valid_packet.encode();
+
+        if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
+            sender_id,
+            origin_node,
+            target_address,
+            sender_address,
+            ttl,
+            audio_data,
+            ..
+        }) = wpapi::protocol::ProtocolPacket::decode(&encoded_valid)
+        {
+            if origin_node != my_node_id && ttl > 0 {
+                let next_ttl = ttl - 1;
+                let _ = AUDIO_BROADCAST.send(AudioMessage {
+                    sender_id,
+                    sender_address: Some(sender_address),
+                    target_address,
+                    origin_node,
+                    ttl: next_ttl,
+                    data: audio_data,
+                });
+            }
+        }
+
+        let recv_msg = rx.recv().await.expect("Should receive broadcasted message");
+        assert_eq!(recv_msg.origin_node, 300u64);
+        assert_eq!(recv_msg.ttl, 7); // Decremented from 8 to 7
+    }
 }
