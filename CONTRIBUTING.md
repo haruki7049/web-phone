@@ -47,6 +47,11 @@ ______________________________________________________________________
 - All new features and protocol alterations MUST strictly adhere to the RFC 2119 terminology ("MUST", "MUST NOT", "SHOULD", "SHOULD NOT", "REQUIRED", "RECOMMENDED", "MAY") defined in `docs/WPIP-*.md`.
 - Maintain backwards compatibility across all supported WPIP DataChannel packet types (`0x01` through `0x13`).
 
+### Concurrency & WebRTC Safety
+
+- `CLIENT_REGISTRY` and shared state are protected by `std::sync::RwLock`. NEVER hold `RwLock` read/write guards across `.await` points when sending over WebRTC DataChannels or performing async I/O.
+- Clone necessary `Arc` handles (`RTCDataChannel`, `RTCPeerConnection`, `UserAddress`) inside short synchronous blocks, drop the guard, and then perform `.await` calls.
+
 ### Code Formatting (`treefmt`)
 
 Code formatting MUST be performed using `treefmt`:
@@ -55,9 +60,9 @@ Code formatting MUST be performed using `treefmt`:
 treefmt
 ```
 
-If `treefmt` is not available in your environment, apply the corresponding formatters configured in `flake.nix`:
+If `treefmt` is not available directly in your execution environment, inspect the `treefmt-nix` configuration in `flake.nix` and apply the corresponding formatters:
 
-- **Rust**: `rustfmt`
+- **Rust**: `rustfmt` / `cargo fmt --all`
 - **Nix**: `nixfmt`
 - **TOML**: `taplo`
 - **Shell**: `shfmt`
@@ -73,19 +78,19 @@ Before submitting a Pull Request or opening a commit, all contributions MUST pas
    ```bash
    cargo test --workspace
    ```
-1. **Run Linter (Zero Warnings Allowed)**:
+2. **Run Linter (Zero Warnings Allowed)**:
    ```bash
    cargo clippy --workspace -- -D warnings
    ```
-1. **Build Release Binaries**:
+3. **Build Release Binaries**:
    ```bash
    cargo build --release
    ```
-1. **Build Nix Derivation**:
+4. **Build Nix Derivation**:
    ```bash
    nix build
    ```
-1. **Format Code**:
+5. **Format Code**:
    ```bash
    treefmt
    ```
@@ -98,6 +103,6 @@ ______________________________________________________________________
    ```bash
    git checkout -b feature/your-feature-name
    ```
-1. Make your changes following the coding standards and concurrency guidelines outlined in [`AGENTS.md`](./AGENTS.md).
-1. Commit your changes with clear, descriptive commit messages.
-1. Push to your branch and open a Pull Request against `main`.
+2. Make your changes following the coding standards and concurrency guidelines outlined in [`AGENTS.md`](./AGENTS.md).
+3. Commit your changes with clear, descriptive commit messages.
+4. Push to your branch and open a Pull Request against `main`.
