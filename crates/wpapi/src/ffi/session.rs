@@ -79,6 +79,37 @@ pub unsafe extern "C" fn wpapi_config_set_server(
     .unwrap_or(-1)
 }
 
+/// Set server URL string (e.g. "http://127.0.0.1:15000", "https://daemon.example.com:8443").
+/// # Safety
+/// `config` and `server_url` must be valid non-null pointers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpapi_config_set_server_url(
+    config: *mut WPAPIConfig,
+    server_url: *const c_char,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if config.is_null() || server_url.is_null() {
+            set_last_error("Null pointer argument");
+            return -1;
+        }
+        let c_str = unsafe { CStr::from_ptr(server_url) };
+        let url_str = match c_str.to_str() {
+            Ok(s) => s,
+            Err(e) => {
+                set_last_error(e);
+                return -1;
+            }
+        };
+        let cfg = unsafe { &mut (*config).0 };
+        if let Err(e) = cfg.parse_and_apply_server_url(url_str) {
+            set_last_error(e);
+            return -1;
+        }
+        0
+    }))
+    .unwrap_or(-1)
+}
+
 /// Set STUN server URL.
 /// # Safety
 /// `config` and `stun_server` must be valid non-null pointers.

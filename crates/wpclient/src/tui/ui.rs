@@ -56,7 +56,7 @@ fn render_header(f: &mut Frame, app: &TuiApp, area: Rect) {
         ),
         Span::raw(" | Server: "),
         Span::styled(
-            format!("{}:{}", app.config.server_ip, app.config.server_port),
+            format!("{}:{}", app.config.host_str(), app.config.server_port),
             Style::default().fg(Color::Yellow),
         ),
         Span::raw(" | My ID: "),

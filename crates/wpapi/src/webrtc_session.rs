@@ -430,12 +430,7 @@ pub async fn perform_sdp_handshake(
         .await
         .ok_or_else(|| anyhow!("Failed to get local SDP description"))?;
 
-    let is_loopback = config.server_ip.is_loopback();
-    let scheme = if is_loopback { "http" } else { "https" };
-    let server_url = match config.server_ip {
-        std::net::IpAddr::V4(ip) => format!("{}://{}:{}", scheme, ip, config.server_port),
-        std::net::IpAddr::V6(ip) => format!("{}://[{}]:{}", scheme, ip, config.server_port),
-    };
+    let server_url = config.server_url();
 
     let sdp_endpoint = format!("{}/sdp", server_url);
     info!("Sending signed SDP offer to {}...", sdp_endpoint);

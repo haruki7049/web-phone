@@ -144,6 +144,7 @@ max_room_members = 50
 #### Client Configuration (`config.toml`)
 
 ```toml
+server_url = "http://127.0.0.1:15000" # Optional: specify full URL or hostname (overrides server_ip/server_port)
 server_ip = "127.0.0.1"
 server_port = 15000
 stun_server = "stun:127.0.0.1:3478"

@@ -17,9 +17,13 @@ struct CLIArgs {
     #[arg(long, default_value = DEFAULT_CONFIG_PATH.lock().unwrap().display().to_string())]
     config_path: PathBuf,
 
-    /// Server IP address override.
+    /// Server URL or host address override (e.g. http://127.0.0.1:15000, https://daemon.example.com:15000).
+    #[arg(long, short = 's', alias = "server")]
+    server_url: Option<String>,
+
+    /// Server IP address or host override.
     #[arg(long)]
-    server_ip: Option<IpAddr>,
+    server_ip: Option<String>,
 
     /// Server port override.
     #[arg(long)]
@@ -191,9 +195,33 @@ async fn main() -> Result<()> {
             Configuration::default()
         });
 
-    if let Some(server_ip) = args.server_ip {
-        loaded_config.server_ip = server_ip;
+    if let Err(e) = loaded_config.normalize() {
+        tracing::warn!("Failed to normalize server_url from config file: {}", e);
     }
+
+    if let Some(ref server_url) = args.server_url
+        && let Err(e) = loaded_config.parse_and_apply_server_url(server_url)
+    {
+        tracing::error!("Invalid --server-url argument '{}': {}", server_url, e);
+        return Err(anyhow::anyhow!("Invalid --server-url: {}", e));
+    }
+
+    if let Some(ref server_ip_raw) = args.server_ip {
+        if server_ip_raw.contains("://")
+            || (server_ip_raw.contains(':') && server_ip_raw.parse::<IpAddr>().is_err())
+        {
+            if let Err(e) = loaded_config.parse_and_apply_server_url(server_ip_raw) {
+                tracing::error!("Invalid --server-ip argument '{}': {}", server_ip_raw, e);
+                return Err(anyhow::anyhow!("Invalid --server-ip: {}", e));
+            }
+        } else if let Ok(ip) = server_ip_raw.parse::<IpAddr>() {
+            loaded_config.server_ip = ip;
+            loaded_config.server_host = Some(ip.to_string());
+        } else {
+            loaded_config.server_host = Some(server_ip_raw.clone());
+        }
+    }
+
     if let Some(server_port) = args.server_port {
         loaded_config.server_port = server_port;
     }

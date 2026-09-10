@@ -27,9 +27,17 @@ pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Configuration {
     /// IP address of the audio server to connect to (supports IPv4 or IPv6).
+    #[serde(default = "default_server_ip")]
     pub server_ip: IpAddr,
     /// Port number of the audio server.
+    #[serde(default = "default_server_port")]
     pub server_port: u16,
+    /// Hostname or domain name override for the audio server (e.g. "localhost", "daemon.example.com").
+    #[serde(default)]
+    pub server_host: Option<String>,
+    /// Server URL override string (e.g. "http://127.0.0.1:15000", "https://daemon.example.com:15000").
+    #[serde(default, rename = "server_url")]
+    pub server_url_override: Option<String>,
     /// STUN server URL for NAT traversal.
     #[serde(default = "default_stun_server")]
     pub stun_server: String,
@@ -54,6 +62,14 @@ pub struct Configuration {
     pub output_device: Option<String>,
 }
 
+fn default_server_ip() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+}
+
+fn default_server_port() -> u16 {
+    15000
+}
+
 fn default_use_tls() -> bool {
     true
 }
@@ -63,41 +79,156 @@ fn default_stun_server() -> String {
 }
 
 impl Configuration {
-    /// Construct full HTTP/HTTPS server base URL according to TLS settings and server IP.
-    pub fn server_url(&self) -> String {
-        let scheme = if self.use_tls {
-            "https"
-        } else if self.server_ip.is_loopback() {
-            "http"
+    /// Parse and apply a server URL or host:port specification string.
+    ///
+    /// Accepts formats like:
+    /// - `http://127.0.0.1:15000`
+    /// - `https://daemon.example.com:8443`
+    /// - `http://localhost:15000`
+    /// - `ws://127.0.0.1:15000`
+    /// - `wss://daemon.example.com:8443`
+    /// - `127.0.0.1:15000`
+    /// - `127.0.0.1`
+    /// - `daemon.example.com:15000`
+    pub fn parse_and_apply_server_url(&mut self, input: &str) -> Result<(), String> {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return Err("Server URL cannot be empty".to_string());
+        }
+
+        let (url_to_parse, scheme_specified) = if trimmed.contains("://") {
+            (trimmed.to_string(), true)
         } else {
-            tracing::warn!(
-                "Insecure HTTP transport selected for non-loopback server IP {}",
-                self.server_ip
-            );
-            "http"
+            (format!("http://{}", trimmed), false)
         };
-        match self.server_ip {
-            IpAddr::V4(ip) => format!("{}://{}:{}", scheme, ip, self.server_port),
-            IpAddr::V6(ip) => format!("{}://[{}]:{}", scheme, ip, self.server_port),
+
+        let parsed = reqwest::Url::parse(&url_to_parse)
+            .map_err(|e| format!("Invalid server URL format '{}': {}", input, e))?;
+
+        if scheme_specified {
+            match parsed.scheme() {
+                "https" | "wss" => {
+                    self.use_tls = true;
+                }
+                "http" | "ws" => {
+                    self.use_tls = false;
+                }
+                other => {
+                    return Err(format!(
+                        "Unsupported URL scheme '{}' (must be http, https, ws, or wss)",
+                        other
+                    ));
+                }
+            }
+        }
+
+        if let Some(host_str) = parsed.host_str() {
+            let clean_host = host_str.trim_matches('[').trim_matches(']').to_string();
+            if let Ok(ip) = clean_host.parse::<IpAddr>() {
+                self.server_ip = ip;
+                self.server_host = Some(clean_host);
+            } else {
+                if clean_host.eq_ignore_ascii_case("localhost") {
+                    self.server_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+                }
+                self.server_host = Some(clean_host);
+            }
+        } else {
+            return Err(format!("No host specified in server URL '{}'", input));
+        }
+
+        if let Some(port) = parsed.port() {
+            self.server_port = port;
+        } else if scheme_specified {
+            match parsed.scheme() {
+                "https" | "wss" => self.server_port = 443,
+                "http" | "ws" => self.server_port = 80,
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Process and normalize `server_url_override` if present.
+    pub fn normalize(&mut self) -> Result<(), String> {
+        if let Some(ref raw_url) = self.server_url_override.clone()
+            && !raw_url.is_empty()
+        {
+            self.parse_and_apply_server_url(raw_url)?;
+        }
+        Ok(())
+    }
+
+    /// Helper to get the display host string (either server_host or formatted server_ip).
+    pub fn host_str(&self) -> String {
+        if let Some(ref host) = self.server_host {
+            host.clone()
+        } else {
+            match self.server_ip {
+                IpAddr::V4(ip) => ip.to_string(),
+                IpAddr::V6(ip) => format!("[{}]", ip),
+            }
         }
     }
 
-    /// Construct full WS/WSS WebSocket server URL according to TLS settings and server IP.
+    /// Construct full HTTP/HTTPS server base URL according to TLS settings, server host/IP, and port.
+    pub fn server_url(&self) -> String {
+        let host = self.host_str();
+        let is_loopback = host == "localhost"
+            || host == "127.0.0.1"
+            || host == "::1"
+            || host == "[::1]"
+            || self.server_ip.is_loopback();
+
+        let scheme = if self.use_tls {
+            "https"
+        } else if is_loopback {
+            "http"
+        } else {
+            tracing::warn!(
+                "Insecure HTTP transport selected for non-loopback server {}",
+                host
+            );
+            "http"
+        };
+
+        if (scheme == "http" && self.server_port == 80)
+            || (scheme == "https" && self.server_port == 443)
+        {
+            format!("{}://{}", scheme, host)
+        } else {
+            format!("{}://{}:{}", scheme, host, self.server_port)
+        }
+    }
+
+    /// Construct full WS/WSS WebSocket server URL according to TLS settings, server host/IP, and port.
     pub fn websocket_url(&self) -> String {
+        let host = self.host_str();
+        let is_loopback = host == "localhost"
+            || host == "127.0.0.1"
+            || host == "::1"
+            || host == "[::1]"
+            || self.server_ip.is_loopback();
+
         let scheme = if self.use_tls {
             "wss"
         } else {
-            if !self.server_ip.is_loopback() {
+            if !is_loopback {
                 tracing::warn!(
-                    "Insecure WS transport selected for non-loopback server IP {}",
-                    self.server_ip
+                    "Insecure WS transport selected for non-loopback server {}",
+                    host
                 );
             }
             "ws"
         };
-        match self.server_ip {
-            IpAddr::V4(ip) => format!("{}://{}:{}", scheme, ip, self.server_port),
-            IpAddr::V6(ip) => format!("{}://[{}]:{}", scheme, ip, self.server_port),
+
+        if (scheme == "ws" && self.server_port == 80)
+            || (scheme == "wss" && self.server_port == 443)
+        {
+            format!("{}://{}", scheme, host)
+        } else {
+            format!("{}://{}:{}", scheme, host, self.server_port)
         }
     }
 
@@ -156,6 +287,16 @@ impl ConfigurationBuilder {
         self
     }
 
+    pub fn server_host(mut self, host: impl Into<String>) -> Self {
+        self.config.server_host = Some(host.into());
+        self
+    }
+
+    pub fn server_url(mut self, url: impl AsRef<str>) -> Result<Self, String> {
+        self.config.parse_and_apply_server_url(url.as_ref())?;
+        Ok(self)
+    }
+
     pub fn stun_server(mut self, stun: impl Into<String>) -> Self {
         self.config.stun_server = stun.into();
         self
@@ -187,6 +328,8 @@ impl Default for Configuration {
         Self {
             server_ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             server_port: 15000,
+            server_host: None,
+            server_url_override: None,
             stun_server: default_stun_server(),
             sample_rate: 48000,
             channels: 1,
@@ -248,6 +391,21 @@ mod tests {
     }
 
     #[test]
+    fn test_configuration_deserialization_with_server_url() {
+        let toml_str = r#"
+            server_url = "http://192.168.1.50:16000"
+            sample_rate = 48000
+            channels = 1
+        "#;
+        let mut config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
+        config.normalize().expect("Normalize should succeed");
+        assert_eq!(config.server_url(), "http://192.168.1.50:16000");
+        assert_eq!(config.server_port, 16000);
+        assert!(!config.use_tls);
+        assert_eq!(config.server_ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 50)));
+    }
+
+    #[test]
     fn test_configuration_tls_scheme() {
         let mut config = Configuration::default();
         // Default loopback with use_tls = true -> https
@@ -263,6 +421,56 @@ mod tests {
         config.use_tls = false;
         assert_eq!(config.server_url(), "http://192.168.1.100:15000");
         assert_eq!(config.websocket_url(), "ws://192.168.1.100:15000");
+    }
+
+    #[test]
+    fn test_parse_and_apply_server_url() {
+        let mut config = Configuration::default();
+
+        // 1. Full HTTP URL
+        config
+            .parse_and_apply_server_url("http://192.168.1.50:16000")
+            .unwrap();
+        assert!(!config.use_tls);
+        assert_eq!(config.server_port, 16000);
+        assert_eq!(config.server_ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 50)));
+        assert_eq!(config.server_url(), "http://192.168.1.50:16000");
+
+        // 2. HTTPS Domain URL
+        config
+            .parse_and_apply_server_url("https://daemon.example.com:8443")
+            .unwrap();
+        assert!(config.use_tls);
+        assert_eq!(config.server_port, 8443);
+        assert_eq!(config.server_host.as_deref(), Some("daemon.example.com"));
+        assert_eq!(config.server_url(), "https://daemon.example.com:8443");
+
+        // 3. Localhost HTTP
+        config
+            .parse_and_apply_server_url("http://localhost:15000")
+            .unwrap();
+        assert!(!config.use_tls);
+        assert_eq!(config.server_port, 15000);
+        assert_eq!(config.server_ip, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(config.server_url(), "http://localhost:15000");
+
+        // 4. IP with port (no scheme)
+        config.parse_and_apply_server_url("10.0.0.5:17000").unwrap();
+        assert_eq!(config.server_port, 17000);
+        assert_eq!(config.server_ip, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)));
+
+        // 5. Scheme default ports
+        config
+            .parse_and_apply_server_url("https://example.com")
+            .unwrap();
+        assert_eq!(config.server_port, 443);
+        assert_eq!(config.server_url(), "https://example.com");
+
+        config
+            .parse_and_apply_server_url("http://example.com")
+            .unwrap();
+        assert_eq!(config.server_port, 80);
+        assert_eq!(config.server_url(), "http://example.com");
     }
 
     #[test]
@@ -300,5 +508,12 @@ mod tests {
         assert_eq!(config.sample_rate, 44100);
         assert_eq!(config.channels, 2);
         assert_eq!(config.stun_server, "stun:stun.l.google.com:19302");
+
+        let url_config = ConfigurationBuilder::new()
+            .server_url("http://192.168.1.100:15000")
+            .expect("URL parse should succeed")
+            .build()
+            .expect("Build should succeed");
+        assert_eq!(url_config.server_url(), "http://192.168.1.100:15000");
     }
 }
