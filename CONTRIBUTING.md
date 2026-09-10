@@ -78,19 +78,19 @@ Before submitting a Pull Request or opening a commit, all contributions MUST pas
    ```bash
    cargo test --workspace
    ```
-2. **Run Linter (Zero Warnings Allowed)**:
+1. **Run Linter (Zero Warnings Allowed)**:
    ```bash
    cargo clippy --workspace -- -D warnings
    ```
-3. **Build Release Binaries**:
+1. **Build Release Binaries**:
    ```bash
    cargo build --release
    ```
-4. **Build Nix Derivation**:
+1. **Build Nix Derivation**:
    ```bash
    nix build
    ```
-5. **Format Code**:
+1. **Format Code**:
    ```bash
    treefmt
    ```
@@ -103,6 +103,6 @@ ______________________________________________________________________
    ```bash
    git checkout -b feature/your-feature-name
    ```
-2. Make your changes following the coding standards and concurrency guidelines outlined in [`AGENTS.md`](./AGENTS.md).
-3. Commit your changes with clear, descriptive commit messages.
-4. Push to your branch and open a Pull Request against `main`.
+1. Make your changes following the coding standards and concurrency guidelines outlined in [`AGENTS.md`](./AGENTS.md).
+1. Commit your changes with clear, descriptive commit messages.
+1. Push to your branch and open a Pull Request against `main`.
