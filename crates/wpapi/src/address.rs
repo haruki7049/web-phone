@@ -114,10 +114,192 @@ fn hex_decode_into(hex_str: &str, out: &mut [u8]) -> bool {
     true
 }
 
-/// Self-Sovereign Ed25519 Cryptographic Identity Keypair for wpclient / wpdaemon (WPIP-01, WPIP-02, WPIP-03).
-#[derive(Debug)]
+const BECH32_CHARSET: &[u8; 32] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+fn bech32_polymod(values: &[u32]) -> u32 {
+    let mut chk: u32 = 1;
+    for &v in values {
+        let top = chk >> 25;
+        chk = ((chk & 0x1ffffff) << 5) ^ v;
+        if (top & 1) != 0 {
+            chk ^= 0x3b6a57b2;
+        }
+        if (top & 2) != 0 {
+            chk ^= 0x26508e6d;
+        }
+        if (top & 4) != 0 {
+            chk ^= 0x1ea119fa;
+        }
+        if (top & 8) != 0 {
+            chk ^= 0x3d4233dd;
+        }
+        if (top & 16) != 0 {
+            chk ^= 0x2a1462b3;
+        }
+    }
+    chk
+}
+
+fn hrp_expand(hrp: &str) -> Vec<u32> {
+    let mut v = Vec::new();
+    for b in hrp.bytes() {
+        v.push((b >> 5) as u32);
+    }
+    v.push(0);
+    for b in hrp.bytes() {
+        v.push((b & 31) as u32);
+    }
+    v
+}
+
+fn verify_bech32_checksum(hrp: &str, data: &[u32]) -> bool {
+    let mut exp = hrp_expand(hrp);
+    exp.extend_from_slice(data);
+    bech32_polymod(&exp) == 1
+}
+
+/// Decode Bech32 encoded string into HRP and 5-bit payload data.
+pub fn decode_bech32(s: &str) -> Result<(String, Vec<u32>), String> {
+    let s_lower = s.to_lowercase();
+    let pos = s_lower.rfind('1').ok_or("Missing Bech32 separator '1'")?;
+    if pos == 0 || pos + 7 > s_lower.len() {
+        return Err("Invalid Bech32 string length".to_string());
+    }
+    let hrp = &s_lower[..pos];
+    let data_part = &s_lower[pos + 1..];
+    let mut data = Vec::with_capacity(data_part.len());
+    for c in data_part.chars() {
+        let idx = BECH32_CHARSET
+            .iter()
+            .position(|&b| b as char == c)
+            .ok_or_else(|| format!("Invalid Bech32 character: {}", c))?;
+        data.push(idx as u32);
+    }
+
+    if !verify_bech32_checksum(hrp, &data) {
+        return Err("Invalid Bech32 checksum".to_string());
+    }
+
+    if data.len() < 6 {
+        return Err("Bech32 payload too short".to_string());
+    }
+    let payload = data[..data.len() - 6].to_vec();
+    Ok((hrp.to_string(), payload))
+}
+
+/// Convert 5-bit array to 8-bit array or vice versa.
+pub fn convert_bits(
+    data: &[u32],
+    from_bits: u32,
+    to_bits: u32,
+    pad: bool,
+) -> Result<Vec<u8>, String> {
+    let mut acc: u32 = 0;
+    let mut bits: u32 = 0;
+    let mut ret = Vec::new();
+    let maxv: u32 = (1 << to_bits) - 1;
+    let max_acc: u32 = (1 << (from_bits + to_bits - 1)) - 1;
+
+    for &value in data {
+        if value >> from_bits != 0 {
+            return Err("Invalid bit value".to_string());
+        }
+        acc = ((acc << from_bits) | value) & max_acc;
+        bits += from_bits;
+        while bits >= to_bits {
+            bits -= to_bits;
+            ret.push(((acc >> bits) & maxv) as u8);
+        }
+    }
+
+    if pad {
+        if bits > 0 {
+            ret.push(((acc << (to_bits - bits)) & maxv) as u8);
+        }
+    } else if bits >= from_bits || ((acc << (to_bits - bits)) & maxv) != 0 {
+        return Err("Invalid padding in Bech32 bit conversion".to_string());
+    }
+
+    Ok(ret)
+}
+
+fn create_bech32_checksum(hrp: &str, data: &[u32]) -> Vec<u32> {
+    let mut values = hrp_expand(hrp);
+    values.extend_from_slice(data);
+    values.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+    let polymod = bech32_polymod(&values) ^ 1;
+    let mut ret = Vec::with_capacity(6);
+    for i in 0..6 {
+        ret.push((polymod >> (5 * (5 - i))) & 31);
+    }
+    ret
+}
+
+/// Encode 8-bit byte slice to Bech32 string with specified HRP prefix.
+pub fn encode_bech32(hrp: &str, data_8bit: &[u8]) -> Result<String, String> {
+    let u32_data: Vec<u32> = data_8bit.iter().map(|&b| b as u32).collect();
+    let data_5bit = convert_bits(&u32_data, 8, 5, true)?;
+    let data_5bit_u32: Vec<u32> = data_5bit.iter().map(|&b| b as u32).collect();
+    let checksum = create_bech32_checksum(hrp, &data_5bit_u32);
+    let mut combined = data_5bit_u32;
+    combined.extend_from_slice(&checksum);
+
+    let mut result = String::new();
+    result.push_str(hrp);
+    result.push('1');
+    for v in combined {
+        result.push(BECH32_CHARSET[v as usize] as char);
+    }
+    Ok(result)
+}
+
+/// Parse a Nostr key (`nsec1...`, `npub1...`, or 64-character Hex string) into 32 raw bytes.
+pub fn parse_nostr_key_to_bytes(input: &str) -> Result<[u8; 32], String> {
+    let trimmed = input.trim();
+    if trimmed.len() == 64 {
+        let bytes = hex::decode(trimmed).map_err(|e| format!("Invalid hex: {}", e))?;
+        let arr = <[u8; 32]>::try_from(bytes.as_slice())
+            .map_err(|_| "Invalid hex byte length".to_string())?;
+        return Ok(arr);
+    }
+
+    if trimmed.starts_with("nsec1") || trimmed.starts_with("npub1") {
+        let (hrp, data_5bit) = decode_bech32(trimmed)?;
+        if hrp != "nsec" && hrp != "npub" {
+            return Err(format!("Unsupported Bech32 HRP prefix: {}", hrp));
+        }
+        let data_8bit = convert_bits(&data_5bit, 5, 8, false)?;
+        let arr = <[u8; 32]>::try_from(data_8bit.as_slice()).map_err(|_| {
+            format!(
+                "Invalid Bech32 payload length: expected 32 bytes, got {}",
+                data_8bit.len()
+            )
+        })?;
+        return Ok(arr);
+    }
+
+    Err("Invalid Nostr key format (expected 64-char Hex or nsec1.../npub1... Bech32)".to_string())
+}
+
+#[derive(Clone)]
+enum KeypairKind {
+    Ed25519(ed25519_dalek::SigningKey),
+    Secp256k1(k256::schnorr::SigningKey),
+}
+
+impl fmt::Debug for KeypairKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            KeypairKind::Ed25519(_) => write!(f, "KeypairKind::Ed25519(...)"),
+            KeypairKind::Secp256k1(_) => write!(f, "KeypairKind::Secp256k1(...)"),
+        }
+    }
+}
+
+/// Cryptographic Identity Keypair for wpclient / wpdaemon supporting Ed25519 (WPIP-01..03) and Secp256k1 / Nostr (WPIP-16).
+#[derive(Debug, Clone)]
 pub struct UserKeypair {
-    signing_key: ed25519_dalek::SigningKey,
+    kind: KeypairKind,
 }
 
 impl UserKeypair {
@@ -125,64 +307,120 @@ impl UserKeypair {
     pub fn generate() -> Self {
         let mut rng = rand::rngs::OsRng;
         let signing_key = ed25519_dalek::SigningKey::generate(&mut rng);
-        Self { signing_key }
+        Self {
+            kind: KeypairKind::Ed25519(signing_key),
+        }
     }
-}
 
-impl Clone for UserKeypair {
-    fn clone(&self) -> Self {
-        Self::from_bytes(&self.to_bytes())
-    }
-}
-
-impl UserKeypair {
-    /// Construct `UserKeypair` from raw 32-byte secret key.
+    /// Construct Ed25519 `UserKeypair` from raw 32-byte secret key.
     pub fn from_bytes(bytes: &[u8; 32]) -> Self {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(bytes);
-        Self { signing_key }
+        Self {
+            kind: KeypairKind::Ed25519(signing_key),
+        }
+    }
+
+    /// Construct Secp256k1 / Nostr `UserKeypair` from raw 32-byte secret key.
+    pub fn from_secp256k1_bytes(bytes: &[u8; 32]) -> Result<Self, String> {
+        let signing_key = k256::schnorr::SigningKey::from_bytes(bytes)
+            .map_err(|e| format!("Invalid secp256k1 secret key: {}", e))?;
+        Ok(Self {
+            kind: KeypairKind::Secp256k1(signing_key),
+        })
+    }
+
+    /// Construct Secp256k1 / Nostr `UserKeypair` from `nsec1...` Bech32 or 64-char Hex string.
+    pub fn from_nostr_key(key_str: &str) -> Result<Self, String> {
+        let bytes = parse_nostr_key_to_bytes(key_str)?;
+        Self::from_secp256k1_bytes(&bytes)
     }
 
     /// Return raw 32-byte secret key.
     pub fn to_bytes(&self) -> [u8; 32] {
-        self.signing_key.to_bytes()
+        match &self.kind {
+            KeypairKind::Ed25519(sk) => sk.to_bytes(),
+            KeypairKind::Secp256k1(sk) => {
+                let bytes: [u8; 32] = sk.to_bytes().into();
+                bytes
+            }
+        }
     }
 
-    /// Get `UserAddress` representing this keypair's 32-byte Ed25519 Public Key (64 hex string).
+    /// Get `UserAddress` representing this keypair's public key (64 hex string).
     pub fn public_key_address(&self) -> UserAddress {
-        let verifying_key = self.signing_key.verifying_key();
-        UserAddress::from_bytes(verifying_key.to_bytes())
+        match &self.kind {
+            KeypairKind::Ed25519(sk) => {
+                let verifying_key = sk.verifying_key();
+                UserAddress::from_bytes(verifying_key.to_bytes())
+            }
+            KeypairKind::Secp256k1(sk) => {
+                let verifying_key = sk.verifying_key();
+                let bytes = verifying_key.to_bytes();
+                UserAddress::new(hex::encode(bytes))
+            }
+        }
     }
 
-    /// Sign arbitrary byte message using Ed25519 secret key, returning 64-byte hex signature string.
+    /// Sign arbitrary byte message using secret key, returning hex signature string.
     pub fn sign(&self, message: &[u8]) -> String {
-        use ed25519_dalek::Signer;
-        let sig = self.signing_key.sign(message);
-        hex_encode(&sig.to_bytes())
+        match &self.kind {
+            KeypairKind::Ed25519(sk) => {
+                use ed25519_dalek::Signer;
+                let sig = sk.sign(message);
+                hex_encode(&sig.to_bytes())
+            }
+            KeypairKind::Secp256k1(sk) => {
+                use k256::schnorr::signature::Signer;
+                let sig: k256::schnorr::Signature = sk.sign(message);
+                hex::encode(sig.to_bytes())
+            }
+        }
     }
 
-    /// Cryptographically verify an Ed25519 signature hex string for a given `UserAddress` public key.
+    /// Check if keypair is Secp256k1 / Nostr key.
+    pub fn is_secp256k1(&self) -> bool {
+        matches!(self.kind, KeypairKind::Secp256k1(_))
+    }
+
+    /// Cryptographically verify an Ed25519 or Secp256k1 signature hex string for a given `UserAddress` public key.
     pub fn verify(pubkey_address: &UserAddress, message: &[u8], signature_hex: &str) -> bool {
         use ed25519_dalek::Verifier;
         let pubkey_bytes = pubkey_address.to_bytes();
-        let Ok(verifying_key) = ed25519_dalek::VerifyingKey::from_bytes(&pubkey_bytes) else {
-            return false;
-        };
-
-        if signature_hex.len() != 128 {
-            return false;
+        if signature_hex.len() == 128 {
+            let Ok(verifying_key) = ed25519_dalek::VerifyingKey::from_bytes(&pubkey_bytes) else {
+                return false;
+            };
+            let mut sig_buf = [0u8; 64];
+            if hex_decode_into(signature_hex, &mut sig_buf)
+                && verifying_key
+                    .verify(message, &ed25519_dalek::Signature::from_bytes(&sig_buf))
+                    .is_ok()
+            {
+                return true;
+            }
         }
 
-        let mut sig_buf = [0u8; 64];
-        if !hex_decode_into(signature_hex, &mut sig_buf) {
-            return false;
+        if let Ok(pubkey_bytes) = hex::decode(&pubkey_address.id) {
+            let Ok(verifying_key) = k256::schnorr::VerifyingKey::from_bytes(&pubkey_bytes) else {
+                return false;
+            };
+            let Ok(sig_bytes) = hex::decode(signature_hex) else {
+                return false;
+            };
+            let Ok(sig) = k256::schnorr::Signature::try_from(sig_bytes.as_slice()) else {
+                return false;
+            };
+            use k256::schnorr::signature::Verifier;
+            if verifying_key.verify(message, &sig).is_ok() {
+                return true;
+            }
         }
 
-        let sig = ed25519_dalek::Signature::from_bytes(&sig_buf);
-        verifying_key.verify(message, &sig).is_ok()
+        false
     }
 }
 
-/// Build HTTP `Authorization` header value per WPIP-02 / WPIP-03: `WP-Ed25519 <PubKeyHex>:<Timestamp>:<SignatureHex>`
+/// Build HTTP `Authorization` header value per WPIP-02 / WPIP-03 (`WP-Ed25519`) or WPIP-16 (`WP-Secp256k1`).
 pub fn build_authorization_header(keypair: &UserKeypair, sdp_offer: &str) -> (u64, String) {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -190,8 +428,14 @@ pub fn build_authorization_header(keypair: &UserKeypair, sdp_offer: &str) -> (u6
         .as_secs();
     let payload = format!("{}:{}", timestamp, sdp_offer);
     let sig_hex = keypair.sign(payload.as_bytes());
+    let scheme = if keypair.is_secp256k1() {
+        "WP-Secp256k1"
+    } else {
+        "WP-Ed25519"
+    };
     let header = format!(
-        "WP-Ed25519 {}:{}:{}",
+        "{} {}:{}:{}",
+        scheme,
         keypair.public_key_address().id,
         timestamp,
         sig_hex
@@ -423,5 +667,29 @@ mod tests {
         let verified_addr = verify_secp256k1_authorization_header(&header, sdp)
             .expect("Schnorr verification should pass");
         assert_eq!(verified_addr.id, pubkey_hex);
+    }
+
+    #[test]
+    fn test_nostr_keypair_and_bech32() {
+        let hex_secret = "3bf0e6984b71239c4a86161427a206a1ed93ee14e04ed96f2a893339f4ad1600";
+        let keypair = UserKeypair::from_nostr_key(hex_secret).expect("Failed to parse hex secret");
+        assert!(keypair.is_secp256k1());
+
+        let sdp = "v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\n";
+        let (_, header) = build_authorization_header(&keypair, sdp);
+        assert!(header.starts_with("WP-Secp256k1 "));
+
+        let verified_addr = verify_secp256k1_authorization_header(&header, sdp)
+            .expect("Verification of generated WP-Secp256k1 header failed");
+        assert_eq!(verified_addr, keypair.public_key_address());
+
+        // Test Bech32 nsec encoding and decoding roundtrip
+        let secret_bytes = hex::decode(hex_secret).unwrap();
+        let nsec_encoded = encode_bech32("nsec", &secret_bytes).expect("Failed to encode nsec");
+        assert!(nsec_encoded.starts_with("nsec1"));
+
+        let nostr_kp = UserKeypair::from_nostr_key(&nsec_encoded).expect("Failed to parse nsec");
+        assert!(nostr_kp.is_secp256k1());
+        assert_eq!(nostr_kp.public_key_address(), keypair.public_key_address());
     }
 }

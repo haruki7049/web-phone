@@ -58,7 +58,7 @@ jobs:
           file: ./Containerfile
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,"name=ghcr.io/${{ github.repository }}/wpdaemon",push-by-digest=true,name-canonical=true
+          outputs: type=image,"name=ghcr.io/${{ github.repository }}/wpdaemon",push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -110,7 +110,14 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          # shellcheck disable=SC2046,SC2086
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(digits=$(printf 'ghcr.io/${{ github.repository }}/wpdaemon@sha256:%s ' *) && echo "$digits")
+          echo "Contents of /tmp/digests:"
+          ls -la
 
+          DIGESTS=$(find . -maxdepth 1 -type f -exec basename {} \; | grep -v '^\.' | sed 's/^/ghcr.io\/${{ github.repository }}\/wpdaemon@sha256:/' | tr '\n' ' ')
+          if [ -z "$DIGESTS" ]; then
+            echo "Error: No digests found in /tmp/digests"
+            exit 1
+          fi
+
+          # shellcheck disable=SC2046,SC2086
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") $DIGESTS

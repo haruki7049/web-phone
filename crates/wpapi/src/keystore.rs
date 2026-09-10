@@ -38,15 +38,21 @@ pub struct CryptoMeta {
     pub ciphertext: String,
 }
 
+fn default_key_type() -> String {
+    "ed25519".to_string()
+}
+
 /// Encrypted Client Key Store JSON format (WPIP-14).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EncryptedKeyStore {
     pub version: u32,
     pub user_address: String,
+    #[serde(default = "default_key_type")]
+    pub key_type: String,
     pub crypto: CryptoMeta,
 }
 
-/// Save an Ed25519 UserKeypair encrypted with a user passphrase to disk (WPIP-14).
+/// Save an Ed25519 or Secp256k1 UserKeypair encrypted with a user passphrase to disk (WPIP-14).
 pub fn save_encrypted_keystore(
     keypair: &UserKeypair,
     passphrase: &str,
@@ -76,9 +82,16 @@ pub fn save_encrypted_keystore(
         .encrypt(&nonce, raw_secret.as_slice())
         .map_err(|e| format!("AES-256-GCM encryption failed: {}", e))?;
 
+    let key_type = if keypair.is_secp256k1() {
+        "secp256k1".to_string()
+    } else {
+        "ed25519".to_string()
+    };
+
     let store = EncryptedKeyStore {
         version: 1,
         user_address: keypair.public_key_address().id,
+        key_type,
         crypto: CryptoMeta {
             kdf: "argon2id".into(),
             kdf_params: KdfParams {
@@ -100,7 +113,7 @@ pub fn save_encrypted_keystore(
     Ok(())
 }
 
-/// Load and decrypt an Ed25519 UserKeypair from an encrypted keystore file (WPIP-14).
+/// Load and decrypt a UserKeypair from an encrypted keystore file (WPIP-14).
 pub fn load_encrypted_keystore(passphrase: &str, path: &Path) -> Result<UserKeypair, String> {
     let content =
         fs::read_to_string(path).map_err(|e| format!("Failed to read keystore file: {}", e))?;
@@ -155,8 +168,13 @@ pub fn load_encrypted_keystore(passphrase: &str, path: &Path) -> Result<UserKeyp
 
     let secret_array: [u8; 32] = decrypted_bytes
         .try_into()
-        .map_err(|_| "Decrypted payload length is invalid for Ed25519 secret key")?;
-    let keypair = UserKeypair::from_bytes(&secret_array);
+        .map_err(|_| "Decrypted payload length is invalid for secret key")?;
+
+    let keypair = match store.key_type.as_str() {
+        "secp256k1" | "nostr" => UserKeypair::from_secp256k1_bytes(&secret_array)
+            .map_err(|e| format!("Failed to create secp256k1 keypair: {}", e))?,
+        _ => UserKeypair::from_bytes(&secret_array),
+    };
 
     if keypair.public_key_address().id != store.user_address {
         return Err("Decrypted public key does not match keystore user_address".into());
@@ -210,6 +228,7 @@ mod tests {
         let mut store = EncryptedKeyStore {
             version: 99,
             user_address: "a1b2c3d4e5f6".into(),
+            key_type: "ed25519".into(),
             crypto: CryptoMeta {
                 kdf: "argon2id".into(),
                 kdf_params: KdfParams {
@@ -254,6 +273,7 @@ mod tests {
         let bad_store = EncryptedKeyStore {
             version: 1,
             user_address: "a1b2c3d4e5f6".into(),
+            key_type: "ed25519".into(),
             crypto: CryptoMeta {
                 kdf: "argon2id".into(),
                 kdf_params: KdfParams {

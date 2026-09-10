@@ -49,6 +49,10 @@ struct CLIArgs {
     #[arg(long)]
     passphrase: Option<String>,
 
+    /// Nostr secret key (nsec1... Bech32 or 64-char Hex) for Nostr/secp256k1 identity (WPIP-16).
+    #[arg(long, short = 'n', alias = "nsec")]
+    nostr_key: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -72,6 +76,10 @@ enum Commands {
         /// Passphrase for decrypting or creating WPIP-14 encrypted keystore
         #[arg(long)]
         passphrase: Option<String>,
+
+        /// Nostr secret key (nsec1... Bech32 or 64-char Hex) for Nostr/secp256k1 identity (WPIP-16)
+        #[arg(long, short = 'n', alias = "nsec")]
+        nostr_key: Option<String>,
     },
     /// Join an SFU group audio room
     Room {
@@ -86,6 +94,10 @@ enum Commands {
         /// Passphrase for decrypting or creating WPIP-14 encrypted keystore
         #[arg(long)]
         passphrase: Option<String>,
+
+        /// Nostr secret key (nsec1... Bech32 or 64-char Hex) for Nostr/secp256k1 identity (WPIP-16)
+        #[arg(long, short = 'n', alias = "nsec")]
+        nostr_key: Option<String>,
     },
     /// List all registered peer user addresses connected to the daemon
     ListAddresses,
@@ -96,17 +108,42 @@ enum Commands {
 fn load_or_create_client_keypair(
     anonymous: bool,
     passphrase_override: Option<&str>,
+    nostr_key_override: Option<&str>,
 ) -> wpapi::UserKeypair {
-    if anonymous {
-        info!("Running in anonymous/ephemeral mode with temporary Ed25519 identity key...");
-        return wpapi::UserKeypair::generate();
-    }
+    let nostr_key_input = nostr_key_override
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("WPCLIENT_NOSTR_KEY").ok());
 
     let keystore_path = wpapi::get_default_keystore_path();
     let passphrase = passphrase_override
         .map(|s| s.to_string())
         .or_else(|| std::env::var("WPCLIENT_PASSPHRASE").ok())
         .unwrap_or_else(|| "default_wpclient_passphrase_key_12345".to_string());
+
+    if let Some(ref nostr_key) = nostr_key_input {
+        match wpapi::UserKeypair::from_nostr_key(nostr_key) {
+            Ok(keypair) => {
+                info!(
+                    "Loaded Nostr secp256k1 identity key: {}",
+                    keypair.public_key_address()
+                );
+                if let Err(e) =
+                    wpapi::save_encrypted_keystore(&keypair, &passphrase, &keystore_path)
+                {
+                    tracing::warn!("Failed to save Nostr encrypted keystore: {}", e);
+                }
+                return keypair;
+            }
+            Err(e) => {
+                tracing::error!("Invalid Nostr key provided ({}), falling back...", e);
+            }
+        }
+    }
+
+    if anonymous {
+        info!("Running in anonymous/ephemeral mode with temporary Ed25519 identity key...");
+        return wpapi::UserKeypair::generate();
+    }
 
     if keystore_path.exists() {
         match wpapi::load_encrypted_keystore(&passphrase, &keystore_path) {
@@ -174,6 +211,7 @@ async fn main() -> Result<()> {
 
     let global_anonymous = args.anonymous;
     let global_passphrase = args.passphrase.as_deref();
+    let global_nostr_key = args.nostr_key.as_deref();
 
     match args.command {
         Some(Commands::Call {
@@ -181,13 +219,15 @@ async fn main() -> Result<()> {
             auto_accept,
             anonymous,
             passphrase,
+            nostr_key,
         }) => {
             if auto_accept {
                 loaded_config.auto_accept = true;
             }
             let is_anon = global_anonymous || anonymous;
             let pass = passphrase.as_deref().or(global_passphrase);
-            let keypair = load_or_create_client_keypair(is_anon, pass);
+            let nk = nostr_key.as_deref().or(global_nostr_key);
+            let keypair = load_or_create_client_keypair(is_anon, pass, nk);
 
             if let Some(target) = to {
                 info!("Starting direct call to target: {}", target);
@@ -200,10 +240,12 @@ async fn main() -> Result<()> {
             id,
             anonymous,
             passphrase,
+            nostr_key,
         }) => {
             let is_anon = global_anonymous || anonymous;
             let pass = passphrase.as_deref().or(global_passphrase);
-            let keypair = load_or_create_client_keypair(is_anon, pass);
+            let nk = nostr_key.as_deref().or(global_nostr_key);
+            let keypair = load_or_create_client_keypair(is_anon, pass, nk);
             info!(
                 "Joining room: {} with address {}",
                 id,
@@ -218,7 +260,11 @@ async fn main() -> Result<()> {
             list_audio_devices()?;
         }
         None => {
-            let keypair = load_or_create_client_keypair(global_anonymous, global_passphrase);
+            let keypair = load_or_create_client_keypair(
+                global_anonymous,
+                global_passphrase,
+                global_nostr_key,
+            );
             wpclient::tui::run_tui_with_keypair(loaded_config, Some(keypair)).await?;
         }
     }
