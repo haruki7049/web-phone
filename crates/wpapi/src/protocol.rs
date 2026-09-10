@@ -4,7 +4,6 @@
 //! strictly conforming to WPIP specifications (WPIP-01 through WPIP-21).
 
 use crate::address::UserAddress;
-use std::fmt;
 
 /// Default Opus Codec ID as defined in WPIP-04.
 pub const CODEC_OPUS: u8 = 0x01;
@@ -13,42 +12,27 @@ pub const CODEC_PCM_F32LE: u8 = 0x00;
 /// PCM 16-bit signed integer LE Codec ID.
 pub const CODEC_PCM_S16LE: u8 = 0x02;
 
+use thiserror::Error;
+
 /// Errors that can occur during protocol packet decoding.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ProtocolError {
     /// Packet data is empty.
+    #[error("Packet data is empty")]
     EmptyPacket,
     /// Unknown or unsupported packet header byte.
+    #[error("Unknown packet type: 0x{0:02x}")]
     UnknownPacketType(u8),
     /// Packet length is less than expected minimum.
+    #[error(
+        "Insufficient packet length for type 0x{packet_type:02x}: got {actual} bytes, expected at least {expected}"
+    )]
     InsufficientLength {
         packet_type: u8,
         actual: usize,
         expected: usize,
     },
 }
-
-impl fmt::Display for ProtocolError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyPacket => write!(f, "Packet data is empty"),
-            Self::UnknownPacketType(t) => write!(f, "Unknown packet type: 0x{:02x}", t),
-            Self::InsufficientLength {
-                packet_type,
-                actual,
-                expected,
-            } => {
-                write!(
-                    f,
-                    "Insufficient packet length for type 0x{:02x}: got {} bytes, expected at least {}",
-                    packet_type, actual, expected
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for ProtocolError {}
 
 /// High-level, type-safe representation of DataChannel protocol messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
