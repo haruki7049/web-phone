@@ -404,7 +404,6 @@ pub unsafe extern "C" fn wpapi_list_addresses(
             return -1;
         }
         let cfg = unsafe { &(*config).0 };
-        let endpoint = format!("{}/addresses", cfg.server_url());
 
         let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
