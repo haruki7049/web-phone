@@ -80,8 +80,12 @@ ip = "127.0.0.1"
 port = 15000
 stun_port = 3478
 turn_enabled = true
+turn_server_secret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # Secret for STUN/TURN HMAC authentication (WPIP-10)
 peers = ["http://127.0.0.1:15001"]
 node_id = 1
+max_connections = 1000
+max_mesh_peers = 16
+max_room_members = 50
 ```
 
 #### Client Configuration (`config.toml`)
@@ -93,6 +97,9 @@ stun_server = "stun:127.0.0.1:3478"
 sample_rate = 48000
 channels = 1
 allow_echoback = false
+auto_accept = false
+input_device = "Microphone" # Optional device name substring
+output_device = "Speaker"   # Optional device name substring
 ```
 
 ## Architecture
