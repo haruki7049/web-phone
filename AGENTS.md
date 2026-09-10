@@ -8,10 +8,10 @@ This file provides instructions and guidelines for AI agents working in this cod
 
 ### Workspace Architecture
 
-- **`crates/wpdaemon`**: WebRTC signaling server daemon, STUN/TURN UDP server, Selective Forwarding Unit (SFU) for group calls (WPIP-08), Keep-Alive heartbeat manager (WPIP-09), and peer mesh node (WPIP-05).
-- **`crates/wpapi`**: Core WebRTC peer connection manager, protocol packet codec (`ProtocolPacket`), CPAL audio capture/playback engine, audio resampler, and C FFI bindings.
-- **`crates/wpclient`**: CLI client binary supporting direct 1-to-1 calls (`wpclient call`) and group room calls (`wpclient room`).
-- **`docs/`**: WPIP specifications (`WPIP-01.md` through `WPIP-14.md`).
+- **`crates/wpdaemon`**: WebRTC signaling server daemon, STUN/TURN UDP server (WPIP-06), Selective Forwarding Unit (SFU) for group calls (WPIP-08), Keep-Alive heartbeat manager (WPIP-09), rate limiter (WPIP-15), and peer mesh node (WPIP-05).
+- **`crates/wpapi`**: Core WebRTC peer connection manager, protocol packet codec (`ProtocolPacket`), CPAL audio capture/playback engine, audio resampler, encrypted keystore (WPIP-14), Nostr/secp256k1 auth (WPIP-16), and C FFI bindings.
+- **`crates/wpclient`**: CLI client binary supporting direct 1-to-1 calls (`wpclient call`) and group room calls (`wpclient room`) with TUI interface.
+- **`docs/`**: WPIP specifications (`WPIP-01.md` through `WPIP-20.md`).
 
 ______________________________________________________________________
 
