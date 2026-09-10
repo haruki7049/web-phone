@@ -3,6 +3,7 @@
 pub mod address;
 pub mod audio;
 pub mod call;
+pub mod client;
 pub mod config;
 pub mod ffi;
 pub mod keystore;
@@ -21,6 +22,7 @@ pub use address::{
     verify_secp256k1_authorization_header_with_cache,
 };
 pub use audio::AudioEngine;
+pub use client::DaemonApiClient;
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 pub use ffi::*;
 pub use keystore::{
