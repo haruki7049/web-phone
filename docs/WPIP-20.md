@@ -36,5 +36,22 @@ ______________________________________________________________________
 
 ## 2. Adaptive Quality & Bandwidth Management
 
-- Clients SHOULD dynamically adjust frame rates (e.g., 15 fps for screen sharing, 30 fps for video) and resolutions based on DataChannel throughput feedback.
+- Clients SHOULD dynamically adjust frame rates and resolutions based on DataChannel throughput feedback.
 - `wpdaemon` SFU implementations MAY selectively drop video frames for low-bandwidth participants while preserving high-priority audio forwarding.
+
+______________________________________________________________________
+
+## 3. Recommended Performance & Resource Control Guidelines
+
+To prevent network bandwidth saturation and CPU exhaustion when streaming video tracks alongside real-time audio, implementations RECOMMENDED adhering to the following guidelines:
+
+1. **Frame Rate Capping for Screen Sharing**:
+   - Clients SHOULD cap screen capture frame rates to **10–15 fps**. This preserves clear text legibility for code and documents while reducing bandwidth consumption by up to 50% compared to 30 fps.
+
+2. **Concurrent Stream Limits per Room**:
+   - `wpdaemon` SFU implementations RECOMMENDED enforcing a maximum limit on active concurrent video/screen sharing streams per room (RECOMMENDED default: **1 to 2 active streams per room**).
+   - Limiting active video publishers prevents exponential bandwidth amplification across group room participants.
+
+3. **Priority-Based Packet Forwarding**:
+   - `wpdaemon` SFU nodes SHOULD assign higher routing priority to audio packets (`0x02`, `0x10`) than video packets (`0x14`).
+   - During network congestion, `wpdaemon` MAY selectively drop video frame payloads (`0x14`) to guarantee uninterrupted, low-latency audio transmission.
