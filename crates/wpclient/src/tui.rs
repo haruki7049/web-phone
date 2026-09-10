@@ -548,6 +548,29 @@ fn handle_app_event(app: &mut TuiApp, evt: AppEvent) {
     }
 }
 
+/// User actions triggered via TUI keyboard input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppAction {
+    Quit,
+    StartStandby,
+    StopStandby,
+    RenewIdentity,
+    EnterCallInput,
+    EnterRoomInput,
+    ToggleMute,
+    ToggleAutoAccept,
+    Hangup,
+    FetchRegisteredAddresses,
+    SubmitCallInput,
+    SubmitRoomInput,
+    CancelInputMode,
+    InputChar(char),
+    BackspaceInput,
+    AcceptIncomingCall,
+    RejectIncomingCall,
+    None,
+}
+
 fn renew_identity(app: &mut TuiApp) {
     if let Some(tx) = app.cancel_tx.take() {
         let _ = tx.send(());
@@ -559,115 +582,140 @@ fn renew_identity(app: &mut TuiApp) {
     start_standby(app);
 }
 
-async fn handle_key_input(app: &mut TuiApp, key: crossterm::event::KeyEvent) -> Result<bool> {
-    // Global quit with Ctrl+C
+/// Parse a raw keyboard event into a high-level `AppAction` depending on the current input mode.
+pub fn parse_key_event(input_mode: &InputMode, key: crossterm::event::KeyEvent) -> AppAction {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-        return Ok(true);
+        return AppAction::Quit;
     }
 
-    match app.input_mode {
+    match input_mode {
         InputMode::Normal => match key.code {
-            KeyCode::Char('q') => return Ok(true),
-            KeyCode::Char('s') => start_standby(app),
-            KeyCode::Char('i') | KeyCode::Char('I') => stop_standby(app),
+            KeyCode::Char('q') => AppAction::Quit,
+            KeyCode::Char('s') => AppAction::StartStandby,
+            KeyCode::Char('i') | KeyCode::Char('I') => AppAction::StopStandby,
             KeyCode::Char('u') | KeyCode::Char('k') | KeyCode::Char('U') | KeyCode::Char('K') => {
-                renew_identity(app);
+                AppAction::RenewIdentity
             }
-            KeyCode::Char('c') => {
-                app.input_buffer.clear();
-                app.input_mode = InputMode::CallInput;
-            }
-            KeyCode::Char('r') => {
-                app.input_buffer.clear();
-                app.input_mode = InputMode::RoomInput;
-            }
-            KeyCode::Char('m') => {
-                app.is_muted = !app.is_muted;
-                let status = if app.is_muted { "Muted" } else { "Unmuted" };
-                app.add_log(format!("Microphone is now {}", status));
-            }
-            KeyCode::Char('a') | KeyCode::Char('A') => {
-                app.config.auto_accept = !app.config.auto_accept;
-                let status = if app.config.auto_accept {
-                    "enabled"
-                } else {
-                    "disabled"
-                };
-                app.add_log(format!("Auto Accept is now {}", status));
-            }
-            KeyCode::Char('h') | KeyCode::Char('x') => {
-                app.hangup();
-            }
-            KeyCode::Char('l') => {
-                fetch_registered_addresses(app);
-            }
-            _ => {}
+            KeyCode::Char('c') => AppAction::EnterCallInput,
+            KeyCode::Char('r') => AppAction::EnterRoomInput,
+            KeyCode::Char('m') => AppAction::ToggleMute,
+            KeyCode::Char('a') | KeyCode::Char('A') => AppAction::ToggleAutoAccept,
+            KeyCode::Char('h') | KeyCode::Char('x') => AppAction::Hangup,
+            KeyCode::Char('l') => AppAction::FetchRegisteredAddresses,
+            _ => AppAction::None,
         },
         InputMode::CallInput => match key.code {
-            KeyCode::Enter => {
-                let target = app.input_buffer.trim().to_string();
-                app.input_mode = InputMode::Normal;
-                if !target.is_empty() {
-                    start_call(app, target);
-                }
-            }
-            KeyCode::Esc => {
-                app.input_mode = InputMode::Normal;
-            }
-            KeyCode::Char(c) => {
-                app.input_buffer.push(c);
-            }
-            KeyCode::Backspace => {
-                app.input_buffer.pop();
-            }
-            _ => {}
+            KeyCode::Enter => AppAction::SubmitCallInput,
+            KeyCode::Esc => AppAction::CancelInputMode,
+            KeyCode::Char(c) => AppAction::InputChar(c),
+            KeyCode::Backspace => AppAction::BackspaceInput,
+            _ => AppAction::None,
         },
         InputMode::RoomInput => match key.code {
-            KeyCode::Enter => {
-                let room = app.input_buffer.trim().to_string();
-                app.input_mode = InputMode::Normal;
-                if !room.is_empty() {
-                    start_room(app, room);
-                }
-            }
-            KeyCode::Esc => {
-                app.input_mode = InputMode::Normal;
-            }
-            KeyCode::Char(c) => {
-                app.input_buffer.push(c);
-            }
-            KeyCode::Backspace => {
-                app.input_buffer.pop();
-            }
-            _ => {}
+            KeyCode::Enter => AppAction::SubmitRoomInput,
+            KeyCode::Esc => AppAction::CancelInputMode,
+            KeyCode::Char(c) => AppAction::InputChar(c),
+            KeyCode::Backspace => AppAction::BackspaceInput,
+            _ => AppAction::None,
         },
         InputMode::IncomingCall => match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                if let Some(resp) = app.incoming_responder.take() {
-                    let _ = resp.send(true);
-                    app.add_log("Accepted incoming call.".to_string());
-                }
-                if let Some(from) = app.incoming_from.take() {
-                    app.call_state = CallState::InCall(from);
-                }
-                app.input_mode = InputMode::Normal;
+                AppAction::AcceptIncomingCall
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                if let Some(resp) = app.incoming_responder.take() {
-                    let _ = resp.send(false);
-                    app.add_log("Rejected incoming call.".to_string());
-                }
-                if let Some(ref session) = app.session {
-                    session.set_target_address(None);
-                }
-                app.input_mode = InputMode::Normal;
-                app.incoming_from = None;
-            }
-            _ => {}
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => AppAction::RejectIncomingCall,
+            _ => AppAction::None,
         },
+    }
+}
+
+/// Execute an `AppAction` against the `TuiApp` state. Returns `Ok(true)` if application exit is requested.
+pub async fn execute_action(app: &mut TuiApp, action: AppAction) -> Result<bool> {
+    match action {
+        AppAction::Quit => return Ok(true),
+        AppAction::StartStandby => start_standby(app),
+        AppAction::StopStandby => stop_standby(app),
+        AppAction::RenewIdentity => renew_identity(app),
+        AppAction::EnterCallInput => {
+            app.input_buffer.clear();
+            app.input_mode = InputMode::CallInput;
+        }
+        AppAction::EnterRoomInput => {
+            app.input_buffer.clear();
+            app.input_mode = InputMode::RoomInput;
+        }
+        AppAction::ToggleMute => {
+            app.is_muted = !app.is_muted;
+            let status = if app.is_muted { "Muted" } else { "Unmuted" };
+            app.add_log(format!("Microphone is now {}", status));
+        }
+        AppAction::ToggleAutoAccept => {
+            app.config.auto_accept = !app.config.auto_accept;
+            let status = if app.config.auto_accept {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            app.add_log(format!("Auto Accept is now {}", status));
+        }
+        AppAction::Hangup => {
+            app.hangup();
+        }
+        AppAction::FetchRegisteredAddresses => {
+            fetch_registered_addresses(app);
+        }
+        AppAction::SubmitCallInput => {
+            let target = app.input_buffer.trim().to_string();
+            app.input_mode = InputMode::Normal;
+            if !target.is_empty() {
+                start_call(app, target);
+            }
+        }
+        AppAction::SubmitRoomInput => {
+            let room = app.input_buffer.trim().to_string();
+            app.input_mode = InputMode::Normal;
+            if !room.is_empty() {
+                start_room(app, room);
+            }
+        }
+        AppAction::CancelInputMode => {
+            app.input_mode = InputMode::Normal;
+        }
+        AppAction::InputChar(c) => {
+            app.input_buffer.push(c);
+        }
+        AppAction::BackspaceInput => {
+            app.input_buffer.pop();
+        }
+        AppAction::AcceptIncomingCall => {
+            if let Some(resp) = app.incoming_responder.take() {
+                let _ = resp.send(true);
+                app.add_log("Accepted incoming call.".to_string());
+            }
+            if let Some(from) = app.incoming_from.take() {
+                app.call_state = CallState::InCall(from);
+            }
+            app.input_mode = InputMode::Normal;
+        }
+        AppAction::RejectIncomingCall => {
+            if let Some(resp) = app.incoming_responder.take() {
+                let _ = resp.send(false);
+                app.add_log("Rejected incoming call.".to_string());
+            }
+            if let Some(ref session) = app.session {
+                session.set_target_address(None);
+            }
+            app.input_mode = InputMode::Normal;
+            app.incoming_from = None;
+        }
+        AppAction::None => {}
     }
 
     Ok(false)
+}
+
+async fn handle_key_input(app: &mut TuiApp, key: crossterm::event::KeyEvent) -> Result<bool> {
+    let action = parse_key_event(&app.input_mode, key);
+    execute_action(app, action).await
 }
 
 fn render_ui(f: &mut Frame, app: &TuiApp) {
@@ -1184,5 +1232,41 @@ mod tests {
         assert!(!quit);
         assert_eq!(app.input_mode, InputMode::Normal);
         assert_eq!(resp_rx.await.unwrap(), true);
+    }
+
+    #[test]
+    fn test_parse_key_event() {
+        let key_ctrl_c = crossterm::event::KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(
+            parse_key_event(&InputMode::Normal, key_ctrl_c),
+            AppAction::Quit
+        );
+
+        let key_q = crossterm::event::KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+        assert_eq!(parse_key_event(&InputMode::Normal, key_q), AppAction::Quit);
+
+        let key_m = crossterm::event::KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE);
+        assert_eq!(
+            parse_key_event(&InputMode::Normal, key_m),
+            AppAction::ToggleMute
+        );
+
+        let key_c = crossterm::event::KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE);
+        assert_eq!(
+            parse_key_event(&InputMode::Normal, key_c),
+            AppAction::EnterCallInput
+        );
+
+        let key_x = crossterm::event::KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
+        assert_eq!(
+            parse_key_event(&InputMode::CallInput, key_x),
+            AppAction::InputChar('x')
+        );
+
+        let key_esc = crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(
+            parse_key_event(&InputMode::CallInput, key_esc),
+            AppAction::CancelInputMode
+        );
     }
 }

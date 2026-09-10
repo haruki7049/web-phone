@@ -11,6 +11,7 @@ clap.workspace = true
 color-eyre.workspace = true
 confy.workspace = true
 reqwest.workspace = true
+thiserror.workspace = true
 
 tokio.workspace = true
 tracing.workspace = true
