@@ -91,11 +91,20 @@ impl PeerConnectionEventHandler for ClientConnectionHandler {
     }
 }
 
+/// SDP Answer response payload containing session description and optional TURN credentials (WPIP-10).
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct SdpAnswerResponse {
+    pub r#type: String,
+    pub sdp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ice_servers: Option<Vec<wpapi::TurnCredential>>,
+}
+
 /// Handle incoming SDP offer from a WebRTC client.
 pub async fn handle_sdp_offer(
     headers: HeaderMap,
     Json(offer): Json<RTCSessionDescription>,
-) -> Result<Json<RTCSessionDescription>, SignalingError> {
+) -> Result<Json<SdpAnswerResponse>, SignalingError> {
     let daemon_config = CONFIGURATION.get().cloned().unwrap_or_default();
     let my_node_id = daemon_config.node_id;
 
@@ -213,5 +222,16 @@ pub async fn handle_sdp_offer(
         SignalingError::InternalError("No local description available".to_string())
     })?;
 
-    Ok(Json(local_desc))
+    let ice_servers = if daemon_config.turn_enabled {
+        let cred = generate_turn_credentials_for_client(&user_address, 86400);
+        Some(vec![cred])
+    } else {
+        None
+    };
+
+    Ok(Json(SdpAnswerResponse {
+        r#type: local_desc.sdp_type.to_string(),
+        sdp: local_desc.sdp,
+        ice_servers,
+    }))
 }

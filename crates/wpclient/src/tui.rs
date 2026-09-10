@@ -25,23 +25,42 @@ pub async fn run_tui(config: Configuration) -> Result<()> {
     run_tui_with_keypair(config, None).await
 }
 
+/// RAII guard struct to guarantee terminal restoration on error or panic.
+pub struct TerminalGuard;
+
+impl TerminalGuard {
+    pub fn new() -> Result<Self> {
+        enable_raw_mode()?;
+        let mut stdout = stdout();
+        execute!(stdout, EnterAlternateScreen)?;
+
+        let original_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            let _ = disable_raw_mode();
+            let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+            original_hook(panic_info);
+        }));
+
+        Ok(Self)
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+    }
+}
+
 /// Run the main TUI loop with an optional pre-loaded UserKeypair.
 pub async fn run_tui_with_keypair(
     config: Configuration,
     keypair: Option<wpapi::UserKeypair>,
 ) -> Result<()> {
-    enable_raw_mode()?;
-    let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    let _guard = TerminalGuard::new()?;
+    let stdout = stdout();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
-    let original_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |panic_info| {
-        let _ = disable_raw_mode();
-        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
-        original_hook(panic_info);
-    }));
 
     let (event_tx, mut event_rx) = mpsc::channel::<AppEvent>(100);
     let mut app = TuiApp::with_keypair(config, event_tx.clone(), keypair);
@@ -85,8 +104,6 @@ pub async fn run_tui_with_keypair(
     if let Some(tx) = app.cancel_tx.take() {
         let _ = tx.send(());
     }
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
     Ok(())

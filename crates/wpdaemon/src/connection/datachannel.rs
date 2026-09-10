@@ -510,7 +510,7 @@ async fn handle_room_group_audio(
     }
 
     let energy = super::calculate_audio_energy(&payload);
-    let (is_top_k, top_speakers, _) = {
+    let (is_top_k, top_speakers, speaker_list_changed) = {
         let mut reg = CLIENT_REGISTRY.write().unwrap();
         reg.update_speaker_energy(&room_address, client_id, energy)
     };
@@ -546,7 +546,7 @@ async fn handle_room_group_audio(
         }
     }
 
-    if !top_speakers.is_empty() {
+    if speaker_list_changed && !top_speakers.is_empty() {
         let notice_pkt = ProtocolPacket::ActiveSpeakerNotice {
             room_address,
             speaker_addresses: top_speakers,

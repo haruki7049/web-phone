@@ -73,6 +73,8 @@ pub struct ClientRegistry {
     pub last_pong: HashMap<u64, std::time::Instant>,
     /// Track client connection timestamp (client_id -> Instant).
     pub connected_at: HashMap<u64, std::time::Instant>,
+    /// Cache of previous Top-K active speakers per room to diff speaker list changes.
+    pub prev_top_k_speakers: HashMap<UserAddress, Vec<UserAddress>>,
 }
 
 impl ClientRegistry {
@@ -409,7 +411,16 @@ impl ClientRegistry {
             .filter_map(|cid| self.addresses.get(cid).cloned())
             .collect();
 
-        (is_top_k, top_k_addrs, false)
+        let list_changed = match self.prev_top_k_speakers.get(&room_key) {
+            Some(prev) => prev != &top_k_addrs,
+            None => !top_k_addrs.is_empty(),
+        };
+
+        if list_changed {
+            self.prev_top_k_speakers.insert(room_key, top_k_addrs.clone());
+        }
+
+        (is_top_k, top_k_addrs, list_changed)
     }
 
     /// Update last pong response timestamp for client.

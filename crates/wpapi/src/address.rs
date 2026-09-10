@@ -19,7 +19,6 @@ static TIME_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Temporary user address / ID generated from UNIX timestamp SHA-256 hash.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
 pub struct UserAddress {
     /// SHA-256 hash string (hexadecimal representation).
     pub id: String,

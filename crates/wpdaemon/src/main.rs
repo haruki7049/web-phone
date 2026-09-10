@@ -108,31 +108,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Handler to retrieve all registered wpclient user addresses.
-async fn list_registered_addresses(
-    headers: axum::http::HeaderMap,
-) -> Result<axum::extract::Json<Vec<wpapi::UserAddress>>, (axum::http::StatusCode, &'static str)> {
-    let auth_header = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok());
-
-    if let Some(auth_val) = auth_header {
-        if wpapi::verify_any_authorization_header(auth_val, "").is_err() {
-            return Err((
-                axum::http::StatusCode::UNAUTHORIZED,
-                "Invalid authorization header signature or timestamp",
-            ));
-        }
-    } else {
-        return Err((
-            axum::http::StatusCode::UNAUTHORIZED,
-            "Missing authorization header for /addresses",
-        ));
-    }
-
-    Ok(axum::extract::Json(
-        wpdaemon::connection::get_registered_addresses(),
-    ))
+/// Handler to retrieve all registered wpclient user addresses (WPIP-02 Section 2.3).
+async fn list_registered_addresses() -> axum::extract::Json<Vec<wpapi::UserAddress>> {
+    axum::extract::Json(wpdaemon::connection::get_registered_addresses())
 }
 
 /// Handler to resolve a client UserAddress by Short ID prefix (WPIP-02 Section 5).
