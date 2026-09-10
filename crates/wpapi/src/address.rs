@@ -73,20 +73,9 @@ impl UserAddress {
         }
     }
 
-    /// Check if this UserAddress matches another UserAddress by exact or prefix match (handling zero-padded Short IDs).
+    /// Check if this UserAddress matches another UserAddress by exact identity equality.
     pub fn matches_prefix(&self, other: &UserAddress) -> bool {
-        if self.id == other.id {
-            return true;
-        }
-        let self_clean = self.id.trim_end_matches('0');
-        let other_clean = other.id.trim_end_matches('0');
-
-        (!other_clean.is_empty()
-            && other_clean.len() <= self.id.len()
-            && self.id.starts_with(other_clean))
-            || (!self_clean.is_empty()
-                && self_clean.len() <= other.id.len()
-                && other.id.starts_with(self_clean))
+        self.id == other.id
     }
 }
 
@@ -963,5 +952,20 @@ mod tests {
         // Ensure SDP payload does not leak keypair secret bytes
         assert!(!sdp.contains(secp_hex));
         assert!(!sdp.contains(&ed_secret_hex));
+    }
+
+    #[test]
+    fn test_prefix_and_zero_trimming_matching_rejected() {
+        let addr1 = UserAddress::new("1111110000000000000000000000000000000000000000000000000000000000");
+        let addr2 = UserAddress::new("111111");
+        let addr3 = UserAddress::new("1111110000000000000000000000000000000000000000000000000000000001");
+
+        // Exact match should succeed
+        assert!(addr1.matches_prefix(&addr1));
+
+        // Prefix and zero-trimmed matches MUST fail for authorization equality
+        assert!(!addr1.matches_prefix(&addr2));
+        assert!(!addr2.matches_prefix(&addr1));
+        assert!(!addr1.matches_prefix(&addr3));
     }
 }

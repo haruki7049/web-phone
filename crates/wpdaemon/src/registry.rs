@@ -13,26 +13,9 @@ use wpapi::UserAddress;
 pub static CLIENT_REGISTRY: LazyLock<RwLock<ClientRegistry>> =
     LazyLock::new(|| RwLock::new(ClientRegistry::default()));
 
-/// Helper to check if address matches room key (exact match or prefix match, handling zero-padded Short IDs).
+/// Helper to check if address matches room key or peer target using exact identity equality.
 pub fn matches_address(addr: &UserAddress, key: &UserAddress) -> bool {
-    if addr.id == key.id {
-        return true;
-    }
-    if key.id.len() >= 12 && addr.id.starts_with(&key.id) {
-        return true;
-    }
-    if addr.id.len() >= 12 && key.id.starts_with(&addr.id) {
-        return true;
-    }
-    let key_clean = key.id.trim_end_matches('0');
-    if key_clean.len() >= 12 && addr.id.starts_with(key_clean) {
-        return true;
-    }
-    let addr_clean = addr.id.trim_end_matches('0');
-    if addr_clean.len() >= 12 && key.id.starts_with(addr_clean) {
-        return true;
-    }
-    false
+    addr.id == key.id
 }
 
 /// Unified registry for managing all WebRTC client state, routing, and call approvals.
