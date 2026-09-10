@@ -4,6 +4,7 @@
 //! strictly conforming to WPIP specifications (WPIP-01 through WPIP-21).
 
 use crate::address::UserAddress;
+use thiserror::Error;
 
 /// Default Opus Codec ID as defined in WPIP-04.
 pub const CODEC_OPUS: u8 = 0x01;
@@ -19,7 +20,29 @@ pub const MAX_AUDIO_PAYLOAD_SIZE: usize = 16384;
 /// Maximum allowable active speaker addresses per notice.
 pub const MAX_SPEAKER_ADDRESSES: usize = 64;
 
-use thiserror::Error;
+/// Header byte offset for message type tag.
+pub const OFFSET_MSG_TYPE: usize = 0;
+/// Field size in bytes for `UserAddress` raw byte payload (32 bytes).
+pub const LEN_USER_ADDR: usize = 32;
+/// Field size in bytes for `client_id` (8 bytes LE u64).
+pub const LEN_CLIENT_ID: usize = 8;
+/// Field size in bytes for `participant_count` (4 bytes LE u32).
+pub const LEN_PARTICIPANT_COUNT: usize = 4;
+/// Field size in bytes for timestamp (8 bytes LE u64).
+pub const LEN_TIMESTAMP: usize = 8;
+
+/// Minimum packet length requirements for decoding validation.
+pub const MIN_LEN_CLIENT_ASSIGNMENT: usize = 1 + LEN_CLIENT_ID; // 9
+pub const FULL_LEN_CLIENT_ASSIGNMENT: usize = 1 + LEN_CLIENT_ID + LEN_USER_ADDR; // 41
+pub const MIN_LEN_CLIENT_TARGETED_AUDIO: usize = 1 + LEN_USER_ADDR + 1; // 34
+pub const MIN_LEN_SERVER_TARGETED_AUDIO: usize =
+    1 + LEN_USER_ADDR + LEN_CLIENT_ID + LEN_USER_ADDR + 1; // 74
+pub const MIN_LEN_PEER_TARGETED_AUDIO: usize =
+    1 + LEN_CLIENT_ID + LEN_CLIENT_ID + LEN_USER_ADDR + LEN_USER_ADDR + 1 + 1; // 83
+pub const MIN_LEN_CALL_REQUEST: usize = 1 + LEN_CLIENT_ID + LEN_USER_ADDR; // 41
+pub const MIN_LEN_ADDRESS_ONLY_PACKET: usize = 1 + LEN_USER_ADDR; // 33
+pub const MIN_LEN_ROOM_STATE_NOTIFICATION: usize = 1 + LEN_USER_ADDR + LEN_PARTICIPANT_COUNT; // 37
+pub const MIN_LEN_PING_PONG: usize = 1 + LEN_TIMESTAMP; // 9
 
 /// Errors that can occur during protocol packet decoding.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -142,396 +165,27 @@ impl ProtocolPacket {
             });
         }
 
-        let msg_type = data[0];
+        let msg_type = data[OFFSET_MSG_TYPE];
         match msg_type {
-            // 0x01: ClientAssignment (or legacy 0x00)
-            0x00 | 0x01 => {
-                if msg_type == 0x00 && data.len() >= 9 && data.len() < 41 {
-                    // Legacy Broadcast Audio fallback
-                    let sender_id = u64::from_le_bytes(data[1..9].try_into().unwrap());
-                    let audio_data = data[9..].to_vec();
-                    return Ok(Self::BroadcastAudio {
-                        sender_id,
-                        audio_data,
-                    });
-                }
-
-                if data.len() < 9 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: msg_type,
-                        actual: data.len(),
-                        expected: 9,
-                    });
-                }
-                let client_id = u64::from_le_bytes(data[1..9].try_into().unwrap());
-                let user_address = if data.len() >= 41 {
-                    let bytes: [u8; 32] = data[9..41].try_into().unwrap();
-                    UserAddress::from_bytes(bytes)
-                } else {
-                    UserAddress::default()
-                };
-                Ok(Self::ClientAssignment {
-                    client_id,
-                    user_address,
-                })
-            }
-            // 0x02: ClientTargetedAudio
-            0x02 => {
-                if data.len() < 34 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x02,
-                        actual: data.len(),
-                        expected: 34,
-                    });
-                }
-                let target_bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let target_address = UserAddress::from_bytes(target_bytes);
-                let codec_id = data[33];
-                let audio_data = data[34..].to_vec();
-                if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
-                    return Err(ProtocolError::AudioPayloadTooLarge {
-                        actual: audio_data.len(),
-                        max: MAX_AUDIO_PAYLOAD_SIZE,
-                    });
-                }
-
-                Ok(Self::ClientTargetedAudio {
-                    target_address,
-                    codec_id,
-                    audio_data,
-                })
-            }
-            // 0x03: ServerTargetedAudio (or legacy ClientTargetedAudio format if length < 74)
-            0x03 => {
-                if data.len() < 33 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x03,
-                        actual: data.len(),
-                        expected: 33,
-                    });
-                }
-                let target_bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let target_address = UserAddress::from_bytes(target_bytes);
-
-                if data.len() >= 74 {
-                    let sender_id = u64::from_le_bytes(data[33..41].try_into().unwrap());
-                    let sender_bytes: [u8; 32] = data[41..73].try_into().unwrap();
-                    let sender_address = UserAddress::from_bytes(sender_bytes);
-                    let codec_id = data[73];
-                    let audio_data = data[74..].to_vec();
-                    if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
-                        return Err(ProtocolError::AudioPayloadTooLarge {
-                            actual: audio_data.len(),
-                            max: MAX_AUDIO_PAYLOAD_SIZE,
-                        });
-                    }
-
-                    Ok(Self::ServerTargetedAudio {
-                        target_address,
-                        sender_id,
-                        sender_address,
-                        codec_id,
-                        audio_data,
-                    })
-                } else {
-                    // Fallback parse without codec_id byte
-                    let audio_data = data[33..].to_vec();
-                    if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
-                        return Err(ProtocolError::AudioPayloadTooLarge {
-                            actual: audio_data.len(),
-                            max: MAX_AUDIO_PAYLOAD_SIZE,
-                        });
-                    }
-                    Ok(Self::ClientTargetedAudio {
-                        target_address,
-                        codec_id: CODEC_OPUS,
-                        audio_data,
-                    })
-                }
-            }
-            // 0x04: PeerTargetedAudio
-            0x04 => {
-                if data.len() >= 83 {
-                    let sender_id = u64::from_le_bytes(data[1..9].try_into().unwrap());
-                    let origin_node = u64::from_le_bytes(data[9..17].try_into().unwrap());
-                    let target_bytes: [u8; 32] = data[17..49].try_into().unwrap();
-                    let target_address = UserAddress::from_bytes(target_bytes);
-                    let sender_bytes: [u8; 32] = data[49..81].try_into().unwrap();
-                    let sender_address = UserAddress::from_bytes(sender_bytes);
-                    let codec_id = data[81];
-                    let ttl = data[82];
-                    let audio_data = data[83..].to_vec();
-                    if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
-                        return Err(ProtocolError::AudioPayloadTooLarge {
-                            actual: audio_data.len(),
-                            max: MAX_AUDIO_PAYLOAD_SIZE,
-                        });
-                    }
-
-                    Ok(Self::PeerTargetedAudio {
-                        sender_id,
-                        origin_node,
-                        target_address,
-                        sender_address,
-                        codec_id,
-                        ttl,
-                        audio_data,
-                    })
-                } else if data.len() >= 41 {
-                    // Legacy CallRequest fallback if length < 83
-                    let caller_id = u64::from_le_bytes(data[1..9].try_into().unwrap());
-                    let caller_bytes: [u8; 32] = data[9..41].try_into().unwrap();
-                    let caller_address = UserAddress::from_bytes(caller_bytes);
-                    Ok(Self::CallRequest {
-                        caller_id,
-                        caller_address,
-                    })
-                } else {
-                    Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x04,
-                        actual: data.len(),
-                        expected: 41,
-                    })
-                }
-            }
-            // 0x05: CallRequest (or legacy CallAcceptResponse)
-            0x05 => {
-                if data.len() >= 41 {
-                    let caller_id = u64::from_le_bytes(data[1..9].try_into().unwrap());
-                    let caller_bytes: [u8; 32] = data[9..41].try_into().unwrap();
-                    let caller_address = UserAddress::from_bytes(caller_bytes);
-                    Ok(Self::CallRequest {
-                        caller_id,
-                        caller_address,
-                    })
-                } else if data.len() >= 33 {
-                    let caller_bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                    let caller_address = UserAddress::from_bytes(caller_bytes);
-                    Ok(Self::CallAcceptResponse { caller_address })
-                } else {
-                    Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x05,
-                        actual: data.len(),
-                        expected: 33,
-                    })
-                }
-            }
-            // 0x06: CallAcceptResponse
-            0x06 => {
-                if data.len() < 33 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x06,
-                        actual: data.len(),
-                        expected: 33,
-                    });
-                }
-                let caller_bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let caller_address = UserAddress::from_bytes(caller_bytes);
-                Ok(Self::CallAcceptResponse { caller_address })
-            }
-            // 0x07: CallRejectResponse
-            0x07 => {
-                if data.len() < 33 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x07,
-                        actual: data.len(),
-                        expected: 33,
-                    });
-                }
-                let caller_bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let caller_address = UserAddress::from_bytes(caller_bytes);
-                Ok(Self::CallRejectResponse { caller_address })
-            }
-            // 0x08: CallAcceptedNotification
-            0x08 => {
-                if data.len() < 33 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x08,
-                        actual: data.len(),
-                        expected: 33,
-                    });
-                }
-                let bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let target_address = UserAddress::from_bytes(bytes);
-                Ok(Self::CallAcceptedNotification { target_address })
-            }
-            // 0x09: CallRejectedNotification
-            0x09 => {
-                if data.len() < 33 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x09,
-                        actual: data.len(),
-                        expected: 33,
-                    });
-                }
-                let bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let target_address = UserAddress::from_bytes(bytes);
-                Ok(Self::CallRejectedNotification { target_address })
-            }
-            // 0x0A: ConnectionError (or legacy 0xFF)
-            0x0A | 0xFF => {
-                if data.len() < 33 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: msg_type,
-                        actual: data.len(),
-                        expected: 33,
-                    });
-                }
-                let bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let target_address = UserAddress::from_bytes(bytes);
-                Ok(Self::ConnectionError { target_address })
-            }
-            // 0x0B: CallHangup
-            0x0B => {
-                if data.len() < 33 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x0B,
-                        actual: data.len(),
-                        expected: 33,
-                    });
-                }
-                let bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let target_address = UserAddress::from_bytes(bytes);
-                Ok(Self::CallHangup { target_address })
-            }
-            // 0x0C: CallEndedNotification
-            0x0C => {
-                if data.len() < 33 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x0C,
-                        actual: data.len(),
-                        expected: 33,
-                    });
-                }
-                let bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let target_address = UserAddress::from_bytes(bytes);
-                Ok(Self::CallEndedNotification { target_address })
-            }
-            // 0x0D: RoomJoinRequest
-            0x0D => {
-                if data.len() < 33 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x0D,
-                        actual: data.len(),
-                        expected: 33,
-                    });
-                }
-                let bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let room_address = UserAddress::from_bytes(bytes);
-                Ok(Self::RoomJoinRequest { room_address })
-            }
-            // 0x0E: RoomStateNotification
-            0x0E => {
-                if data.len() < 37 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x0E,
-                        actual: data.len(),
-                        expected: 37,
-                    });
-                }
-                let bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let room_address = UserAddress::from_bytes(bytes);
-                let participant_count = u32::from_le_bytes(data[33..37].try_into().unwrap());
-                Ok(Self::RoomStateNotification {
-                    room_address,
-                    participant_count,
-                })
-            }
-            // 0x0F: RoomLeaveRequest
-            0x0F => {
-                if data.len() < 33 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x0F,
-                        actual: data.len(),
-                        expected: 33,
-                    });
-                }
-                let bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let room_address = UserAddress::from_bytes(bytes);
-                Ok(Self::RoomLeaveRequest { room_address })
-            }
-            // 0x10: RoomGroupAudio
-            0x10 => {
-                if data.len() < 34 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x10,
-                        actual: data.len(),
-                        expected: 34,
-                    });
-                }
-                let bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let room_address = UserAddress::from_bytes(bytes);
-                let codec_id = data[33];
-                let audio_data = data[34..].to_vec();
-                if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
-                    return Err(ProtocolError::AudioPayloadTooLarge {
-                        actual: audio_data.len(),
-                        max: MAX_AUDIO_PAYLOAD_SIZE,
-                    });
-                }
-                Ok(Self::RoomGroupAudio {
-                    room_address,
-                    codec_id,
-                    audio_data,
-                })
-            }
-            // 0x11: ActiveSpeakerNotice
-            0x11 => {
-                if data.len() < 33 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x11,
-                        actual: data.len(),
-                        expected: 33,
-                    });
-                }
-                let bytes: [u8; 32] = data[1..33].try_into().unwrap();
-                let room_address = UserAddress::from_bytes(bytes);
-
-                let remaining_bytes = data.len() - 33;
-                let speaker_count = remaining_bytes / 32;
-                if speaker_count > MAX_SPEAKER_ADDRESSES {
-                    return Err(ProtocolError::TooManySpeakers {
-                        actual: speaker_count,
-                        max: MAX_SPEAKER_ADDRESSES,
-                    });
-                }
-
-                let mut speaker_addresses = Vec::new();
-                let mut offset = 33;
-                while offset + 32 <= data.len() {
-                    let s_bytes: [u8; 32] = data[offset..offset + 32].try_into().unwrap();
-                    speaker_addresses.push(UserAddress::from_bytes(s_bytes));
-                    offset += 32;
-                }
-                Ok(Self::ActiveSpeakerNotice {
-                    room_address,
-                    speaker_addresses,
-                })
-            }
-            // 0x12: Ping
-            0x12 => {
-                if data.len() < 9 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x12,
-                        actual: data.len(),
-                        expected: 9,
-                    });
-                }
-                let timestamp = u64::from_le_bytes(data[1..9].try_into().unwrap());
-                Ok(Self::Ping { timestamp })
-            }
-            // 0x13: Pong
-            0x13 => {
-                if data.len() < 9 {
-                    return Err(ProtocolError::InsufficientLength {
-                        packet_type: 0x13,
-                        actual: data.len(),
-                        expected: 9,
-                    });
-                }
-                let timestamp = u64::from_le_bytes(data[1..9].try_into().unwrap());
-                Ok(Self::Pong { timestamp })
-            }
+            0x00 | 0x01 => decode_client_assignment(data, msg_type),
+            0x02 => decode_client_targeted_audio(data),
+            0x03 => decode_server_targeted_audio(data),
+            0x04 => decode_peer_targeted_audio(data),
+            0x05 => decode_call_request(data),
+            0x06 => decode_call_accept_response(data),
+            0x07 => decode_call_reject_response(data),
+            0x08 => decode_call_accepted_notification(data),
+            0x09 => decode_call_rejected_notification(data),
+            0x0A | 0xFF => decode_connection_error(data, msg_type),
+            0x0B => decode_call_hangup(data),
+            0x0C => decode_call_ended_notification(data),
+            0x0D => decode_room_join_request(data),
+            0x0E => decode_room_state_notification(data),
+            0x0F => decode_room_leave_request(data),
+            0x10 => decode_room_group_audio(data),
+            0x11 => decode_active_speaker_notice(data),
+            0x12 => decode_ping(data),
+            0x13 => decode_pong(data),
             unknown => Err(ProtocolError::UnknownPacketType(unknown)),
         }
     }
@@ -543,7 +197,7 @@ impl ProtocolPacket {
                 client_id,
                 user_address,
             } => {
-                let mut buf = Vec::with_capacity(41);
+                let mut buf = Vec::with_capacity(FULL_LEN_CLIENT_ASSIGNMENT);
                 buf.push(0x01);
                 buf.extend_from_slice(&client_id.to_le_bytes());
                 buf.extend_from_slice(&user_address.to_bytes());
@@ -554,7 +208,7 @@ impl ProtocolPacket {
                 codec_id,
                 audio_data,
             } => {
-                let mut buf = Vec::with_capacity(34 + audio_data.len());
+                let mut buf = Vec::with_capacity(MIN_LEN_CLIENT_TARGETED_AUDIO + audio_data.len());
                 buf.push(0x02);
                 buf.extend_from_slice(&target_address.to_bytes());
                 buf.push(*codec_id);
@@ -568,7 +222,7 @@ impl ProtocolPacket {
                 codec_id,
                 audio_data,
             } => {
-                let mut buf = Vec::with_capacity(74 + audio_data.len());
+                let mut buf = Vec::with_capacity(MIN_LEN_SERVER_TARGETED_AUDIO + audio_data.len());
                 buf.push(0x03);
                 buf.extend_from_slice(&target_address.to_bytes());
                 buf.extend_from_slice(&sender_id.to_le_bytes());
@@ -586,7 +240,7 @@ impl ProtocolPacket {
                 ttl,
                 audio_data,
             } => {
-                let mut buf = Vec::with_capacity(83 + audio_data.len());
+                let mut buf = Vec::with_capacity(MIN_LEN_PEER_TARGETED_AUDIO + audio_data.len());
                 buf.push(0x04);
                 buf.extend_from_slice(&sender_id.to_le_bytes());
                 buf.extend_from_slice(&origin_node.to_le_bytes());
@@ -601,56 +255,56 @@ impl ProtocolPacket {
                 caller_id,
                 caller_address,
             } => {
-                let mut buf = Vec::with_capacity(41);
+                let mut buf = Vec::with_capacity(MIN_LEN_CALL_REQUEST);
                 buf.push(0x05);
                 buf.extend_from_slice(&caller_id.to_le_bytes());
                 buf.extend_from_slice(&caller_address.to_bytes());
                 buf
             }
             Self::CallAcceptResponse { caller_address } => {
-                let mut buf = Vec::with_capacity(33);
+                let mut buf = Vec::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
                 buf.push(0x06);
                 buf.extend_from_slice(&caller_address.to_bytes());
                 buf
             }
             Self::CallRejectResponse { caller_address } => {
-                let mut buf = Vec::with_capacity(33);
+                let mut buf = Vec::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
                 buf.push(0x07);
                 buf.extend_from_slice(&caller_address.to_bytes());
                 buf
             }
             Self::CallAcceptedNotification { target_address } => {
-                let mut buf = Vec::with_capacity(33);
+                let mut buf = Vec::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
                 buf.push(0x08);
                 buf.extend_from_slice(&target_address.to_bytes());
                 buf
             }
             Self::CallRejectedNotification { target_address } => {
-                let mut buf = Vec::with_capacity(33);
+                let mut buf = Vec::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
                 buf.push(0x09);
                 buf.extend_from_slice(&target_address.to_bytes());
                 buf
             }
             Self::ConnectionError { target_address } => {
-                let mut buf = Vec::with_capacity(33);
+                let mut buf = Vec::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
                 buf.push(0x0A);
                 buf.extend_from_slice(&target_address.to_bytes());
                 buf
             }
             Self::CallHangup { target_address } => {
-                let mut buf = Vec::with_capacity(33);
+                let mut buf = Vec::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
                 buf.push(0x0B);
                 buf.extend_from_slice(&target_address.to_bytes());
                 buf
             }
             Self::CallEndedNotification { target_address } => {
-                let mut buf = Vec::with_capacity(33);
+                let mut buf = Vec::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
                 buf.push(0x0C);
                 buf.extend_from_slice(&target_address.to_bytes());
                 buf
             }
             Self::RoomJoinRequest { room_address } => {
-                let mut buf = Vec::with_capacity(33);
+                let mut buf = Vec::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
                 buf.push(0x0D);
                 buf.extend_from_slice(&room_address.to_bytes());
                 buf
@@ -659,14 +313,14 @@ impl ProtocolPacket {
                 room_address,
                 participant_count,
             } => {
-                let mut buf = Vec::with_capacity(37);
+                let mut buf = Vec::with_capacity(MIN_LEN_ROOM_STATE_NOTIFICATION);
                 buf.push(0x0E);
                 buf.extend_from_slice(&room_address.to_bytes());
                 buf.extend_from_slice(&participant_count.to_le_bytes());
                 buf
             }
             Self::RoomLeaveRequest { room_address } => {
-                let mut buf = Vec::with_capacity(33);
+                let mut buf = Vec::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
                 buf.push(0x0F);
                 buf.extend_from_slice(&room_address.to_bytes());
                 buf
@@ -676,7 +330,7 @@ impl ProtocolPacket {
                 codec_id,
                 audio_data,
             } => {
-                let mut buf = Vec::with_capacity(34 + audio_data.len());
+                let mut buf = Vec::with_capacity(MIN_LEN_CLIENT_TARGETED_AUDIO + audio_data.len());
                 buf.push(0x10);
                 buf.extend_from_slice(&room_address.to_bytes());
                 buf.push(*codec_id);
@@ -687,7 +341,9 @@ impl ProtocolPacket {
                 room_address,
                 speaker_addresses,
             } => {
-                let mut buf = Vec::with_capacity(33 + 32 * speaker_addresses.len());
+                let mut buf = Vec::with_capacity(
+                    MIN_LEN_ADDRESS_ONLY_PACKET + LEN_USER_ADDR * speaker_addresses.len(),
+                );
                 buf.push(0x11);
                 buf.extend_from_slice(&room_address.to_bytes());
                 for addr in speaker_addresses {
@@ -696,13 +352,13 @@ impl ProtocolPacket {
                 buf
             }
             Self::Ping { timestamp } => {
-                let mut buf = Vec::with_capacity(9);
+                let mut buf = Vec::with_capacity(MIN_LEN_PING_PONG);
                 buf.push(0x12);
                 buf.extend_from_slice(&timestamp.to_le_bytes());
                 buf
             }
             Self::Pong { timestamp } => {
-                let mut buf = Vec::with_capacity(9);
+                let mut buf = Vec::with_capacity(MIN_LEN_PING_PONG);
                 buf.push(0x13);
                 buf.extend_from_slice(&timestamp.to_le_bytes());
                 buf
@@ -711,7 +367,7 @@ impl ProtocolPacket {
                 sender_id,
                 audio_data,
             } => {
-                let mut buf = Vec::with_capacity(9 + audio_data.len());
+                let mut buf = Vec::with_capacity(1 + LEN_CLIENT_ID + audio_data.len());
                 buf.push(0x00);
                 buf.extend_from_slice(&sender_id.to_le_bytes());
                 buf.extend_from_slice(audio_data);
@@ -719,6 +375,391 @@ impl ProtocolPacket {
             }
         }
     }
+}
+
+fn decode_client_assignment(data: &[u8], msg_type: u8) -> Result<ProtocolPacket, ProtocolError> {
+    if msg_type == 0x00 && data.len() >= 9 && data.len() < FULL_LEN_CLIENT_ASSIGNMENT {
+        let sender_id = u64::from_le_bytes(data[1..9].try_into().unwrap());
+        let audio_data = data[9..].to_vec();
+        return Ok(ProtocolPacket::BroadcastAudio {
+            sender_id,
+            audio_data,
+        });
+    }
+
+    if data.len() < MIN_LEN_CLIENT_ASSIGNMENT {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: msg_type,
+            actual: data.len(),
+            expected: MIN_LEN_CLIENT_ASSIGNMENT,
+        });
+    }
+    let client_id = u64::from_le_bytes(data[1..9].try_into().unwrap());
+    let user_address = if data.len() >= FULL_LEN_CLIENT_ASSIGNMENT {
+        let bytes: [u8; 32] = data[9..41].try_into().unwrap();
+        UserAddress::from_bytes(bytes)
+    } else {
+        UserAddress::default()
+    };
+    Ok(ProtocolPacket::ClientAssignment {
+        client_id,
+        user_address,
+    })
+}
+
+fn decode_client_targeted_audio(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_CLIENT_TARGETED_AUDIO {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x02,
+            actual: data.len(),
+            expected: MIN_LEN_CLIENT_TARGETED_AUDIO,
+        });
+    }
+    let target_bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let target_address = UserAddress::from_bytes(target_bytes);
+    let codec_id = data[33];
+    let audio_data = data[34..].to_vec();
+    if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
+        return Err(ProtocolError::AudioPayloadTooLarge {
+            actual: audio_data.len(),
+            max: MAX_AUDIO_PAYLOAD_SIZE,
+        });
+    }
+
+    Ok(ProtocolPacket::ClientTargetedAudio {
+        target_address,
+        codec_id,
+        audio_data,
+    })
+}
+
+fn decode_server_targeted_audio(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x03,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        });
+    }
+    let target_bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let target_address = UserAddress::from_bytes(target_bytes);
+
+    if data.len() >= MIN_LEN_SERVER_TARGETED_AUDIO {
+        let sender_id = u64::from_le_bytes(data[33..41].try_into().unwrap());
+        let sender_bytes: [u8; 32] = data[41..73].try_into().unwrap();
+        let sender_address = UserAddress::from_bytes(sender_bytes);
+        let codec_id = data[73];
+        let audio_data = data[74..].to_vec();
+        if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
+            return Err(ProtocolError::AudioPayloadTooLarge {
+                actual: audio_data.len(),
+                max: MAX_AUDIO_PAYLOAD_SIZE,
+            });
+        }
+
+        Ok(ProtocolPacket::ServerTargetedAudio {
+            target_address,
+            sender_id,
+            sender_address,
+            codec_id,
+            audio_data,
+        })
+    } else {
+        let audio_data = data[33..].to_vec();
+        if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
+            return Err(ProtocolError::AudioPayloadTooLarge {
+                actual: audio_data.len(),
+                max: MAX_AUDIO_PAYLOAD_SIZE,
+            });
+        }
+        Ok(ProtocolPacket::ClientTargetedAudio {
+            target_address,
+            codec_id: CODEC_OPUS,
+            audio_data,
+        })
+    }
+}
+
+fn decode_peer_targeted_audio(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() >= MIN_LEN_PEER_TARGETED_AUDIO {
+        let sender_id = u64::from_le_bytes(data[1..9].try_into().unwrap());
+        let origin_node = u64::from_le_bytes(data[9..17].try_into().unwrap());
+        let target_bytes: [u8; 32] = data[17..49].try_into().unwrap();
+        let target_address = UserAddress::from_bytes(target_bytes);
+        let sender_bytes: [u8; 32] = data[49..81].try_into().unwrap();
+        let sender_address = UserAddress::from_bytes(sender_bytes);
+        let codec_id = data[81];
+        let ttl = data[82];
+        let audio_data = data[83..].to_vec();
+        if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
+            return Err(ProtocolError::AudioPayloadTooLarge {
+                actual: audio_data.len(),
+                max: MAX_AUDIO_PAYLOAD_SIZE,
+            });
+        }
+
+        Ok(ProtocolPacket::PeerTargetedAudio {
+            sender_id,
+            origin_node,
+            target_address,
+            sender_address,
+            codec_id,
+            ttl,
+            audio_data,
+        })
+    } else if data.len() >= MIN_LEN_CALL_REQUEST {
+        let caller_id = u64::from_le_bytes(data[1..9].try_into().unwrap());
+        let caller_bytes: [u8; 32] = data[9..41].try_into().unwrap();
+        let caller_address = UserAddress::from_bytes(caller_bytes);
+        Ok(ProtocolPacket::CallRequest {
+            caller_id,
+            caller_address,
+        })
+    } else {
+        Err(ProtocolError::InsufficientLength {
+            packet_type: 0x04,
+            actual: data.len(),
+            expected: MIN_LEN_CALL_REQUEST,
+        })
+    }
+}
+
+fn decode_call_request(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() >= MIN_LEN_CALL_REQUEST {
+        let caller_id = u64::from_le_bytes(data[1..9].try_into().unwrap());
+        let caller_bytes: [u8; 32] = data[9..41].try_into().unwrap();
+        let caller_address = UserAddress::from_bytes(caller_bytes);
+        Ok(ProtocolPacket::CallRequest {
+            caller_id,
+            caller_address,
+        })
+    } else if data.len() >= MIN_LEN_ADDRESS_ONLY_PACKET {
+        let caller_bytes: [u8; 32] = data[1..33].try_into().unwrap();
+        let caller_address = UserAddress::from_bytes(caller_bytes);
+        Ok(ProtocolPacket::CallAcceptResponse { caller_address })
+    } else {
+        Err(ProtocolError::InsufficientLength {
+            packet_type: 0x05,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        })
+    }
+}
+
+fn decode_call_accept_response(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x06,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        });
+    }
+    let caller_bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let caller_address = UserAddress::from_bytes(caller_bytes);
+    Ok(ProtocolPacket::CallAcceptResponse { caller_address })
+}
+
+fn decode_call_reject_response(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x07,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        });
+    }
+    let caller_bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let caller_address = UserAddress::from_bytes(caller_bytes);
+    Ok(ProtocolPacket::CallRejectResponse { caller_address })
+}
+
+fn decode_call_accepted_notification(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x08,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        });
+    }
+    let bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let target_address = UserAddress::from_bytes(bytes);
+    Ok(ProtocolPacket::CallAcceptedNotification { target_address })
+}
+
+fn decode_call_rejected_notification(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x09,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        });
+    }
+    let bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let target_address = UserAddress::from_bytes(bytes);
+    Ok(ProtocolPacket::CallRejectedNotification { target_address })
+}
+
+fn decode_connection_error(data: &[u8], msg_type: u8) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: msg_type,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        });
+    }
+    let bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let target_address = UserAddress::from_bytes(bytes);
+    Ok(ProtocolPacket::ConnectionError { target_address })
+}
+
+fn decode_call_hangup(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x0B,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        });
+    }
+    let bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let target_address = UserAddress::from_bytes(bytes);
+    Ok(ProtocolPacket::CallHangup { target_address })
+}
+
+fn decode_call_ended_notification(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x0C,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        });
+    }
+    let bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let target_address = UserAddress::from_bytes(bytes);
+    Ok(ProtocolPacket::CallEndedNotification { target_address })
+}
+
+fn decode_room_join_request(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x0D,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        });
+    }
+    let bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let room_address = UserAddress::from_bytes(bytes);
+    Ok(ProtocolPacket::RoomJoinRequest { room_address })
+}
+
+fn decode_room_state_notification(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ROOM_STATE_NOTIFICATION {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x0E,
+            actual: data.len(),
+            expected: MIN_LEN_ROOM_STATE_NOTIFICATION,
+        });
+    }
+    let bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let room_address = UserAddress::from_bytes(bytes);
+    let participant_count = u32::from_le_bytes(data[33..37].try_into().unwrap());
+    Ok(ProtocolPacket::RoomStateNotification {
+        room_address,
+        participant_count,
+    })
+}
+
+fn decode_room_leave_request(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x0F,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        });
+    }
+    let bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let room_address = UserAddress::from_bytes(bytes);
+    Ok(ProtocolPacket::RoomLeaveRequest { room_address })
+}
+
+fn decode_room_group_audio(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_CLIENT_TARGETED_AUDIO {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x10,
+            actual: data.len(),
+            expected: MIN_LEN_CLIENT_TARGETED_AUDIO,
+        });
+    }
+    let bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let room_address = UserAddress::from_bytes(bytes);
+    let codec_id = data[33];
+    let audio_data = data[34..].to_vec();
+    if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
+        return Err(ProtocolError::AudioPayloadTooLarge {
+            actual: audio_data.len(),
+            max: MAX_AUDIO_PAYLOAD_SIZE,
+        });
+    }
+    Ok(ProtocolPacket::RoomGroupAudio {
+        room_address,
+        codec_id,
+        audio_data,
+    })
+}
+
+fn decode_active_speaker_notice(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x11,
+            actual: data.len(),
+            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
+        });
+    }
+    let bytes: [u8; 32] = data[1..33].try_into().unwrap();
+    let room_address = UserAddress::from_bytes(bytes);
+
+    let remaining_bytes = data.len() - 33;
+    let speaker_count = remaining_bytes / 32;
+    if speaker_count > MAX_SPEAKER_ADDRESSES {
+        return Err(ProtocolError::TooManySpeakers {
+            actual: speaker_count,
+            max: MAX_SPEAKER_ADDRESSES,
+        });
+    }
+
+    let mut speaker_addresses = Vec::new();
+    let mut offset = 33;
+    while offset + 32 <= data.len() {
+        let s_bytes: [u8; 32] = data[offset..offset + 32].try_into().unwrap();
+        speaker_addresses.push(UserAddress::from_bytes(s_bytes));
+        offset += 32;
+    }
+    Ok(ProtocolPacket::ActiveSpeakerNotice {
+        room_address,
+        speaker_addresses,
+    })
+}
+
+fn decode_ping(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_PING_PONG {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x12,
+            actual: data.len(),
+            expected: MIN_LEN_PING_PONG,
+        });
+    }
+    let timestamp = u64::from_le_bytes(data[1..9].try_into().unwrap());
+    Ok(ProtocolPacket::Ping { timestamp })
+}
+
+fn decode_pong(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_PING_PONG {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x13,
+            actual: data.len(),
+            expected: MIN_LEN_PING_PONG,
+        });
+    }
+    let timestamp = u64::from_le_bytes(data[1..9].try_into().unwrap());
+    Ok(ProtocolPacket::Pong { timestamp })
 }
 
 #[cfg(test)]
@@ -873,7 +914,6 @@ mod tests {
             Err(ProtocolError::UnknownPacketType(0x99))
         );
 
-        // Test total packet size overflow (> 64 KiB)
         let huge_packet = vec![0x02u8; MAX_PACKET_SIZE + 1];
         assert_eq!(
             ProtocolPacket::decode(&huge_packet),
@@ -883,8 +923,7 @@ mod tests {
             })
         );
 
-        // Test audio payload size overflow (> 16 KiB)
-        let mut oversized_audio_packet = vec![0x02u8; 34]; // ClientTargetedAudio header
+        let mut oversized_audio_packet = vec![0x02u8; 34];
         oversized_audio_packet.extend(vec![0xAAu8; MAX_AUDIO_PAYLOAD_SIZE + 1]);
         assert_eq!(
             ProtocolPacket::decode(&oversized_audio_packet),

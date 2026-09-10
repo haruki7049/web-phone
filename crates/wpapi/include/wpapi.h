@@ -49,6 +49,52 @@
 #define MAX_SPEAKER_ADDRESSES 64
 
 /**
+ * Header byte offset for message type tag.
+ */
+#define OFFSET_MSG_TYPE 0
+
+/**
+ * Field size in bytes for `UserAddress` raw byte payload (32 bytes).
+ */
+#define LEN_USER_ADDR 32
+
+/**
+ * Field size in bytes for `client_id` (8 bytes LE u64).
+ */
+#define LEN_CLIENT_ID 8
+
+/**
+ * Field size in bytes for `participant_count` (4 bytes LE u32).
+ */
+#define LEN_PARTICIPANT_COUNT 4
+
+/**
+ * Field size in bytes for timestamp (8 bytes LE u64).
+ */
+#define LEN_TIMESTAMP 8
+
+/**
+ * Minimum packet length requirements for decoding validation.
+ */
+#define MIN_LEN_CLIENT_ASSIGNMENT (1 + LEN_CLIENT_ID)
+
+#define FULL_LEN_CLIENT_ASSIGNMENT ((1 + LEN_CLIENT_ID) + LEN_USER_ADDR)
+
+#define MIN_LEN_CLIENT_TARGETED_AUDIO ((1 + LEN_USER_ADDR) + 1)
+
+#define MIN_LEN_SERVER_TARGETED_AUDIO ((((1 + LEN_USER_ADDR) + LEN_CLIENT_ID) + LEN_USER_ADDR) + 1)
+
+#define MIN_LEN_PEER_TARGETED_AUDIO ((((((1 + LEN_CLIENT_ID) + LEN_CLIENT_ID) + LEN_USER_ADDR) + LEN_USER_ADDR) + 1) + 1)
+
+#define MIN_LEN_CALL_REQUEST ((1 + LEN_CLIENT_ID) + LEN_USER_ADDR)
+
+#define MIN_LEN_ADDRESS_ONLY_PACKET (1 + LEN_USER_ADDR)
+
+#define MIN_LEN_ROOM_STATE_NOTIFICATION ((1 + LEN_USER_ADDR) + LEN_PARTICIPANT_COUNT)
+
+#define MIN_LEN_PING_PONG (1 + LEN_TIMESTAMP)
+
+/**
  * Maximum allowed TTL for ephemeral TURN credentials (24 hours).
  */
 #define MAX_TURN_TTL_SECS 86400
