@@ -6,7 +6,6 @@ use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use directories::ProjectDirs;
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -57,23 +56,21 @@ pub fn save_encrypted_keystore(
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
 
-    let mut salt = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut salt);
+    let salt: [u8; 16] = rand::random();
 
     let params = Params::new(65536, 3, 4, Some(32))
         .map_err(|e| format!("Invalid Argon2id params: {}", e))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
-    let mut derived_key = [0u8; 32];
+    let mut derived_buf = [0u8; 32];
     argon2
-        .hash_password_into(passphrase.as_bytes(), &salt, &mut derived_key)
+        .hash_password_into(passphrase.as_bytes(), &salt, &mut derived_buf)
         .map_err(|e| format!("Argon2id key derivation failed: {}", e))?;
 
-    let cipher = Aes256Gcm::new_from_slice(&derived_key)
+    let cipher = Aes256Gcm::new_from_slice(&derived_buf)
         .map_err(|e| format!("AES-256-GCM initialization failed: {}", e))?;
-    let mut nonce_bytes = [0u8; 12];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
-    let nonce = aes_gcm::Nonce::from(nonce_bytes);
+    let nonce_raw: [u8; 12] = rand::random();
+    let nonce = aes_gcm::Nonce::from(nonce_raw);
 
     let raw_secret = keypair.to_bytes();
     let ciphertext = cipher
@@ -145,12 +142,12 @@ pub fn load_encrypted_keystore(passphrase: &str, path: &Path) -> Result<UserKeyp
 
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
-    let mut derived_key = [0u8; 32];
+    let mut derived_buf = [0u8; 32];
     argon2
-        .hash_password_into(passphrase.as_bytes(), &salt, &mut derived_key)
+        .hash_password_into(passphrase.as_bytes(), &salt, &mut derived_buf)
         .map_err(|e| format!("Argon2id key derivation failed: {}", e))?;
 
-    let cipher = Aes256Gcm::new_from_slice(&derived_key)
+    let cipher = Aes256Gcm::new_from_slice(&derived_buf)
         .map_err(|e| format!("AES-256-GCM initialization failed: {}", e))?;
 
     let nonce = aes_gcm::Nonce::from(nonce_bytes);
@@ -162,9 +159,9 @@ pub fn load_encrypted_keystore(passphrase: &str, path: &Path) -> Result<UserKeyp
         return Err("Decrypted payload length is invalid for Ed25519 secret key".into());
     }
 
-    let mut secret_key_bytes = [0u8; 32];
-    secret_key_bytes.copy_from_slice(&decrypted_bytes);
-    let keypair = UserKeypair::from_bytes(&secret_key_bytes);
+    let mut secret_buf = [0u8; 32];
+    secret_buf.copy_from_slice(&decrypted_bytes);
+    let keypair = UserKeypair::from_bytes(&secret_buf);
 
     if keypair.public_key_address().id != store.user_address {
         return Err("Decrypted public key does not match keystore user_address".into());

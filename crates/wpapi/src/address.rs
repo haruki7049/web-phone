@@ -52,9 +52,9 @@ impl UserAddress {
 
     /// Convert `UserAddress` to 32-byte raw array representation.
     pub fn to_bytes(&self) -> [u8; 32] {
-        let mut bytes = [0u8; 32];
-        if hex_decode_into(&self.id, &mut bytes) {
-            bytes
+        let mut raw_buf = [0u8; 32];
+        if hex_decode_into(&self.id, &mut raw_buf) {
+            raw_buf
         } else {
             [0u8; 32]
         }
@@ -172,12 +172,12 @@ impl UserKeypair {
             return false;
         }
 
-        let mut sig_bytes = [0u8; 64];
-        if !hex_decode_into(signature_hex, &mut sig_bytes) {
+        let mut sig_buf = [0u8; 64];
+        if !hex_decode_into(signature_hex, &mut sig_buf) {
             return false;
         }
 
-        let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
+        let sig = ed25519_dalek::Signature::from_bytes(&sig_buf);
         verifying_key.verify(message, &sig).is_ok()
     }
 }

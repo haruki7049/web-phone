@@ -127,11 +127,11 @@ fn build_stun_binding_response(
         }
         SocketAddr::V6(addr) => {
             let ip_bytes = addr.ip().octets();
-            let mut key = [0u8; 16];
-            key[0..4].copy_from_slice(&STUN_MAGIC_COOKIE.to_be_bytes());
-            key[4..16].copy_from_slice(transaction_id);
+            let mut xor_mask = [0u8; 16];
+            xor_mask[0..4].copy_from_slice(&STUN_MAGIC_COOKIE.to_be_bytes());
+            xor_mask[4..16].copy_from_slice(transaction_id);
             for i in 0..16 {
-                resp.push(ip_bytes[i] ^ key[i]);
+                resp.push(ip_bytes[i] ^ xor_mask[i]);
             }
         }
     }

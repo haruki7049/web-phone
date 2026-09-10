@@ -23,7 +23,6 @@ pub static DEFAULT_CONFIG_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| {
 /// Global configuration instance.
 pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -85,9 +84,8 @@ fn default_true() -> bool {
 
 /// Generate a cryptographically secure 256-bit random hex secret for TURN authentication.
 pub fn generate_random_turn_secret() -> String {
-    let mut key = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut key);
-    hex::encode(key)
+    let rand_bytes: [u8; 32] = rand::random();
+    hex::encode(rand_bytes)
 }
 
 static DEFAULT_DYNAMIC_TURN_SECRET: LazyLock<String> = LazyLock::new(generate_random_turn_secret);
