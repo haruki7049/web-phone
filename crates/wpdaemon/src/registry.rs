@@ -20,9 +20,21 @@ pub fn matches_address(addr: &UserAddress, key: &UserAddress) -> bool {
 
 /// Helper to check if address matches target key using prefix match (min 12 chars) for address resolution / routing (WPIP-02 Section 5).
 pub fn matches_address_prefix(addr: &UserAddress, key: &UserAddress) -> bool {
-    addr.id == key.id
-        || (key.id.len() >= 12 && addr.id.starts_with(&key.id))
-        || (addr.id.len() >= 12 && key.id.starts_with(&addr.id))
+    if addr.id == key.id {
+        return true;
+    }
+    // Direct Short ID input (12..63 characters)
+    if key.id.len() >= 12 && key.id.len() < 64 && addr.id.starts_with(&key.id) {
+        return true;
+    }
+    // Wire zero-padded Short ID (64 chars total: >=12 hex prefix + trailing zero padding)
+    if key.id.len() == 64 && addr.id.len() == 64 {
+        let clean_key = key.id.trim_end_matches('0');
+        if clean_key.len() >= 12 && clean_key.len() < 64 && addr.id.starts_with(clean_key) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Unified registry for managing all WebRTC client state, routing, and call approvals.
@@ -493,6 +505,11 @@ mod tests {
         let short_target = UserAddress::new("39f8adc7bf93".to_string());
         let found = registry.find_client_by_address(&short_target);
         assert_eq!(found, Some(1));
+
+        let zero_padded_target = UserAddress::new(
+            "39f8adc7bf930000000000000000000000000000000000000000000000000000".to_string(),
+        );
+        assert_eq!(registry.find_client_by_address(&zero_padded_target), Some(1));
 
         let invalid_short = UserAddress::new("39f8adc7".to_string());
         assert_eq!(registry.find_client_by_address(&invalid_short), None);
