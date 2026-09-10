@@ -185,6 +185,36 @@ pub fn get_registered_addresses() -> Vec<UserAddress> {
     CLIENT_REGISTRY.read().unwrap().get_registered_addresses()
 }
 
+/// Validate that claimed sender identity fields in a packet match the connection's authenticated identity.
+pub fn validate_packet_sender_identity(
+    packet: &ProtocolPacket,
+    authenticated_client_id: u64,
+    authenticated_user_address: &UserAddress,
+) -> bool {
+    match packet {
+        ProtocolPacket::ClientAssignment {
+            client_id,
+            user_address,
+        } => *client_id == authenticated_client_id && user_address == authenticated_user_address,
+        ProtocolPacket::ServerTargetedAudio {
+            sender_id,
+            sender_address,
+            ..
+        } => *sender_id == authenticated_client_id && sender_address == authenticated_user_address,
+        ProtocolPacket::PeerTargetedAudio {
+            sender_id,
+            sender_address,
+            ..
+        } => *sender_id == authenticated_client_id && sender_address == authenticated_user_address,
+        ProtocolPacket::CallRequest {
+            caller_id,
+            caller_address,
+        } => *caller_id == authenticated_client_id && caller_address == authenticated_user_address,
+        ProtocolPacket::BroadcastAudio { sender_id, .. } => *sender_id == authenticated_client_id,
+        _ => true,
+    }
+}
+
 /// Generate Ephemeral TURN credentials for an authenticated UserAddress (WPIP-10).
 pub fn generate_turn_credentials_for_client(
     user_address: &UserAddress,
@@ -324,6 +354,14 @@ async fn handle_client_datachannel_events(
                 let Ok(packet) = ProtocolPacket::decode(&msg.data) else {
                     continue;
                 };
+
+                if !validate_packet_sender_identity(&packet, client_id, &user_address) {
+                    warn!(
+                        "Client {} attempted to send packet with spoofed sender identity, dropping",
+                        client_id
+                    );
+                    continue;
+                }
 
                 let sender_addr = Some(user_address.clone());
                 match packet {
@@ -1012,7 +1050,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_addresses_authentication_requirement() {
-        use axum::http::{HeaderMap, HeaderValue, StatusCode};
+        use axum::http::{HeaderMap, HeaderValue};
 
         // 1. Test missing Authorization header
         let headers = HeaderMap::new();
@@ -1048,5 +1086,78 @@ mod tests {
             .to_str()
             .unwrap();
         assert!(wpapi::verify_any_authorization_header(valid_auth_val, "").is_ok());
+    }
+
+    #[test]
+    fn test_packet_sender_identity_binding_and_spoof_rejection() {
+        let auth_client_id = 42u64;
+        let auth_user_addr = UserAddress::generate_from_time();
+
+        let attacker_addr = UserAddress::generate_from_time();
+        let attacker_client_id = 999u64;
+
+        // 1. Valid packet with matching auth identity
+        let valid_packet = ProtocolPacket::ServerTargetedAudio {
+            target_address: UserAddress::generate_from_time(),
+            sender_id: auth_client_id,
+            sender_address: auth_user_addr.clone(),
+            codec_id: wpapi::protocol::CODEC_OPUS,
+            audio_data: vec![0x01, 0x02],
+        };
+        assert!(validate_packet_sender_identity(
+            &valid_packet,
+            auth_client_id,
+            &auth_user_addr
+        ));
+
+        // 2. Spoofed sender_id in ServerTargetedAudio
+        let spoofed_id_packet = ProtocolPacket::ServerTargetedAudio {
+            target_address: UserAddress::generate_from_time(),
+            sender_id: attacker_client_id,
+            sender_address: auth_user_addr.clone(),
+            codec_id: wpapi::protocol::CODEC_OPUS,
+            audio_data: vec![0x01, 0x02],
+        };
+        assert!(!validate_packet_sender_identity(
+            &spoofed_id_packet,
+            auth_client_id,
+            &auth_user_addr
+        ));
+
+        // 3. Spoofed sender_address in ServerTargetedAudio
+        let spoofed_addr_packet = ProtocolPacket::ServerTargetedAudio {
+            target_address: UserAddress::generate_from_time(),
+            sender_id: auth_client_id,
+            sender_address: attacker_addr.clone(),
+            codec_id: wpapi::protocol::CODEC_OPUS,
+            audio_data: vec![0x01, 0x02],
+        };
+        assert!(!validate_packet_sender_identity(
+            &spoofed_addr_packet,
+            auth_client_id,
+            &auth_user_addr
+        ));
+
+        // 4. Spoofed sender_id in BroadcastAudio
+        let spoofed_broadcast = ProtocolPacket::BroadcastAudio {
+            sender_id: attacker_client_id,
+            audio_data: vec![0x00],
+        };
+        assert!(!validate_packet_sender_identity(
+            &spoofed_broadcast,
+            auth_client_id,
+            &auth_user_addr
+        ));
+
+        // 5. Spoofed CallRequest caller_id and caller_address
+        let spoofed_call_req = ProtocolPacket::CallRequest {
+            caller_id: attacker_client_id,
+            caller_address: attacker_addr,
+        };
+        assert!(!validate_packet_sender_identity(
+            &spoofed_call_req,
+            auth_client_id,
+            &auth_user_addr
+        ));
     }
 }
