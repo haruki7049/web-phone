@@ -26,8 +26,8 @@ fn derive_opaque_user_id(user_address: &UserAddress, server_secret: &[u8]) -> St
     use hmac::{Hmac, KeyInit, Mac};
     use sha2::Sha256;
     type HmacSha256 = Hmac<Sha256>;
-    let mut mac = HmacSha256::new_from_slice(server_secret)
-        .unwrap_or_else(|_| HmacSha256::new_from_slice(b"turn_secret_fallback").unwrap());
+    let mut mac =
+        HmacSha256::new_from_slice(server_secret).expect("HMAC initialization failed for TURN key");
     mac.update(user_address.id.as_bytes());
     let res = mac.finalize().into_bytes();
     let mut s = String::with_capacity(32);
@@ -125,26 +125,26 @@ mod tests {
 
     #[test]
     fn test_ephemeral_turn_credential_generation_and_verification() {
-        let secret = b"super_secret_turn_key_12345";
+        let secret: [u8; 32] = rand::random();
         let user_addr =
             UserAddress::new("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
         let urls = vec!["turn:node.web-phone.dev:3478?transport=udp".to_string()];
 
-        let cred = generate_ephemeral_turn_credential(secret, &user_addr, urls.clone(), 600);
+        let cred = generate_ephemeral_turn_credential(&secret, &user_addr, urls.clone(), 600);
         assert_eq!(cred.urls, urls);
         // Ensure username does NOT leak raw user address ID
         assert!(!cred.username.contains(&user_addr.id));
 
         let verified_addr =
-            verify_ephemeral_turn_credential(secret, &cred.username, &cred.credential)
+            verify_ephemeral_turn_credential(&secret, &cred.username, &cred.credential)
                 .expect("Verification should succeed");
-        let expected_opaque = derive_opaque_user_id(&user_addr, secret);
+        let expected_opaque = derive_opaque_user_id(&user_addr, &secret);
         assert_eq!(verified_addr.id, expected_opaque);
     }
 
     #[test]
     fn test_ephemeral_turn_credential_expired() {
-        let secret = b"super_secret_turn_key_12345";
+        let secret: [u8; 32] = rand::random();
         let user_addr = UserAddress::new("test_user_id");
 
         // Expired 100 seconds ago
@@ -153,14 +153,14 @@ mod tests {
             .unwrap()
             .as_secs();
         let exp_timestamp = now - 100;
-        let opaque_id = derive_opaque_user_id(&user_addr, secret);
+        let opaque_id = derive_opaque_user_id(&user_addr, &secret);
         let username = format!("{}:{}", exp_timestamp, opaque_id);
 
-        let mut mac = HmacSha1::new_from_slice(secret).unwrap();
+        let mut mac = HmacSha1::new_from_slice(&secret).unwrap();
         mac.update(username.as_bytes());
         let credential = BASE64_STANDARD.encode(mac.finalize().into_bytes());
 
-        let result = verify_ephemeral_turn_credential(secret, &username, &credential);
+        let result = verify_ephemeral_turn_credential(&secret, &username, &credential);
         assert!(matches!(
             result,
             Err(AuthError::TurnCredentialExpired { .. })
@@ -169,23 +169,23 @@ mod tests {
 
     #[test]
     fn test_ephemeral_turn_credential_invalid_secret() {
-        let secret1 = b"correct_secret";
-        let secret2 = b"wrong_secret";
+        let secret1: [u8; 32] = rand::random();
+        let secret2: [u8; 32] = rand::random();
         let user_addr = UserAddress::new("test_user_id");
 
-        let cred = generate_ephemeral_turn_credential(secret1, &user_addr, vec![], 600);
-        let result = verify_ephemeral_turn_credential(secret2, &cred.username, &cred.credential);
+        let cred = generate_ephemeral_turn_credential(&secret1, &user_addr, vec![], 600);
+        let result = verify_ephemeral_turn_credential(&secret2, &cred.username, &cred.credential);
         assert_eq!(result, Err(AuthError::InvalidTurnSignature));
     }
 
     #[test]
     fn test_turn_credential_max_ttl_and_privacy() {
-        let secret = b"turn_secret_key";
+        let secret: [u8; 32] = rand::random();
         let user_addr =
             UserAddress::new("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
         // Request excessive TTL (e.g. 10 days = 864000s)
-        let cred = generate_ephemeral_turn_credential(secret, &user_addr, vec![], 864000);
+        let cred = generate_ephemeral_turn_credential(&secret, &user_addr, vec![], 864000);
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)

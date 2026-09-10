@@ -118,7 +118,10 @@ fn load_or_create_client_keypair(
     let passphrase = passphrase_override
         .map(|s| s.to_string())
         .or_else(|| std::env::var("WPCLIENT_PASSPHRASE").ok())
-        .unwrap_or_else(|| "default_wpclient_passphrase_key_12345".to_string());
+        .unwrap_or_else(|| {
+            let rand_bytes: [u8; 16] = rand::random();
+            hex::encode(rand_bytes)
+        });
 
     if let Some(ref nostr_key) = nostr_key_input {
         match wpapi::UserKeypair::from_nostr_key(nostr_key) {

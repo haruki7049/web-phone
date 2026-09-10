@@ -276,8 +276,8 @@ mod tests {
 
     #[test]
     fn test_sfu_zero_knowledge_energy_routing() {
-        let key = [0x55u8; 32];
-        let nonce = [0x09u8; 12];
+        let key: [u8; 32] = rand::random();
+        let nonce: [u8; 12] = rand::random();
         let sframe = wpapi::SFrameCodec::new(&key).unwrap();
 
         let raw_pcm = [0.5f32.to_le_bytes(), 0.8f32.to_le_bytes()].concat();

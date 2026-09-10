@@ -20,6 +20,8 @@ ratatui.workspace = true
 crossterm.workspace = true
 futures.workspace = true
 cpal.workspace = true
+rand.workspace = true
+hex.workspace = true
 
 
 [dev-dependencies]
