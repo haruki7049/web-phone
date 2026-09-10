@@ -34,6 +34,26 @@
 #define CODEC_PCM_S16LE 2
 
 /**
+ * Maximum allowable total packet size (64 KiB) to prevent memory allocation DoS attacks.
+ */
+#define MAX_PACKET_SIZE 65536
+
+/**
+ * Maximum allowable audio payload size (16 KiB).
+ */
+#define MAX_AUDIO_PAYLOAD_SIZE 16384
+
+/**
+ * Maximum allowable active speaker addresses per notice.
+ */
+#define MAX_SPEAKER_ADDRESSES 64
+
+/**
+ * Maximum allowed TTL for ephemeral TURN credentials (24 hours).
+ */
+#define MAX_TURN_TTL_SECS 86400
+
+/**
  * Log levels for WPAPI log callback.
  * 0 = DEBUG, 1 = INFO, 2 = WARN, 3 = ERROR
  */
@@ -72,10 +92,16 @@ const char *wpapi_last_error_message(void);
 /**
  * Register a custom C log callback function to receive log messages.
  * Pass `None` (or `NULL` in C) as `callback` to disable log callbacks.
+ *
  * # Safety
- * `user_data` must be valid for the duration of callbacks, or NULL.
+ * - `callback`: If non-null, must be a valid, thread-safe function pointer (`Send` + `Sync`).
+ * - `user_data`: Must remain valid, allocated, and thread-safe (`Send` + `Sync`) for as long as
+ *   the callback is registered, or until `wpapi_set_log_callback(None, NULL)` is called.
+ * - Unregistering (`callback = None`) atomically clears the callback state to guarantee no subsequent
+ *   invocations will occur on `user_data`.
  */
-void wpapi_set_log_callback(WPAPILogCallback callback, void *user_data);
+void wpapi_set_log_callback(WPAPILogCallback callback,
+                            void *user_data);
 
 /**
  * Initialize tracing subscriber for logging output.

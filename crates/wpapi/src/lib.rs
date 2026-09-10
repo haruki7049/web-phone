@@ -72,6 +72,7 @@ pub type WPAPILogCallback = Option<
     ),
 >;
 
+#[derive(Clone, Copy)]
 struct LogCallbackState {
     callback: WPAPILogCallback,
     user_data: *mut std::ffi::c_void,
@@ -121,8 +122,15 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CallbackLayer {
         event: &tracing::Event<'_>,
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        if let Ok(guard) = LOG_CALLBACK.read()
-            && let Some(state) = guard.as_ref()
+        let callback_state = {
+            if let Ok(guard) = LOG_CALLBACK.read() {
+                *guard
+            } else {
+                None
+            }
+        };
+
+        if let Some(state) = callback_state
             && let Some(cb) = state.callback
         {
             let level = match *event.metadata().level() {
@@ -140,9 +148,10 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CallbackLayer {
                 Err(_) => CString::new("Log message contained null bytes").unwrap(),
             };
 
-            unsafe {
-                cb(level, c_msg.as_ptr(), state.user_data);
-            }
+            let user_data = state.user_data;
+            let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+                cb(level, c_msg.as_ptr(), user_data);
+            }));
         }
     }
 }
@@ -178,8 +187,13 @@ pub extern "C" fn wpapi_last_error_message() -> *const c_char {
 
 /// Register a custom C log callback function to receive log messages.
 /// Pass `None` (or `NULL` in C) as `callback` to disable log callbacks.
+///
 /// # Safety
-/// `user_data` must be valid for the duration of callbacks, or NULL.
+/// - `callback`: If non-null, must be a valid, thread-safe function pointer (`Send` + `Sync`).
+/// - `user_data`: Must remain valid, allocated, and thread-safe (`Send` + `Sync`) for as long as
+///   the callback is registered, or until `wpapi_set_log_callback(None, NULL)` is called.
+/// - Unregistering (`callback = None`) atomically clears the callback state to guarantee no subsequent
+///   invocations will occur on `user_data`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wpapi_set_log_callback(
     callback: WPAPILogCallback,
@@ -717,6 +731,48 @@ mod tests {
 
         assert!(LOG_CALLED.load(Ordering::Relaxed));
 
+        unsafe { wpapi_set_log_callback(None, std::ptr::null_mut()) };
+    }
+
+    #[test]
+    fn test_concurrent_log_callback_registration_and_unregistration() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static COUNT: AtomicU64 = AtomicU64::new(0);
+
+        unsafe extern "C" fn dummy_cb(
+            _level: WPAPILogLevel,
+            _msg: *const c_char,
+            _user_data: *mut std::ffi::c_void,
+        ) {
+            COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                spawn(move || {
+                    for _ in 0..50 {
+                        if i % 2 == 0 {
+                            unsafe {
+                                wpapi_set_log_callback(Some(dummy_cb), std::ptr::null_mut())
+                            };
+                            tracing::info!("Concurrent log event");
+                        } else {
+                            unsafe {
+                                wpapi_set_log_callback(None, std::ptr::null_mut())
+                            };
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // Clean up
         unsafe { wpapi_set_log_callback(None, std::ptr::null_mut()) };
     }
 }
