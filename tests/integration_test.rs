@@ -57,7 +57,8 @@ fn test_e2e_protocol_packet_roundtrips() {
         audio_data: vec![0xDE, 0xAD, 0xBE, 0xEF],
     };
     let audio_bytes = client_audio.encode();
-    let decoded_audio = ProtocolPacket::decode(&audio_bytes).expect("Decode ClientTargetedAudio failed");
+    let decoded_audio =
+        ProtocolPacket::decode(&audio_bytes).expect("Decode ClientTargetedAudio failed");
     assert_eq!(decoded_audio, client_audio);
 }
 
@@ -76,7 +77,8 @@ fn test_e2e_daemon_registry_short_id_resolution() {
     );
 
     // Ambiguous prefix search
-    let addr2 = UserAddress::new("abcdef1234569999999999999999999999999999999999999999999999999999");
+    let addr2 =
+        UserAddress::new("abcdef1234569999999999999999999999999999999999999999999999999999");
     registry.addresses.insert(2, addr2);
 
     assert_eq!(
