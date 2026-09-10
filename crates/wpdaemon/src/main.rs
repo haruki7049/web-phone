@@ -86,10 +86,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/addresses",
             axum::routing::get(wpdaemon::handlers::list_registered_addresses),
-        )
-        .route(
-            "/addresses/:id",
-            axum::routing::get(wpdaemon::handlers::resolve_registered_address),
         );
 
     let listener = tokio::net::TcpListener::bind(address).await?;
