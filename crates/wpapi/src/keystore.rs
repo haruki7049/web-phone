@@ -62,13 +62,12 @@ pub fn save_encrypted_keystore(
         .map_err(|e| format!("Invalid Argon2id params: {}", e))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
-    let mut derived_buf = [0u8; 32];
+    let mut derived_key = aes_gcm::Key::<Aes256Gcm>::default();
     argon2
-        .hash_password_into(passphrase.as_bytes(), &salt, &mut derived_buf)
+        .hash_password_into(passphrase.as_bytes(), &salt, derived_key.as_mut_slice())
         .map_err(|e| format!("Argon2id key derivation failed: {}", e))?;
 
-    let cipher = Aes256Gcm::new_from_slice(&derived_buf)
-        .map_err(|e| format!("AES-256-GCM initialization failed: {}", e))?;
+    let cipher = Aes256Gcm::new(&derived_key);
     let nonce_raw: [u8; 12] = rand::random();
     let nonce = aes_gcm::Nonce::from(nonce_raw);
 
@@ -142,26 +141,22 @@ pub fn load_encrypted_keystore(passphrase: &str, path: &Path) -> Result<UserKeyp
 
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
-    let mut derived_buf = [0u8; 32];
+    let mut derived_key = aes_gcm::Key::<Aes256Gcm>::default();
     argon2
-        .hash_password_into(passphrase.as_bytes(), &salt, &mut derived_buf)
+        .hash_password_into(passphrase.as_bytes(), &salt, derived_key.as_mut_slice())
         .map_err(|e| format!("Argon2id key derivation failed: {}", e))?;
 
-    let cipher = Aes256Gcm::new_from_slice(&derived_buf)
-        .map_err(|e| format!("AES-256-GCM initialization failed: {}", e))?;
+    let cipher = Aes256Gcm::new(&derived_key);
 
     let nonce = aes_gcm::Nonce::from(nonce_bytes);
     let decrypted_bytes = cipher
         .decrypt(&nonce, ciphertext.as_slice())
         .map_err(|_| "Decryption failed: Incorrect passphrase or corrupted keystore".to_string())?;
 
-    if decrypted_bytes.len() != 32 {
-        return Err("Decrypted payload length is invalid for Ed25519 secret key".into());
-    }
-
-    let mut secret_buf = [0u8; 32];
-    secret_buf.copy_from_slice(&decrypted_bytes);
-    let keypair = UserKeypair::from_bytes(&secret_buf);
+    let secret_array: [u8; 32] = decrypted_bytes
+        .try_into()
+        .map_err(|_| "Decrypted payload length is invalid for Ed25519 secret key")?;
+    let keypair = UserKeypair::from_bytes(&secret_array);
 
     if keypair.public_key_address().id != store.user_address {
         return Err("Decrypted public key does not match keystore user_address".into());
