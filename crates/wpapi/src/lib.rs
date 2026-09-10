@@ -3,6 +3,7 @@
 pub mod address;
 pub mod audio;
 pub mod call;
+pub mod client;
 pub mod config;
 pub mod keystore;
 pub mod protocol;
@@ -20,6 +21,7 @@ pub use address::{
     verify_secp256k1_authorization_header_with_cache,
 };
 pub use audio::AudioEngine;
+pub use client::DaemonApiClient;
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 pub use keystore::{
     EncryptedKeyStore, KeyStoreError, get_default_keystore_path, load_encrypted_keystore,
@@ -416,18 +418,8 @@ pub unsafe extern "C" fn wpapi_list_addresses(
         };
 
         let res: Result<String, anyhow::Error> = rt.block_on(async {
-            let client = reqwest::Client::new();
-            let keypair = UserKeypair::generate();
-            let (_, auth_hdr) = build_authorization_header(&keypair, "");
-            let resp = client
-                .get(&endpoint)
-                .header(reqwest::header::AUTHORIZATION, auth_hdr)
-                .send()
-                .await?;
-            if !resp.status().is_success() {
-                anyhow::bail!("Server returned HTTP status {}", resp.status());
-            }
-            let addresses: Vec<UserAddress> = resp.json().await?;
+            let daemon_client = DaemonApiClient::new();
+            let addresses = daemon_client.fetch_registered_addresses(cfg).await?;
             let json_str = serde_json::to_string(&addresses)?;
             Ok(json_str)
         });

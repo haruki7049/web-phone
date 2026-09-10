@@ -438,36 +438,10 @@ fn fetch_registered_addresses(app: &mut TuiApp) {
     app.add_log("Fetching registered user addresses from daemon...".to_string());
 
     tokio::spawn(async move {
-        let endpoint = format!("{}/addresses", config.server_url());
-        let client = reqwest::Client::new();
-        let keypair = wpapi::UserKeypair::generate();
-        let (_, auth_hdr) = wpapi::build_authorization_header(&keypair, "");
-        match client
-            .get(&endpoint)
-            .header(reqwest::header::AUTHORIZATION, auth_hdr)
-            .send()
-            .await
-        {
-            Ok(resp) => {
-                if resp.status().is_success() {
-                    match resp.json::<Vec<UserAddress>>().await {
-                        Ok(addrs) => {
-                            let _ = event_tx.send(AppEvent::RegisteredAddresses(addrs)).await;
-                        }
-                        Err(e) => {
-                            let _ = event_tx
-                                .send(AppEvent::Log(format!("Failed to parse response: {}", e)))
-                                .await;
-                        }
-                    }
-                } else {
-                    let _ = event_tx
-                        .send(AppEvent::Log(format!(
-                            "Server returned HTTP status {}",
-                            resp.status()
-                        )))
-                        .await;
-                }
+        let daemon_client = wpapi::DaemonApiClient::new();
+        match daemon_client.fetch_registered_addresses(&config).await {
+            Ok(addrs) => {
+                let _ = event_tx.send(AppEvent::RegisteredAddresses(addrs)).await;
             }
             Err(e) => {
                 let _ = event_tx
