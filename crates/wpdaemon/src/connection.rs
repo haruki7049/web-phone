@@ -27,31 +27,26 @@ use wpapi::{ProtocolPacket, UserAddress};
 /// Counter for connected clients.
 static CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 
-/// Helper to calculate audio energy (RMS) of audio frame payload.
+/// Helper to calculate audio energy (RMS) of audio frame payload or extract unencrypted WPIP-11 SFrame AudioEnergyByte.
 pub fn calculate_audio_energy(audio_data: &[u8]) -> f64 {
     if audio_data.is_empty() {
         return 0.0;
     }
-    if audio_data.len() >= 4 && audio_data.len().is_multiple_of(4) {
-        let (chunks, _) = audio_data.as_chunks::<4>();
-        let sum_sq: f64 = chunks
-            .iter()
-            .map(|c| {
-                let sample = f32::from_le_bytes(*c) as f64;
-                sample * sample
-            })
-            .sum();
-        (sum_sq / chunks.len() as f64).sqrt()
-    } else {
-        let sum_sq: f64 = audio_data
-            .iter()
-            .map(|&b| {
-                let val = (b as f64) - 128.0;
-                val * val
-            })
-            .sum();
-        (sum_sq / audio_data.len() as f64).sqrt()
+    // WPIP-11 SFrame E2EE Zero-Knowledge SFU check:
+    // When non-multiple of 4 (e.g. 1-byte unencrypted AudioEnergy header + AES-GCM ciphertext),
+    // extract unencrypted energy byte directly without decrypting audio payload.
+    if !audio_data.len().is_multiple_of(4) {
+        return (audio_data[0] as f64) / 255.0;
     }
+    let (chunks, _) = audio_data.as_chunks::<4>();
+    let sum_sq: f64 = chunks
+        .iter()
+        .map(|c| {
+            let sample = f32::from_le_bytes(*c) as f64;
+            sample * sample
+        })
+        .sum();
+    (sum_sq / chunks.len() as f64).sqrt()
 }
 
 /// Start background keep-alive heartbeat task (WPIP-09).
@@ -997,5 +992,21 @@ mod tests {
             err,
             SignalingError::Unauthorized(wpapi::AuthError::ReplayDetected)
         ));
+    }
+
+    #[test]
+    fn test_sfu_zero_knowledge_energy_routing() {
+        let key = [0x55u8; 32];
+        let nonce = [0x09u8; 12];
+        let sframe = wpapi::SFrameCodec::new(&key).unwrap();
+
+        let raw_pcm = vec![0.5f32.to_le_bytes(), 0.8f32.to_le_bytes()].concat();
+        let energy_byte = 204u8; // ~0.8 scale (204/255 = 0.8)
+
+        let encrypted_frame = sframe.encrypt_frame(&nonce, energy_byte, &raw_pcm).unwrap();
+
+        // Ensure wpdaemon calculates audio energy without decrypting SFrame payload
+        let calculated_energy = calculate_audio_energy(&encrypted_frame);
+        assert!((calculated_energy - (204.0 / 255.0)).abs() < 1e-4);
     }
 }

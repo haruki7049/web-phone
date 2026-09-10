@@ -8,6 +8,7 @@ pub mod keystore;
 pub mod protocol;
 pub mod resample;
 pub mod session;
+pub mod sframe;
 pub mod turn_auth;
 pub mod webrtc_session;
 
@@ -26,6 +27,7 @@ pub use keystore::{
 };
 pub use protocol::{ProtocolError, ProtocolPacket};
 pub use session::ClientSession;
+pub use sframe::{SFrameCodec, SFrameError};
 pub use turn_auth::{
     TurnCredential, generate_ephemeral_turn_credential, verify_ephemeral_turn_credential,
 };
