@@ -48,3 +48,26 @@ ______________________________________________________________________
 
 - `wpdaemon` MUST support both `WP-Ed25519` (WPIP-02 / WPIP-03) and `WP-Secp256k1` (WPIP-16) authorization schemes concurrently.
 - Unauthenticated fallback connections MUST continue to generate temporary `UserAddress` instances as specified in WPIP-02.
+
+______________________________________________________________________
+
+## 4. Client `nsec` Key Ingestion & Keystore Storage
+
+### 4.1 CLI & Environment Variable Key Ingestion
+
+`wpclient` implementations MUST accept Nostr secret keys specified via:
+
+- `--nostr-key <KEY>` (CLI flag, aliases `-n`, `--nsec`)
+- `WPCLIENT_NOSTR_KEY` (Environment variable)
+
+Implementations MUST accept both:
+
+1. **Bech32 string**: NIP-19 `nsec1...` format decoded via BIP-173 Bech32 to 32 raw bytes.
+1. **Hex string**: 64-character hexadecimal representation of the 32-byte secp256k1 secret key.
+
+### 4.2 WPIP-14 Encrypted Keystore Integration
+
+When persisting a Nostr secp256k1 identity key to `keystore.json` via WPIP-14:
+
+- The JSON structure MUST include `"key_type": "secp256k1"`.
+- The raw 32-byte secret key MUST be encrypted using Argon2id key derivation and AES-256-GCM authenticated encryption.

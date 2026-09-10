@@ -35,6 +35,7 @@ Encrypted client key stores MUST be stored using the following JSON structure:
 {
   "version": 1,
   "user_address": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "key_type": "ed25519",
   "crypto": {
     "kdf": "argon2id",
     "kdf_params": {
@@ -45,7 +46,7 @@ Encrypted client key stores MUST be stored using the following JSON structure:
     },
     "cipher": "aes-256-gcm",
     "nonce": "base64_encoded_12_byte_nonce",
-    "ciphertext": "base64_encoded_encrypted_ed25519_secret_key"
+    "ciphertext": "base64_encoded_encrypted_secret_key"
   }
 }
 ```
