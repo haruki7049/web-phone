@@ -1,6 +1,7 @@
 //! WebRTC DataChannel event loop and packet routing handlers.
 
 use crate::broadcast::{AUDIO_BROADCAST, AudioMessage};
+use crate::constants::{DEFAULT_INITIAL_TTL, MAX_MESSAGE_SIZE};
 use crate::registry::{CLIENT_REGISTRY, matches_address};
 use bytes::BytesMut;
 use std::sync::Arc;
@@ -183,123 +184,194 @@ async fn handle_client_targeted_audio(
     sender_addr: Option<UserAddress>,
     target_address: UserAddress,
     my_node_id: u64,
-    audio_data: Vec<u8>,
-    sender_dc: &Arc<dyn DataChannel>,
+    payload: Vec<u8>,
+    dc: &Arc<dyn DataChannel>,
 ) {
-    if let Some(target_cid) = super::find_client_by_address(&target_address) {
-        if super::is_call_rejected(target_cid, sender_addr.as_ref().unwrap()) {
-            info!(
-                "Call to client {} was rejected, dropping audio and notifying caller",
-                target_cid
+    if payload.len() > MAX_MESSAGE_SIZE {
+        warn!(
+            "Client {} sent oversized audio packet ({} bytes), ignoring",
+            client_id,
+            payload.len()
+        );
+        return;
+    }
+
+    let caller_user_addr = sender_addr.clone().unwrap_or_default();
+
+    if super::is_client_in_room(client_id, &target_address) {
+        // Group call mode
+    } else if let Some(target_cid) = super::find_client_by_address(&target_address) {
+        if super::is_call_rejected(target_cid, &caller_user_addr) {
+            warn!(
+                "Rejecting Client {} call to {}: call rejected by recipient",
+                client_id,
+                target_address.short_id()
             );
-            let notif = ProtocolPacket::CallRejectedNotification {
+            let err_packet = ProtocolPacket::ConnectionError {
                 target_address: target_address.clone(),
             };
-            let _ = sender_dc
-                .send(BytesMut::from(notif.encode().as_slice()))
+            let _ = dc
+                .send(BytesMut::from(err_packet.encode().as_slice()))
                 .await;
             return;
         }
 
-        if !super::is_call_approved(target_cid, sender_addr.as_ref().unwrap()) {
-            if !super::has_been_notified(target_cid, client_id) {
-                info!(
-                    "Sending CallRequest notification to target client {}",
-                    target_cid
-                );
-                let call_req = ProtocolPacket::CallRequest {
-                    caller_id: client_id,
-                    caller_address: sender_addr.clone().unwrap_or_default(),
-                };
-                let target_dc = {
-                    let reg = CLIENT_REGISTRY.read().unwrap();
-                    reg.data_channels.get(&target_cid).cloned()
-                };
-                if let Some(tdc) = target_dc {
-                    let _ = tdc.send(BytesMut::from(call_req.encode().as_slice())).await;
-                }
-                super::mark_notified(target_cid, client_id);
-            }
+        let is_in_same_call = super::is_client_in_same_call(client_id, &target_address);
+        let is_mutual = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .targets
+            .get(&target_cid)
+            .map(|addr| matches_address(addr, &caller_user_addr))
+            .unwrap_or(false);
+
+        if !is_in_same_call && !is_mutual && super::is_room_or_target_full(&target_address) {
+            warn!(
+                "Rejecting Client {} call to {}: target user busy",
+                client_id,
+                target_address.short_id()
+            );
+            let err_packet = ProtocolPacket::ConnectionError {
+                target_address: target_address.clone(),
+            };
+            let _ = dc
+                .send(BytesMut::from(err_packet.encode().as_slice()))
+                .await;
             return;
         }
 
-        let audio_msg = AudioMessage {
+        if !is_mutual && !super::is_call_approved(target_cid, &caller_user_addr) {
+            if !super::has_been_notified(target_cid, client_id) {
+                super::mark_notified(target_cid, client_id);
+                let target_dc = CLIENT_REGISTRY
+                    .read()
+                    .unwrap()
+                    .data_channels
+                    .get(&target_cid)
+                    .cloned();
+                if let Some(target_dc) = target_dc {
+                    let req_packet = ProtocolPacket::CallRequest {
+                        caller_id: client_id,
+                        caller_address: caller_user_addr.clone(),
+                    };
+                    let _ = target_dc
+                        .send(BytesMut::from(req_packet.encode().as_slice()))
+                        .await;
+                    info!(
+                        "Sent call request notification to Client {} for caller Client {} ({})",
+                        target_cid,
+                        client_id,
+                        caller_user_addr.short_id()
+                    );
+                }
+            }
+            return;
+        }
+    } else {
+        warn!(
+            "Rejecting Client {} connection to target {}: target user not found or offline",
+            client_id,
+            target_address.short_id()
+        );
+        let err_packet = ProtocolPacket::ConnectionError {
+            target_address: target_address.clone(),
+        };
+        let _ = dc
+            .send(BytesMut::from(err_packet.encode().as_slice()))
+            .await;
+        return;
+    }
+
+    CLIENT_REGISTRY
+        .write()
+        .unwrap()
+        .targets
+        .insert(client_id, target_address.clone());
+
+    if !payload.is_empty() {
+        let _ = AUDIO_BROADCAST.send(AudioMessage {
             sender_id: client_id,
             sender_address: sender_addr,
-            target_address: target_address.clone(),
-            data: audio_data,
-        };
-        let _ = AUDIO_BROADCAST.send(audio_msg);
-    } else {
-        crate::peer::forward_peer_audio(
-            client_id,
-            my_node_id,
             target_address,
-            sender_addr.unwrap_or_default(),
-            crate::constants::DEFAULT_INITIAL_TTL,
-            audio_data,
-        )
-        .await;
+            origin_node: my_node_id,
+            ttl: DEFAULT_INITIAL_TTL,
+            data: payload,
+        });
     }
 }
 
 async fn handle_call_accept_response(client_id: u64, caller_address: UserAddress) {
     info!(
-        "Client {} accepted call request from {}",
+        "Client {} accepted call request from caller {}",
         client_id,
         caller_address.short_id()
     );
     super::mark_call_approved(client_id, caller_address.clone());
 
-    if let Some(caller_cid) = super::find_client_by_address(&caller_address) {
-        let caller_user_addr = CLIENT_REGISTRY
+    {
+        let mut reg = CLIENT_REGISTRY.write().unwrap();
+        reg.targets
+            .entry(client_id)
+            .or_insert_with(|| caller_address.clone());
+    }
+
+    let caller_dc = super::find_client_by_address(&caller_address).and_then(|caller_cid| {
+        CLIENT_REGISTRY
             .read()
             .unwrap()
-            .client_addresses
+            .data_channels
+            .get(&caller_cid)
+            .cloned()
+    });
+
+    if let Some(caller_dc) = caller_dc {
+        let my_addr = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .addresses
             .get(&client_id)
-            .cloned();
-
-        let notif = ProtocolPacket::CallAcceptedNotification {
-            target_address: caller_user_addr.unwrap_or_default(),
+            .cloned()
+            .unwrap_or_default();
+        let accept_packet = ProtocolPacket::CallAcceptedNotification {
+            target_address: my_addr,
         };
-
-        let caller_dc = {
-            let reg = CLIENT_REGISTRY.read().unwrap();
-            reg.data_channels.get(&caller_cid).cloned()
-        };
-        if let Some(cdc) = caller_dc {
-            let _ = cdc.send(BytesMut::from(notif.encode().as_slice())).await;
-        }
+        let _ = caller_dc
+            .send(BytesMut::from(accept_packet.encode().as_slice()))
+            .await;
     }
 }
 
 async fn handle_call_reject_response(client_id: u64, caller_address: UserAddress) {
     info!(
-        "Client {} rejected call request from {}",
+        "Client {} rejected call request from caller {}",
         client_id,
         caller_address.short_id()
     );
     super::mark_call_rejected(client_id, caller_address.clone());
 
-    if let Some(caller_cid) = super::find_client_by_address(&caller_address) {
-        let caller_user_addr = CLIENT_REGISTRY
+    let caller_dc = super::find_client_by_address(&caller_address).and_then(|caller_cid| {
+        CLIENT_REGISTRY
             .read()
             .unwrap()
-            .client_addresses
+            .data_channels
+            .get(&caller_cid)
+            .cloned()
+    });
+
+    if let Some(caller_dc) = caller_dc {
+        let my_addr = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .addresses
             .get(&client_id)
-            .cloned();
-
-        let notif = ProtocolPacket::CallRejectedNotification {
-            target_address: caller_user_addr.unwrap_or_default(),
+            .cloned()
+            .unwrap_or_default();
+        let reject_packet = ProtocolPacket::CallRejectedNotification {
+            target_address: my_addr,
         };
-
-        let caller_dc = {
-            let reg = CLIENT_REGISTRY.read().unwrap();
-            reg.data_channels.get(&caller_cid).cloned()
-        };
-        if let Some(cdc) = caller_dc {
-            let _ = cdc.send(BytesMut::from(notif.encode().as_slice())).await;
-        }
+        let _ = caller_dc
+            .send(BytesMut::from(reject_packet.encode().as_slice()))
+            .await;
     }
 }
 
@@ -308,128 +380,101 @@ async fn handle_call_hangup(
     sender_addr: Option<UserAddress>,
     target_address: UserAddress,
 ) {
+    let my_addr = sender_addr.unwrap_or_default();
     info!(
-        "Client {} sent hangup signal for target {}",
+        "Client {} ({}) initiated CallHangup for target {}",
         client_id,
+        my_addr.short_id(),
         target_address.short_id()
     );
+    CLIENT_REGISTRY
+        .write()
+        .unwrap()
+        .clear_call_session(client_id, &target_address);
 
-    if let Some(sender_addr) = sender_addr {
+    let target_dc = super::find_client_by_address(&target_address).and_then(|target_cid| {
         CLIENT_REGISTRY
-            .write()
+            .read()
             .unwrap()
-            .remove_call_approval(client_id, &target_address);
+            .data_channels
+            .get(&target_cid)
+            .cloned()
+    });
 
-        if let Some(target_cid) = super::find_client_by_address(&target_address) {
-            CLIENT_REGISTRY
-                .write()
-                .unwrap()
-                .remove_call_approval(target_cid, &sender_addr);
-
-            let notif = ProtocolPacket::CallEndedNotification {
-                target_address: sender_addr,
-            };
-
-            let target_dc = {
-                let reg = CLIENT_REGISTRY.read().unwrap();
-                reg.data_channels.get(&target_cid).cloned()
-            };
-            if let Some(tdc) = target_dc {
-                let _ = tdc.send(BytesMut::from(notif.encode().as_slice())).await;
-            }
-        }
+    if let Some(target_dc) = target_dc {
+        let ended_pkt = ProtocolPacket::CallEndedNotification {
+            target_address: my_addr,
+        };
+        let _ = target_dc
+            .send(BytesMut::from(ended_pkt.encode().as_slice()))
+            .await;
     }
 }
 
 async fn handle_room_join(client_id: u64, room_address: UserAddress) {
-    info!(
-        "Client {} joining room {}",
-        client_id,
-        room_address.short_id()
-    );
-
-    let (member_count, state_notif, old_members) = {
+    let (member_count, member_cids) = {
         let mut reg = CLIENT_REGISTRY.write().unwrap();
-        let member_count = reg.get_room_participant_count(&room_address);
-
-        if member_count >= crate::constants::MAX_ROOM_MEMBERS {
-            warn!(
-                "Client {} failed to join room {}: maximum capacity ({}) reached",
-                client_id,
-                room_address.short_id(),
-                crate::constants::MAX_ROOM_MEMBERS
-            );
-            return;
-        }
-
-        let old_members = reg.get_room_members(&room_address);
-        reg.join_room(client_id, room_address.clone());
-        let new_count = reg.get_room_participant_count(&room_address);
-
-        let state_notif = ProtocolPacket::RoomStateNotification {
-            room_address: room_address.clone(),
-            participant_count: new_count as u32,
-        };
-
-        (new_count, state_notif, old_members)
+        let count = reg.join_room(client_id, room_address.clone());
+        let members = reg.get_room_member_ids(&room_address);
+        (count, members)
     };
-
-    let notif_bytes = BytesMut::from(state_notif.encode().as_slice());
-
-    let my_dc = {
-        let reg = CLIENT_REGISTRY.read().unwrap();
-        reg.data_channels.get(&client_id).cloned()
-    };
-    if let Some(dc) = my_dc {
-        let _ = dc.send(notif_bytes.clone()).await;
-    }
-
-    for member_cid in old_members {
-        let member_dc = {
-            let reg = CLIENT_REGISTRY.read().unwrap();
-            reg.data_channels.get(&member_cid).cloned()
-        };
-        if let Some(dc) = member_dc {
-            let _ = dc.send(notif_bytes.clone()).await;
-        }
-    }
 
     info!(
-        "Client {} joined room {} (total participants: {})",
+        "Client {} joined room {} (Total participants: {})",
         client_id,
         room_address.short_id(),
         member_count
     );
+
+    let state_pkt = ProtocolPacket::RoomStateNotification {
+        room_address,
+        participant_count: member_count,
+    };
+    let bytes = BytesMut::from(state_pkt.encode().as_slice());
+
+    for member_cid in member_cids {
+        let dc = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .data_channels
+            .get(&member_cid)
+            .cloned();
+        if let Some(dc) = dc {
+            let _ = dc.send(bytes.clone()).await;
+        }
+    }
 }
 
 async fn handle_room_leave(client_id: u64, room_address: &UserAddress) {
-    info!(
-        "Client {} leaving room {}",
-        client_id,
-        room_address.short_id()
-    );
-
-    let (remaining_count, remaining_members) = {
+    let (remaining_count, member_cids) = {
         let mut reg = CLIENT_REGISTRY.write().unwrap();
-        reg.leave_room(client_id, room_address);
-        let count = reg.get_room_participant_count(room_address);
-        let members = reg.get_room_members(room_address);
+        let count = reg.leave_room(client_id, room_address);
+        let members = reg.get_room_member_ids(room_address);
         (count, members)
     };
 
-    let state_notif = ProtocolPacket::RoomStateNotification {
-        room_address: room_address.clone(),
-        participant_count: remaining_count as u32,
-    };
-    let notif_bytes = BytesMut::from(state_notif.encode().as_slice());
+    info!(
+        "Client {} left room {} (Remaining participants: {})",
+        client_id,
+        room_address.short_id(),
+        remaining_count
+    );
 
-    for member_cid in remaining_members {
-        let member_dc = {
-            let reg = CLIENT_REGISTRY.read().unwrap();
-            reg.data_channels.get(&member_cid).cloned()
-        };
-        if let Some(dc) = member_dc {
-            let _ = dc.send(notif_bytes.clone()).await;
+    let state_pkt = ProtocolPacket::RoomStateNotification {
+        room_address: room_address.clone(),
+        participant_count: remaining_count,
+    };
+    let bytes = BytesMut::from(state_pkt.encode().as_slice());
+
+    for member_cid in member_cids {
+        let dc = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .data_channels
+            .get(&member_cid)
+            .cloned();
+        if let Some(dc) = dc {
+            let _ = dc.send(bytes.clone()).await;
         }
     }
 }
@@ -438,51 +483,69 @@ async fn handle_room_group_audio(
     client_id: u64,
     room_address: UserAddress,
     codec_id: u8,
-    audio_data: Vec<u8>,
+    payload: Vec<u8>,
 ) {
-    if !super::is_client_in_room(client_id, &room_address) {
+    if payload.len() > MAX_MESSAGE_SIZE {
+        warn!(
+            "Client {} sent oversized group audio packet ({} bytes), ignoring",
+            client_id,
+            payload.len()
+        );
         return;
     }
 
-    let energy = super::calculate_audio_energy(&audio_data);
-    let (room_members, top_speakers) = {
+    let energy = super::calculate_audio_energy(&payload);
+    let (is_top_k, top_speakers, _) = {
         let mut reg = CLIENT_REGISTRY.write().unwrap();
-        reg.record_audio_energy(client_id, room_address.clone(), energy);
-        let members = reg.get_room_members(&room_address);
-        let top_speakers = reg.get_top_k_speakers(&room_address, crate::constants::TOP_K_SPEAKERS);
-        (members, top_speakers)
+        reg.update_speaker_energy(&room_address, client_id, energy)
     };
 
-    let speaker_notice = ProtocolPacket::ActiveSpeakerNotice {
+    if !is_top_k {
+        return;
+    }
+
+    let member_cids = CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .get_room_member_ids(&room_address);
+
+    let server_audio_pkt = ProtocolPacket::RoomGroupAudio {
         room_address: room_address.clone(),
-        speaker_addresses: top_speakers,
-    };
-    let speaker_bytes = BytesMut::from(speaker_notice.encode().as_slice());
-
-    let my_user_addr = {
-        let reg = CLIENT_REGISTRY.read().unwrap();
-        reg.client_addresses.get(&client_id).cloned()
-    };
-
-    let server_audio_packet = ProtocolPacket::ServerTargetedAudio {
-        target_address: room_address.clone(),
-        sender_id: client_id,
-        sender_address: my_user_addr.unwrap_or_default(),
         codec_id,
-        audio_data,
+        audio_data: payload,
     };
-    let audio_bytes = BytesMut::from(server_audio_packet.encode().as_slice());
+    let bytes = BytesMut::from(server_audio_pkt.encode().as_slice());
 
-    for member_cid in room_members {
-        let member_dc = {
-            let reg = CLIENT_REGISTRY.read().unwrap();
-            reg.data_channels.get(&member_cid).cloned()
+    for member_cid in &member_cids {
+        if *member_cid == client_id {
+            continue;
+        }
+        let dc = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .data_channels
+            .get(member_cid)
+            .cloned();
+        if let Some(dc) = dc {
+            let _ = dc.send(bytes.clone()).await;
+        }
+    }
+
+    if !top_speakers.is_empty() {
+        let notice_pkt = ProtocolPacket::ActiveSpeakerNotice {
+            room_address,
+            speaker_addresses: top_speakers,
         };
-
-        if let Some(dc) = member_dc {
-            let _ = dc.send(speaker_bytes.clone()).await;
-            if member_cid != client_id {
-                let _ = dc.send(audio_bytes.clone()).await;
+        let notice_bytes = BytesMut::from(notice_pkt.encode().as_slice());
+        for member_cid in member_cids {
+            let dc = CLIENT_REGISTRY
+                .read()
+                .unwrap()
+                .data_channels
+                .get(&member_cid)
+                .cloned();
+            if let Some(dc) = dc {
+                let _ = dc.send(notice_bytes.clone()).await;
             }
         }
     }

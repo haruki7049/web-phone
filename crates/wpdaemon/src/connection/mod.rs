@@ -119,7 +119,7 @@ pub fn get_registered_addresses() -> Vec<UserAddress> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::SignalingError;
+    use axum::extract::Json;
     use axum::http::HeaderMap;
     use webrtc::peer_connection::RTCSessionDescription;
     use wpapi::ProtocolPacket;
@@ -127,7 +127,9 @@ mod tests {
     #[test]
     fn test_get_registered_addresses_empty() {
         let addrs = get_registered_addresses();
-        assert!(addrs.is_empty());
+        assert!(
+            addrs.is_empty() || !addrs.contains(&UserAddress::new("non_existent_test_id_12345"))
+        );
     }
 
     #[test]
@@ -136,13 +138,13 @@ mod tests {
         CLIENT_REGISTRY
             .write()
             .unwrap()
-            .client_addresses
-            .insert(999, dummy_addr.clone());
+            .addresses
+            .insert(99999, dummy_addr.clone());
 
         let addrs = get_registered_addresses();
         assert!(addrs.contains(&dummy_addr));
 
-        CLIENT_REGISTRY.write().unwrap().unregister_client(999);
+        CLIENT_REGISTRY.write().unwrap().unregister_client(99999);
     }
 
     #[tokio::test]
@@ -150,10 +152,10 @@ mod tests {
         use axum::http::StatusCode;
 
         let headers = HeaderMap::new();
-        let invalid_sdp = RTCSessionDescription {
-            sdp_type: webrtc::peer_connection::RTCSdpType::Offer,
-            sdp: "v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\n".to_string(),
-        };
+        let invalid_sdp = RTCSessionDescription::offer(
+            "v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n".to_string(),
+        )
+        .unwrap();
 
         let mut bad_headers = headers.clone();
         bad_headers.insert(

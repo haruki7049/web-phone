@@ -1,6 +1,7 @@
 //! WebRTC SDP handshake and connection handler.
 
 use crate::config::CONFIGURATION;
+use crate::constants::{HANDSHAKE_TIMEOUT, ICE_GATHER_TIMEOUT};
 use crate::error::SignalingError;
 use crate::registry::CLIENT_REGISTRY;
 use async_trait::async_trait;
@@ -10,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 use webrtc::peer_connection::{
-    PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
+    PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
     RTCIceGatheringState, RTCPeerConnectionState, RTCSessionDescription,
 };
 use wpapi::UserAddress;
@@ -151,38 +152,66 @@ pub async fn handle_sdp_offer(
         .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
         .build()
         .await
-        .map_err(|e| SignalingError::PeerConnectionFailed(e.to_string()))?;
+        .map_err(|e| {
+            SignalingError::InternalError(format!("Failed to build PeerConnection: {}", e))
+        })?;
 
-    pc.set_remote_description(offer)
+    let peer_connection: Arc<dyn PeerConnection> = Arc::new(pc);
+
+    info!(
+        "Client {} connected, assigned User ID: {}",
+        client_id, user_address
+    );
+
+    CLIENT_REGISTRY.write().unwrap().register_client(
+        client_id,
+        user_address.clone(),
+        Arc::clone(&peer_connection),
+    );
+
+    // Handshake timeout task: close connection if DataChannel is not opened within 15s
+    let pc_timeout = Arc::clone(&peer_connection);
+    tokio::spawn(async move {
+        tokio::time::sleep(HANDSHAKE_TIMEOUT).await;
+        let has_dc = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .data_channels
+            .contains_key(&client_id);
+        if !has_dc {
+            warn!(
+                "Handshake timeout: Client {} failed to open DataChannel within 15s, closing connection",
+                client_id
+            );
+            let _ = pc_timeout.close().await;
+            CLIENT_REGISTRY
+                .write()
+                .unwrap()
+                .unregister_client(client_id);
+        }
+    });
+
+    peer_connection
+        .set_remote_description(offer)
         .await
-        .map_err(|e| SignalingError::PeerConnectionFailed(e.to_string()))?;
+        .map_err(|e| SignalingError::InvalidSdpOffer(e.to_string()))?;
 
-    let answer = pc
-        .create_answer()
+    let answer = peer_connection.create_answer(None).await.map_err(|e| {
+        SignalingError::InternalError(format!("Failed to create SDP answer: {}", e))
+    })?;
+
+    peer_connection
+        .set_local_description(answer)
         .await
-        .map_err(|e| SignalingError::PeerConnectionFailed(e.to_string()))?;
+        .map_err(|e| {
+            SignalingError::InternalError(format!("Failed to set local description: {}", e))
+        })?;
 
-    pc.set_local_description(answer.clone())
-        .await
-        .map_err(|e| SignalingError::PeerConnectionFailed(e.to_string()))?;
+    let _ = tokio::time::timeout(ICE_GATHER_TIMEOUT, gather_rx.recv()).await;
 
-    // Register PeerConnection handle in registry
-    CLIENT_REGISTRY
-        .write()
-        .unwrap()
-        .register_client(client_id, user_address, Arc::clone(&pc));
+    let local_desc = peer_connection.local_description().await.ok_or_else(|| {
+        SignalingError::InternalError("No local description available".to_string())
+    })?;
 
-    // Wait for ICE gathering to complete or timeout
-    let _ = tokio::time::timeout(
-        tokio::time::Duration::from_millis(crate::constants::ICE_GATHER_TIMEOUT),
-        gather_rx.recv(),
-    )
-    .await;
-
-    let final_sdp = pc
-        .local_description()
-        .await
-        .ok_or_else(|| SignalingError::PeerConnectionFailed("Missing local SDP".to_string()))?;
-
-    Ok(Json(final_sdp))
+    Ok(Json(local_desc))
 }
