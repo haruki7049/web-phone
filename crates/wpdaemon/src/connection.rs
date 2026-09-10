@@ -1009,4 +1009,44 @@ mod tests {
         let calculated_energy = calculate_audio_energy(&encrypted_frame);
         assert!((calculated_energy - (204.0 / 255.0)).abs() < 1e-4);
     }
+
+    #[tokio::test]
+    async fn test_addresses_authentication_requirement() {
+        use axum::http::{HeaderMap, HeaderValue, StatusCode};
+
+        // 1. Test missing Authorization header
+        let headers = HeaderMap::new();
+        let auth_header = headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok());
+        assert!(auth_header.is_none());
+
+        // 2. Test invalid Authorization header
+        let mut invalid_headers = HeaderMap::new();
+        invalid_headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer invalid_token"),
+        );
+        let auth_val = invalid_headers
+            .get(axum::http::header::AUTHORIZATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(wpapi::verify_any_authorization_header(auth_val, "").is_err());
+
+        // 3. Test valid Authorization header
+        let keypair = wpapi::UserKeypair::generate();
+        let (_, valid_hdr_val) = wpapi::build_authorization_header(&keypair, "");
+        let mut valid_headers = HeaderMap::new();
+        valid_headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_str(&valid_hdr_val).unwrap(),
+        );
+        let valid_auth_val = valid_headers
+            .get(axum::http::header::AUTHORIZATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(wpapi::verify_any_authorization_header(valid_auth_val, "").is_ok());
+    }
 }

@@ -407,7 +407,13 @@ pub unsafe extern "C" fn wpapi_list_addresses(
 
         let res: Result<String, anyhow::Error> = rt.block_on(async {
             let client = reqwest::Client::new();
-            let resp = client.get(&endpoint).send().await?;
+            let keypair = UserKeypair::generate();
+            let (_, auth_hdr) = build_authorization_header(&keypair, "");
+            let resp = client
+                .get(&endpoint)
+                .header(reqwest::header::AUTHORIZATION, auth_hdr)
+                .send()
+                .await?;
             if !resp.status().is_success() {
                 anyhow::bail!("Server returned HTTP status {}", resp.status());
             }

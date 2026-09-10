@@ -441,7 +441,14 @@ fn fetch_registered_addresses(app: &mut TuiApp) {
         let server_url = format!("http://{}:{}", config.server_ip, config.server_port);
         let endpoint = format!("{}/addresses", server_url);
         let client = reqwest::Client::new();
-        match client.get(&endpoint).send().await {
+        let keypair = wpapi::UserKeypair::generate();
+        let (_, auth_hdr) = wpapi::build_authorization_header(&keypair, "");
+        match client
+            .get(&endpoint)
+            .header(reqwest::header::AUTHORIZATION, auth_hdr)
+            .send()
+            .await
+        {
             Ok(resp) => {
                 if resp.status().is_success() {
                     match resp.json::<Vec<UserAddress>>().await {

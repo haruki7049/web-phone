@@ -304,7 +304,13 @@ async fn list_registered_addresses(config: &Configuration) -> Result<()> {
         endpoint
     );
     let client = reqwest::Client::new();
-    let resp = client.get(&endpoint).send().await?;
+    let keypair = wpapi::UserKeypair::generate();
+    let (_, auth_hdr) = wpapi::build_authorization_header(&keypair, "");
+    let resp = client
+        .get(&endpoint)
+        .header(reqwest::header::AUTHORIZATION, auth_hdr)
+        .send()
+        .await?;
     if resp.status().is_success() {
         let addrs: Vec<UserAddress> = resp.json().await?;
         println!("Registered User Addresses (Total: {}):", addrs.len());

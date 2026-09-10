@@ -108,8 +108,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Handler to retrieve all registered wpclient user addresses.
-async fn list_registered_addresses() -> axum::extract::Json<Vec<wpapi::UserAddress>> {
-    axum::extract::Json(wpdaemon::connection::get_registered_addresses())
+async fn list_registered_addresses(
+    headers: axum::http::HeaderMap,
+) -> Result<axum::extract::Json<Vec<wpapi::UserAddress>>, (axum::http::StatusCode, &'static str)> {
+    let auth_header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok());
+
+    if let Some(auth_val) = auth_header {
+        if wpapi::verify_any_authorization_header(auth_val, "").is_err() {
+            return Err((
+                axum::http::StatusCode::UNAUTHORIZED,
+                "Invalid authorization header signature or timestamp",
+            ));
+        }
+    } else {
+        return Err((
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Missing authorization header for /addresses",
+        ));
+    }
+
+    Ok(axum::extract::Json(wpdaemon::connection::get_registered_addresses()))
 }
 
 /// Command-line arguments for the audio server daemon.
