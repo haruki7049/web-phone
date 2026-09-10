@@ -96,8 +96,8 @@ mod tests {
 
     #[test]
     fn test_sframe_encryption_decryption_roundtrip() {
-        let key = [0x42u8; 32];
-        let nonce = [0x07u8; 12];
+        let key: [u8; 32] = rand::random();
+        let nonce: [u8; 12] = rand::random();
         let codec = SFrameCodec::new(&key).unwrap();
 
         let audio_pcm = [1.0f32.to_le_bytes(), 0.5f32.to_le_bytes()].concat();
@@ -114,9 +114,9 @@ mod tests {
 
     #[test]
     fn test_sframe_decryption_with_wrong_key_fails() {
-        let key1 = [0x11u8; 32];
-        let key2 = [0x22u8; 32];
-        let nonce = [0x01u8; 12];
+        let key1: [u8; 32] = rand::random();
+        let key2: [u8; 32] = rand::random();
+        let nonce: [u8; 12] = rand::random();
 
         let codec1 = SFrameCodec::new(&key1).unwrap();
         let codec2 = SFrameCodec::new(&key2).unwrap();

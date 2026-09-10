@@ -5134,6 +5134,8 @@ dependencies = [
  "cpal",
  "crossterm",
  "futures",
+ "hex",
+ "rand 0.8.8",
  "ratatui",
  "reqwest",
  "thiserror 2.0.20",
