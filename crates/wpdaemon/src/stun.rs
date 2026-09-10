@@ -103,7 +103,9 @@ pub async fn run_stun_server(
                     "TURN Allocate request authentication failed for IP: {}",
                     crate::rate_limit::sanitize_ip(&src.ip().to_string())
                 );
-                if let Ok(err_resp) = build_turn_allocate_error_response(transaction_id, 401, "Unauthorized") {
+                if let Ok(err_resp) =
+                    build_turn_allocate_error_response(transaction_id, 401, "Unauthorized")
+                {
                     let _ = socket.send_to(&err_resp, src).await;
                 }
             } else {

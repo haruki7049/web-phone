@@ -34,7 +34,7 @@
 #define CODEC_PCM_S16LE 2
 
 /**
- * Maximum allowable total packet size (1 MB / 1,048,576 bytes) to prevent memory allocation DoS attacks.
+ * Maximum allowable total packet size (1 MB / 1,048,576 bytes) per WPIP-04.
  */
 #define MAX_PACKET_SIZE 1048576
 
@@ -93,6 +93,8 @@
 #define MIN_LEN_ROOM_STATE_NOTIFICATION ((1 + LEN_USER_ADDR) + LEN_PARTICIPANT_COUNT)
 
 #define MIN_LEN_PING_PONG (1 + LEN_TIMESTAMP)
+
+#define MIN_LEN_VIDEO_FRAME_DATA ((1 + LEN_USER_ADDR) + 1)
 
 /**
  * Maximum allowed TTL for ephemeral TURN credentials (24 hours).

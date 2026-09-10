@@ -3,6 +3,9 @@
 //! This module provides functionality for listing available audio
 //! input (microphone) and output (speaker) devices on the system.
 
+pub mod buffer;
+pub use buffer::AudioRingBuffer;
+
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait};
 use tracing::info;
@@ -253,19 +256,10 @@ impl AudioEngine {
                                 + 4;
                             let mut net_samples = Vec::with_capacity(net_needed);
                             {
-                                let mut buffer = audio_buf.lock().unwrap();
-                                // Latency Capping: If audio_buffer accumulated >100ms of samples (e.g. 4800 samples),
-                                // drop oldest stale backlog down to ~1920 samples (~40ms) to guarantee low latency.
-                                let max_samples = 4800;
-                                if buffer.len() > max_samples {
-                                    let drain_count = buffer.len() - 1920;
-                                    for _ in 0..drain_count {
-                                        buffer.pop_front();
-                                    }
-                                }
-                                let drain_count = net_needed.min(buffer.len());
+                                audio_buf.cap_latency(4800, 1920);
+                                let drain_count = net_needed.min(audio_buf.len());
                                 for _ in 0..drain_count {
-                                    if let Some(s) = buffer.pop_front() {
+                                    if let Some(s) = audio_buf.pop() {
                                         net_samples.push(s);
                                     }
                                 }

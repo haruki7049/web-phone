@@ -30,6 +30,7 @@ hmac.workspace = true
 sha1.workspace = true
 base64.workspace = true
 k256.workspace = true
+bech32.workspace = true
 hex.workspace = true
 argon2.workspace = true
 aes-gcm.workspace = true

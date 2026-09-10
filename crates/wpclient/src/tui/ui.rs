@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Gauge, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
 
 use super::app::*;
@@ -98,92 +98,17 @@ fn render_body(f: &mut Frame, app: &TuiApp, area: Rect) {
 }
 
 fn render_left_panel(f: &mut Frame, app: &TuiApp, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5), // Mute & Info
-            Constraint::Length(3), // Input Gauge (Mic)
-            Constraint::Length(3), // Output Gauge (Speaker)
-            Constraint::Min(3),    // Configuration summary
-        ])
-        .split(area);
-
-    // Mute Status & Overview
-    let mute_str = if app.is_muted {
-        " [MUTED] "
-    } else {
-        " [ACTIVE] "
-    };
-    let mute_style = if app.is_muted {
-        Style::default()
-            .fg(Color::White)
-            .bg(Color::Red)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Green)
-            .add_modifier(Modifier::BOLD)
-    };
-
-    let info_text = vec![
-        Line::from(vec![
-            Span::raw("Microphone: "),
-            Span::styled(mute_str, mute_style),
-            Span::raw(" (Press [m] to toggle)"),
-        ]),
-        Line::from(vec![
-            Span::raw("Auto Accept: "),
-            Span::styled(
-                if app.config.auto_accept { "ON" } else { "OFF" },
-                Style::default().fg(Color::Yellow),
-            ),
-            Span::raw(" (Press [a] to toggle)"),
-        ]),
-    ];
-
-    let info_block = Block::default()
-        .title(" Audio Control ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded);
-    f.render_widget(Paragraph::new(info_text).block(info_block), chunks[0]);
-
-    // Mic VU Meter
-    let mic_gauge = Gauge::default()
-        .block(
-            Block::default()
-                .title(" Mic Input Level ")
-                .borders(Borders::ALL),
-        )
-        .gauge_style(Style::default().fg(Color::Green))
-        .ratio(app.input_level.clamp(0.0, 1.0) as f64);
-    f.render_widget(mic_gauge, chunks[1]);
-
-    // Speaker VU Meter
-    let spk_gauge = Gauge::default()
-        .block(
-            Block::default()
-                .title(" Speaker Output Level ")
-                .borders(Borders::ALL),
-        )
-        .gauge_style(Style::default().fg(Color::Cyan))
-        .ratio(app.output_level.clamp(0.0, 1.0) as f64);
-    f.render_widget(spk_gauge, chunks[2]);
-
-    // Extra Settings
-    let settings_text = vec![
-        Line::from(format!("STUN Server: {}", app.config.stun_server)),
-        Line::from(format!("Sample Rate: {} Hz", app.config.sample_rate)),
-        Line::from(format!("Channels: {}", app.config.channels)),
-    ];
-    let settings_block = Block::default()
-        .title(" System Info ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded);
-    f.render_widget(
-        Paragraph::new(settings_text).block(settings_block),
-        chunks[3],
-    );
+    match &app.call_state {
+        CallState::InCall(target) => {
+            super::views::call::render_call_view(f, app, target, area);
+        }
+        CallState::InRoom(room) => {
+            super::views::room::render_room_view(f, app, room, area);
+        }
+        CallState::Idle | CallState::Standby | CallState::Connecting(_) => {
+            super::views::standby::render_standby_view(f, app, area);
+        }
+    }
 }
 
 fn render_right_panel(f: &mut Frame, app: &TuiApp, area: Rect) {

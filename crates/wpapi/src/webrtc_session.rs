@@ -249,16 +249,7 @@ pub async fn setup_data_channel(
                                 .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
                                 .collect();
 
-                            let mut buffer = audio_buffer.lock().unwrap();
-                            for sample in samples {
-                                buffer.push_back(sample);
-                            }
-                            if buffer.len() > 4800 {
-                                let excess = buffer.len() - 4800;
-                                for _ in 0..excess {
-                                    buffer.pop_front();
-                                }
-                            }
+                            audio_buffer.push_slice(&samples);
                         }
                         ProtocolPacket::Ping { timestamp } => {
                             let pong = ProtocolPacket::Pong { timestamp };
@@ -386,16 +377,7 @@ pub async fn setup_room_data_channel(
                                 .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
                                 .collect();
 
-                            let mut buffer = audio_buffer.lock().unwrap();
-                            for sample in samples {
-                                buffer.push_back(sample);
-                            }
-                            if buffer.len() > 4800 {
-                                let excess = buffer.len() - 4800;
-                                for _ in 0..excess {
-                                    buffer.pop_front();
-                                }
-                            }
+                            audio_buffer.push_slice(&samples);
                         }
                         ProtocolPacket::Ping { timestamp } => {
                             let pong = ProtocolPacket::Pong { timestamp };

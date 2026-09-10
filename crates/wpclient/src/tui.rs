@@ -3,10 +3,12 @@
 pub mod app;
 pub mod event;
 pub mod ui;
+pub mod views;
 
 pub use app::*;
 pub use event::*;
 pub use ui::*;
+pub use views::*;
 
 use anyhow::Result;
 use crossterm::{
