@@ -13,6 +13,9 @@ use axum::{
 use bytes::BytesMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::constants::{
+    DEFAULT_INITIAL_TTL, HANDSHAKE_TIMEOUT, ICE_GATHER_TIMEOUT, MAX_MESSAGE_SIZE,
+};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -26,9 +29,6 @@ use wpapi::{ProtocolPacket, UserAddress};
 
 /// Counter for connected clients.
 static CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
-
-/// Maximum audio message size in bytes (1MB).
-const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 
 /// Helper to calculate audio energy (RMS) of audio frame payload.
 pub fn calculate_audio_energy(audio_data: &[u8]) -> f64 {
@@ -505,7 +505,7 @@ pub async fn handle_sdp_offer(
     // Handshake timeout task: close connection if DataChannel is not opened within 15s
     let pc_timeout = Arc::clone(&peer_connection);
     tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+        tokio::time::sleep(HANDSHAKE_TIMEOUT).await;
         let has_dc = CLIENT_REGISTRY
             .read()
             .unwrap()
@@ -546,7 +546,7 @@ pub async fn handle_sdp_offer(
             )
         })?;
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), gather_rx.recv()).await;
+    let _ = tokio::time::timeout(ICE_GATHER_TIMEOUT, gather_rx.recv()).await;
 
     let local_desc = peer_connection.local_description().await.ok_or_else(|| {
         (
@@ -673,7 +673,7 @@ async fn handle_client_targeted_audio(
             sender_address: sender_addr,
             target_address,
             origin_node: my_node_id,
-            ttl: 8, // Initial TTL per WPIP-05 Section 3.1
+            ttl: DEFAULT_INITIAL_TTL, // Initial TTL per WPIP-05 Section 3.1
             data: payload,
         });
     }

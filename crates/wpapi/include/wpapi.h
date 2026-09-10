@@ -14,6 +14,11 @@
 #include <stdlib.h>
 
 /**
+ * Maximum allowable time drift (±300 seconds) for Authorization header timestamps (WPIP-02 / WPIP-16).
+ */
+#define MAX_TIMESTAMP_DRIFT_SECS 300
+
+/**
  * Default Opus Codec ID as defined in WPIP-04.
  */
 #define CODEC_OPUS 1

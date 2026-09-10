@@ -19,9 +19,15 @@ pub fn verify_turn_allocation_credentials(
     verify_ephemeral_turn_credential(&secret_bytes, username, credential)
 }
 
+use crate::constants::{STUN_RATE_LIMIT_BURST, STUN_RATE_LIMIT_REFILL};
+
 /// Static STUN IP rate limiter: 20 requests/sec, max burst of 50.
-static STUN_RATE_LIMITER: LazyLock<Arc<RateLimiter>> =
-    LazyLock::new(|| Arc::new(RateLimiter::new(20.0, 50.0)));
+static STUN_RATE_LIMITER: LazyLock<Arc<RateLimiter>> = LazyLock::new(|| {
+    Arc::new(RateLimiter::new(
+        STUN_RATE_LIMIT_REFILL,
+        STUN_RATE_LIMIT_BURST,
+    ))
+});
 
 /// STUN Magic Cookie (RFC 5389)
 const STUN_MAGIC_COOKIE: u32 = 0x2112A442;

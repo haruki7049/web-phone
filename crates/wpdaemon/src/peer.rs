@@ -6,6 +6,7 @@
 
 use crate::broadcast::{AUDIO_BROADCAST, AudioMessage};
 use crate::config::CONFIGURATION;
+use crate::constants::ICE_GATHER_TIMEOUT;
 use crate::registry::CLIENT_REGISTRY;
 use async_trait::async_trait;
 use axum::{extract::Json, http::StatusCode};
@@ -213,7 +214,7 @@ pub async fn handle_peer_sdp(
             )
         })?;
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), gather_rx.recv()).await;
+    let _ = tokio::time::timeout(ICE_GATHER_TIMEOUT, gather_rx.recv()).await;
 
     let local_desc = peer_connection.local_description().await.ok_or_else(|| {
         (
@@ -344,7 +345,7 @@ pub async fn connect_to_peer(
     let offer = peer_connection.create_offer(None).await?;
     peer_connection.set_local_description(offer).await?;
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), gather_rx.recv()).await;
+    let _ = tokio::time::timeout(ICE_GATHER_TIMEOUT, gather_rx.recv()).await;
 
     let local_desc = peer_connection
         .local_description()

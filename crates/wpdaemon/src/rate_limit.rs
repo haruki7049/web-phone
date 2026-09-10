@@ -66,9 +66,18 @@ impl RateLimiter {
     }
 }
 
+use crate::constants::{
+    DATACHANNEL_RATE_LIMIT_BURST, DATACHANNEL_RATE_LIMIT_REFILL, HTTP_SDP_RATE_LIMIT_BURST,
+    HTTP_SDP_RATE_LIMIT_REFILL,
+};
+
 /// Global shared rate limiter instance: 5 requests/sec, max burst of 10 requests.
-pub static GLOBAL_RATE_LIMITER: LazyLock<Arc<RateLimiter>> =
-    LazyLock::new(|| Arc::new(RateLimiter::new(5.0, 10.0)));
+pub static GLOBAL_RATE_LIMITER: LazyLock<Arc<RateLimiter>> = LazyLock::new(|| {
+    Arc::new(RateLimiter::new(
+        HTTP_SDP_RATE_LIMIT_REFILL,
+        HTTP_SDP_RATE_LIMIT_BURST,
+    ))
+});
 
 /// Extract IP address from request headers or socket ConnectInfo.
 pub fn extract_ip(headers: &HeaderMap, req_ip: Option<IpAddr>) -> IpAddr {
@@ -160,8 +169,12 @@ impl DataChannelRateLimiter {
 }
 
 /// Global DataChannel rate limiter: 100 packets/sec, max burst of 200 packets.
-pub static DATACHANNEL_RATE_LIMITER: LazyLock<Arc<DataChannelRateLimiter>> =
-    LazyLock::new(|| Arc::new(DataChannelRateLimiter::new(100.0, 200.0)));
+pub static DATACHANNEL_RATE_LIMITER: LazyLock<Arc<DataChannelRateLimiter>> = LazyLock::new(|| {
+    Arc::new(DataChannelRateLimiter::new(
+        DATACHANNEL_RATE_LIMIT_REFILL,
+        DATACHANNEL_RATE_LIMIT_BURST,
+    ))
+});
 
 #[cfg(test)]
 mod tests {

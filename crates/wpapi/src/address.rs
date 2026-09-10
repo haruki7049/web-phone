@@ -447,6 +447,9 @@ pub fn build_authorization_header(keypair: &UserKeypair, sdp_offer: &str) -> (u6
     (timestamp, header)
 }
 
+/// Maximum allowable time drift (±300 seconds) for Authorization header timestamps (WPIP-02 / WPIP-16).
+pub const MAX_TIMESTAMP_DRIFT_SECS: u64 = 300;
+
 /// Anti-replay signature cache to prevent handshake replay attacks within the valid timestamp window.
 #[derive(Debug, Clone, Default)]
 pub struct AntiReplayCache {
@@ -472,7 +475,7 @@ impl AntiReplayCache {
         let mut map = self.signatures.write().unwrap();
 
         // Retain entries within 300s window relative to current time `now`
-        map.retain(|_, &mut ts| now.abs_diff(ts) <= 300);
+        map.retain(|_, &mut ts| now.abs_diff(ts) <= MAX_TIMESTAMP_DRIFT_SECS);
 
         if map.contains_key(signature) {
             return Err("Replay attack detected: signature already used".to_string());
@@ -517,10 +520,10 @@ pub fn verify_authorization_header_with_cache(
         .unwrap_or_default()
         .as_secs();
     let diff = now.abs_diff(timestamp);
-    if diff > 300 {
+    if diff > MAX_TIMESTAMP_DRIFT_SECS {
         return Err(format!(
-            "Authorization timestamp drift too large ({}s > 300s)",
-            diff
+            "Authorization timestamp drift too large ({}s > {}s)",
+            diff, MAX_TIMESTAMP_DRIFT_SECS
         ));
     }
 
@@ -571,10 +574,10 @@ pub fn verify_secp256k1_authorization_header_with_cache(
         .unwrap_or_default()
         .as_secs();
     let diff = now.abs_diff(timestamp);
-    if diff > 300 {
+    if diff > MAX_TIMESTAMP_DRIFT_SECS {
         return Err(format!(
-            "Authorization timestamp drift too large ({}s > 300s)",
-            diff
+            "Authorization timestamp drift too large ({}s > {}s)",
+            diff, MAX_TIMESTAMP_DRIFT_SECS
         ));
     }
 
