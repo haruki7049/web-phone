@@ -956,9 +956,11 @@ mod tests {
 
     #[test]
     fn test_prefix_and_zero_trimming_matching_rejected() {
-        let addr1 = UserAddress::new("1111110000000000000000000000000000000000000000000000000000000000");
+        let addr1 =
+            UserAddress::new("1111110000000000000000000000000000000000000000000000000000000000");
         let addr2 = UserAddress::new("111111");
-        let addr3 = UserAddress::new("1111110000000000000000000000000000000000000000000000000000000001");
+        let addr3 =
+            UserAddress::new("1111110000000000000000000000000000000000000000000000000000000001");
 
         // Exact match should succeed
         assert!(addr1.matches_prefix(&addr1));

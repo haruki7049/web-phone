@@ -295,10 +295,7 @@ fn list_audio_devices() -> Result<()> {
 }
 
 async fn list_registered_addresses(config: &Configuration) -> Result<()> {
-    let endpoint = format!(
-        "http://{}:{}/addresses",
-        config.server_ip, config.server_port
-    );
+    let endpoint = format!("{}/addresses", config.server_url());
     println!(
         "Fetching registered addresses from daemon at {}...",
         endpoint

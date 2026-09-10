@@ -438,8 +438,7 @@ fn fetch_registered_addresses(app: &mut TuiApp) {
     app.add_log("Fetching registered user addresses from daemon...".to_string());
 
     tokio::spawn(async move {
-        let server_url = format!("http://{}:{}", config.server_ip, config.server_port);
-        let endpoint = format!("{}/addresses", server_url);
+        let endpoint = format!("{}/addresses", config.server_url());
         let client = reqwest::Client::new();
         let keypair = wpapi::UserKeypair::generate();
         let (_, auth_hdr) = wpapi::build_authorization_header(&keypair, "");
@@ -1238,7 +1237,7 @@ mod tests {
         let quit = handle_key_input(&mut app, key_y).await.unwrap();
         assert!(!quit);
         assert_eq!(app.input_mode, InputMode::Normal);
-        assert_eq!(resp_rx.await.unwrap(), true);
+        assert!(resp_rx.await.unwrap());
     }
 
     #[test]

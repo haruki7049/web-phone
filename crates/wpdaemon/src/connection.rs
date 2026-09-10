@@ -1038,7 +1038,7 @@ mod tests {
         let nonce = [0x09u8; 12];
         let sframe = wpapi::SFrameCodec::new(&key).unwrap();
 
-        let raw_pcm = vec![0.5f32.to_le_bytes(), 0.8f32.to_le_bytes()].concat();
+        let raw_pcm = [0.5f32.to_le_bytes(), 0.8f32.to_le_bytes()].concat();
         let energy_byte = 204u8; // ~0.8 scale (204/255 = 0.8)
 
         let encrypted_frame = sframe.encrypt_frame(&nonce, energy_byte, &raw_pcm).unwrap();

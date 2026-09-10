@@ -129,7 +129,9 @@ async fn list_registered_addresses(
         ));
     }
 
-    Ok(axum::extract::Json(wpdaemon::connection::get_registered_addresses()))
+    Ok(axum::extract::Json(
+        wpdaemon::connection::get_registered_addresses(),
+    ))
 }
 
 /// Command-line arguments for the audio server daemon.

@@ -402,11 +402,7 @@ pub unsafe extern "C" fn wpapi_list_addresses(
             return -1;
         }
         let cfg = unsafe { &(*config).0 };
-        let server_url = match cfg.server_ip {
-            std::net::IpAddr::V4(ip) => format!("http://{}:{}", ip, cfg.server_port),
-            std::net::IpAddr::V6(ip) => format!("http://[{}]:{}", ip, cfg.server_port),
-        };
-        let endpoint = format!("{}/addresses", server_url);
+        let endpoint = format!("{}/addresses", cfg.server_url());
 
         let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -705,8 +701,11 @@ mod tests {
         unsafe { wpapi_string_free(json_ptr) };
     }
 
+    static LOG_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_wpapi_log_callback() {
+        let _guard = LOG_TEST_MUTEX.lock().unwrap();
         use std::sync::atomic::{AtomicBool, Ordering};
         static LOG_CALLED: AtomicBool = AtomicBool::new(false);
 
@@ -736,7 +735,7 @@ mod tests {
 
     #[test]
     fn test_concurrent_log_callback_registration_and_unregistration() {
-        use std::sync::Arc;
+        let _guard = LOG_TEST_MUTEX.lock().unwrap();
         use std::sync::atomic::{AtomicU64, Ordering};
 
         static COUNT: AtomicU64 = AtomicU64::new(0);
@@ -754,14 +753,10 @@ mod tests {
                 spawn(move || {
                     for _ in 0..50 {
                         if i % 2 == 0 {
-                            unsafe {
-                                wpapi_set_log_callback(Some(dummy_cb), std::ptr::null_mut())
-                            };
+                            unsafe { wpapi_set_log_callback(Some(dummy_cb), std::ptr::null_mut()) };
                             tracing::info!("Concurrent log event");
                         } else {
-                            unsafe {
-                                wpapi_set_log_callback(None, std::ptr::null_mut())
-                            };
+                            unsafe { wpapi_set_log_callback(None, std::ptr::null_mut()) };
                         }
                     }
                 })

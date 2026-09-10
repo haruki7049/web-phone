@@ -43,6 +43,9 @@ pub struct Configuration {
     /// Automatically accept incoming call requests without prompting.
     #[serde(default)]
     pub auto_accept: bool,
+    /// Use TLS/HTTPS and WSS for secure server communication (default: true).
+    #[serde(default = "default_use_tls")]
+    pub use_tls: bool,
     /// Name (or substring) of input audio device (microphone) to use.
     #[serde(default)]
     pub input_device: Option<String>,
@@ -51,8 +54,52 @@ pub struct Configuration {
     pub output_device: Option<String>,
 }
 
+fn default_use_tls() -> bool {
+    true
+}
+
 fn default_stun_server() -> String {
     "stun:127.0.0.1:3478".to_string()
+}
+
+impl Configuration {
+    /// Construct full HTTP/HTTPS server base URL according to TLS settings and server IP.
+    pub fn server_url(&self) -> String {
+        let scheme = if self.use_tls {
+            "https"
+        } else if self.server_ip.is_loopback() {
+            "http"
+        } else {
+            tracing::warn!(
+                "Insecure HTTP transport selected for non-loopback server IP {}",
+                self.server_ip
+            );
+            "http"
+        };
+        match self.server_ip {
+            IpAddr::V4(ip) => format!("{}://{}:{}", scheme, ip, self.server_port),
+            IpAddr::V6(ip) => format!("{}://[{}]:{}", scheme, ip, self.server_port),
+        }
+    }
+
+    /// Construct full WS/WSS WebSocket server URL according to TLS settings and server IP.
+    pub fn websocket_url(&self) -> String {
+        let scheme = if self.use_tls {
+            "wss"
+        } else {
+            if !self.server_ip.is_loopback() {
+                tracing::warn!(
+                    "Insecure WS transport selected for non-loopback server IP {}",
+                    self.server_ip
+                );
+            }
+            "ws"
+        };
+        match self.server_ip {
+            IpAddr::V4(ip) => format!("{}://{}:{}", scheme, ip, self.server_port),
+            IpAddr::V6(ip) => format!("{}://[{}]:{}", scheme, ip, self.server_port),
+        }
+    }
 }
 
 impl Default for Configuration {
@@ -65,6 +112,7 @@ impl Default for Configuration {
             channels: 1,
             allow_echoback: false,
             auto_accept: false,
+            use_tls: true,
             input_device: None,
             output_device: None,
         }
@@ -117,5 +165,23 @@ mod tests {
         assert!(config.allow_echoback);
         assert_eq!(config.input_device.as_deref(), Some("Shokz"));
         assert_eq!(config.output_device.as_deref(), Some("MacBook"));
+    }
+
+    #[test]
+    fn test_configuration_tls_scheme() {
+        let mut config = Configuration::default();
+        // Default loopback with use_tls = true -> https
+        assert_eq!(config.server_url(), "https://127.0.0.1:15000");
+        assert_eq!(config.websocket_url(), "wss://127.0.0.1:15000");
+
+        // Non-loopback IP with use_tls = true -> https
+        config.server_ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100));
+        assert_eq!(config.server_url(), "https://192.168.1.100:15000");
+        assert_eq!(config.websocket_url(), "wss://192.168.1.100:15000");
+
+        // Non-loopback IP with use_tls = false -> http (insecure warning)
+        config.use_tls = false;
+        assert_eq!(config.server_url(), "http://192.168.1.100:15000");
+        assert_eq!(config.websocket_url(), "ws://192.168.1.100:15000");
     }
 }

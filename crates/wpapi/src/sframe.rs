@@ -100,7 +100,7 @@ mod tests {
         let nonce = [0x07u8; 12];
         let codec = SFrameCodec::new(&key).unwrap();
 
-        let audio_pcm = vec![1.0f32.to_le_bytes(), 0.5f32.to_le_bytes()].concat();
+        let audio_pcm = [1.0f32.to_le_bytes(), 0.5f32.to_le_bytes()].concat();
         let energy = 180u8;
 
         let frame = codec.encrypt_frame(&nonce, energy, &audio_pcm).unwrap();
