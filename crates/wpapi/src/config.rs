@@ -100,6 +100,86 @@ impl Configuration {
             IpAddr::V6(ip) => format!("{}://[{}]:{}", scheme, ip, self.server_port),
         }
     }
+
+    /// Validate configuration settings.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.server_port == 0 {
+            return Err("Server port cannot be 0".to_string());
+        }
+        if self.sample_rate < 8000 || self.sample_rate > 96000 {
+            return Err(format!(
+                "Sample rate {} Hz out of valid range (8000..=96000 Hz)",
+                self.sample_rate
+            ));
+        }
+        if self.channels != 1 && self.channels != 2 {
+            return Err(format!(
+                "Channels {} invalid (must be 1 for mono or 2 for stereo)",
+                self.channels
+            ));
+        }
+        if self.stun_server.is_empty() {
+            return Err("STUN server URL cannot be empty".to_string());
+        }
+        if !self.stun_server.starts_with("stun:")
+            && !self.stun_server.starts_with("stuns:")
+            && !self.stun_server.starts_with("turn:")
+            && !self.stun_server.starts_with("turns:")
+        {
+            return Err(format!(
+                "Invalid STUN/TURN URL format: '{}' (must start with stun:, stuns:, turn:, or turns:)",
+                self.stun_server
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Fluent builder for constructing `Configuration` instances with validation.
+#[derive(Debug, Clone, Default)]
+pub struct ConfigurationBuilder {
+    config: Configuration,
+}
+
+impl ConfigurationBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn server_ip(mut self, ip: IpAddr) -> Self {
+        self.config.server_ip = ip;
+        self
+    }
+
+    pub fn server_port(mut self, port: u16) -> Self {
+        self.config.server_port = port;
+        self
+    }
+
+    pub fn stun_server(mut self, stun: impl Into<String>) -> Self {
+        self.config.stun_server = stun.into();
+        self
+    }
+
+    pub fn sample_rate(mut self, rate: u32) -> Self {
+        self.config.sample_rate = rate;
+        self
+    }
+
+    pub fn channels(mut self, channels: u16) -> Self {
+        self.config.channels = channels;
+        self
+    }
+
+    pub fn use_tls(mut self, use_tls: bool) -> Self {
+        self.config.use_tls = use_tls;
+        self
+    }
+
+    pub fn build(self) -> Result<Configuration, String> {
+        self.config.validate()?;
+        Ok(self.config)
+    }
 }
 
 impl Default for Configuration {
@@ -183,5 +263,42 @@ mod tests {
         config.use_tls = false;
         assert_eq!(config.server_url(), "http://192.168.1.100:15000");
         assert_eq!(config.websocket_url(), "ws://192.168.1.100:15000");
+    }
+
+    #[test]
+    fn test_configuration_validation() {
+        let mut config = Configuration::default();
+        assert!(config.validate().is_ok());
+
+        config.server_port = 0;
+        assert!(config.validate().is_err());
+
+        config.server_port = 15000;
+        config.sample_rate = 500;
+        assert!(config.validate().is_err());
+
+        config.sample_rate = 48000;
+        config.channels = 5;
+        assert!(config.validate().is_err());
+
+        config.channels = 1;
+        config.stun_server = "invalid_scheme".to_string();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_configuration_builder() {
+        let config = ConfigurationBuilder::new()
+            .server_port(18000)
+            .sample_rate(44100)
+            .channels(2)
+            .stun_server("stun:stun.l.google.com:19302")
+            .build()
+            .expect("Build should succeed");
+
+        assert_eq!(config.server_port, 18000);
+        assert_eq!(config.sample_rate, 44100);
+        assert_eq!(config.channels, 2);
+        assert_eq!(config.stun_server, "stun:stun.l.google.com:19302");
     }
 }

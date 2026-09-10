@@ -76,7 +76,6 @@ pub async fn setup_data_channel(
     config: &Configuration,
     session: &ClientSession,
 ) -> Result<Arc<dyn DataChannel>> {
-    let my_client_id = Arc::clone(&session.client_id);
     let audio_buffer = Arc::clone(&session.audio_buffer);
     let data_channel = peer_connection.create_data_channel("audio", None).await?;
     session.set_data_channel(Arc::clone(&data_channel));
@@ -84,7 +83,6 @@ pub async fn setup_data_channel(
     let target_addr_init = target_address.clone();
     let dc_init = Arc::clone(&data_channel);
     let session_ref = session.clone();
-    let session_user_addr = Arc::clone(&session.user_address);
     let auto_accept = config.auto_accept;
     let mut rx_audio_opt = Some(rx_audio);
 
@@ -133,131 +131,14 @@ pub async fn setup_data_channel(
                         continue;
                     };
 
-                    match packet {
-                        ProtocolPacket::ClientAssignment {
-                            client_id,
-                            user_address,
-                        } => {
-                            my_client_id.store(client_id, Ordering::SeqCst);
-                            if let Ok(mut guard) = session_user_addr.lock() {
-                                *guard = Some(user_address.clone());
-                            }
-                            info!("============================================================");
-                            info!(" Assigned Temporary User ID (SHA-256): {}", user_address);
-                            info!(" Short ID: {}", user_address.short_id());
-                            info!(" Client ID: {}", client_id);
-                            info!("============================================================");
-                        }
-                        ProtocolPacket::CallRequest { caller_address, .. } => {
-                            info!("Incoming Call Request from {}", caller_address.short_id());
-                            session_ref.set_target_address(Some(caller_address.clone()));
-                            if auto_accept {
-                                info!("Auto-accepting call from {}", caller_address.short_id());
-                                let accept = ProtocolPacket::CallAcceptResponse {
-                                    caller_address: caller_address.clone(),
-                                };
-                                let _ = dc_init
-                                    .send(BytesMut::from(accept.encode().as_slice()))
-                                    .await;
-                            } else if let Some(tx) = session_ref.get_incoming_call_handler() {
-                                let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-                                let dc_reply = Arc::clone(&dc_init);
-                                let caller_addr = caller_address.clone();
-                                tokio::spawn(async move {
-                                    if let Ok(accepted) = resp_rx.await {
-                                        let packet = if accepted {
-                                            ProtocolPacket::CallAcceptResponse {
-                                                caller_address: caller_addr,
-                                            }
-                                        } else {
-                                            ProtocolPacket::CallRejectResponse {
-                                                caller_address: caller_addr,
-                                            }
-                                        };
-                                        let _ = dc_reply
-                                            .send(BytesMut::from(packet.encode().as_slice()))
-                                            .await;
-                                    }
-                                });
-                                let _ = tx.send((caller_address, resp_tx)).await;
-                            }
-                        }
-                        ProtocolPacket::CallAcceptResponse { caller_address } => {
-                            info!("Call accepted by {}", caller_address.short_id());
-                            session_ref.set_target_address(Some(caller_address.clone()));
-                            if let Some(tx) = session_ref.get_call_notification_handler() {
-                                let _ = tx.send(CallNotification::Accepted(caller_address)).await;
-                            }
-                        }
-                        ProtocolPacket::CallRejectResponse { caller_address } => {
-                            info!("Call rejected by {}", caller_address.short_id());
-                            session_ref.set_target_address(None);
-                            if let Some(tx) = session_ref.get_call_notification_handler() {
-                                let _ = tx.send(CallNotification::Rejected(caller_address)).await;
-                            }
-                        }
-                        ProtocolPacket::CallAcceptedNotification { target_address } => {
-                            info!(
-                                "Call accepted notification for {}",
-                                target_address.short_id()
-                            );
-                            session_ref.set_target_address(Some(target_address.clone()));
-                            if let Some(tx) = session_ref.get_call_notification_handler() {
-                                let _ = tx.send(CallNotification::Accepted(target_address)).await;
-                            }
-                        }
-                        ProtocolPacket::CallRejectedNotification { target_address } => {
-                            info!(
-                                "Call rejected notification for {}",
-                                target_address.short_id()
-                            );
-                            session_ref.set_target_address(None);
-                            if let Some(tx) = session_ref.get_call_notification_handler() {
-                                let _ = tx.send(CallNotification::Rejected(target_address)).await;
-                            }
-                        }
-                        ProtocolPacket::ConnectionError { target_address } => {
-                            info!("Connection error for target {}", target_address.short_id());
-                            session_ref.set_target_address(None);
-                            if let Some(tx) = session_ref.get_call_notification_handler() {
-                                let _ = tx
-                                    .send(CallNotification::Error(
-                                        target_address,
-                                        "Target user not found or offline".to_string(),
-                                    ))
-                                    .await;
-                            }
-                        }
-                        ProtocolPacket::CallEndedNotification { target_address } => {
-                            info!("Call ended notification from {}", target_address.short_id());
-                            session_ref.set_target_address(None);
-                            if let Some(tx) = session_ref.get_call_notification_handler() {
-                                let _ = tx
-                                    .send(CallNotification::Error(
-                                        target_address,
-                                        "Call ended by remote user".to_string(),
-                                    ))
-                                    .await;
-                            }
-                        }
-                        ProtocolPacket::ServerTargetedAudio { audio_data, .. }
-                        | ProtocolPacket::PeerTargetedAudio { audio_data, .. } => {
-                            let samples: Vec<f32> = audio_data
-                                .as_chunks::<4>()
-                                .0
-                                .iter()
-                                .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
-                                .collect();
-
-                            audio_buffer.push_slice(&samples);
-                        }
-                        ProtocolPacket::Ping { timestamp } => {
-                            let pong = ProtocolPacket::Pong { timestamp };
-                            let _ = dc_init.send(BytesMut::from(pong.encode().as_slice())).await;
-                        }
-                        ProtocolPacket::Pong { .. } => {}
-                        _ => {}
-                    }
+                    dispatch_client_packet(
+                        packet,
+                        &session_ref,
+                        auto_accept,
+                        &dc_init,
+                        &audio_buffer,
+                    )
+                    .await;
                 }
                 DataChannelEvent::OnClose => {
                     info!("DataChannel closed.");
@@ -269,6 +150,139 @@ pub async fn setup_data_channel(
     });
 
     Ok(data_channel)
+}
+
+async fn dispatch_client_packet(
+    packet: ProtocolPacket,
+    session_ref: &ClientSession,
+    auto_accept: bool,
+    dc_init: &Arc<dyn DataChannel>,
+    audio_buffer: &Arc<crate::audio::AudioRingBuffer>,
+) {
+    match packet {
+        ProtocolPacket::ClientAssignment {
+            client_id,
+            user_address,
+        } => {
+            info!(
+                "Assigned client ID: {} | UserAddress: {}",
+                client_id, user_address
+            );
+            session_ref.client_id.store(client_id, Ordering::SeqCst);
+            if let Ok(mut guard) = session_ref.user_address.lock() {
+                *guard = Some(user_address);
+            }
+        }
+        ProtocolPacket::CallRequest { caller_address, .. } => {
+            info!("Incoming Call Request from {}", caller_address.short_id());
+            session_ref.set_target_address(Some(caller_address.clone()));
+            if auto_accept {
+                info!("Auto-accepting call from {}", caller_address.short_id());
+                let accept = ProtocolPacket::CallAcceptResponse {
+                    caller_address: caller_address.clone(),
+                };
+                let _ = dc_init
+                    .send(BytesMut::from(accept.encode().as_slice()))
+                    .await;
+            } else if let Some(tx) = session_ref.get_incoming_call_handler() {
+                let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                let dc_reply = Arc::clone(dc_init);
+                let caller_addr = caller_address.clone();
+                tokio::spawn(async move {
+                    if let Ok(accepted) = resp_rx.await {
+                        let packet = if accepted {
+                            ProtocolPacket::CallAcceptResponse {
+                                caller_address: caller_addr,
+                            }
+                        } else {
+                            ProtocolPacket::CallRejectResponse {
+                                caller_address: caller_addr,
+                            }
+                        };
+                        let _ = dc_reply
+                            .send(BytesMut::from(packet.encode().as_slice()))
+                            .await;
+                    }
+                });
+                let _ = tx.send((caller_address, resp_tx)).await;
+            }
+        }
+        ProtocolPacket::CallAcceptResponse { caller_address } => {
+            info!("Call accepted by {}", caller_address.short_id());
+            session_ref.set_target_address(Some(caller_address.clone()));
+            if let Some(tx) = session_ref.get_call_notification_handler() {
+                let _ = tx.send(CallNotification::Accepted(caller_address)).await;
+            }
+        }
+        ProtocolPacket::CallRejectResponse { caller_address } => {
+            info!("Call rejected by {}", caller_address.short_id());
+            session_ref.set_target_address(None);
+            if let Some(tx) = session_ref.get_call_notification_handler() {
+                let _ = tx.send(CallNotification::Rejected(caller_address)).await;
+            }
+        }
+        ProtocolPacket::CallAcceptedNotification { target_address } => {
+            info!(
+                "Call accepted notification for {}",
+                target_address.short_id()
+            );
+            session_ref.set_target_address(Some(target_address.clone()));
+            if let Some(tx) = session_ref.get_call_notification_handler() {
+                let _ = tx.send(CallNotification::Accepted(target_address)).await;
+            }
+        }
+        ProtocolPacket::CallRejectedNotification { target_address } => {
+            info!(
+                "Call rejected notification for {}",
+                target_address.short_id()
+            );
+            session_ref.set_target_address(None);
+            if let Some(tx) = session_ref.get_call_notification_handler() {
+                let _ = tx.send(CallNotification::Rejected(target_address)).await;
+            }
+        }
+        ProtocolPacket::ConnectionError { target_address } => {
+            info!("Connection error for target {}", target_address.short_id());
+            session_ref.set_target_address(None);
+            if let Some(tx) = session_ref.get_call_notification_handler() {
+                let _ = tx
+                    .send(CallNotification::Error(
+                        target_address,
+                        "Target user not found or offline".to_string(),
+                    ))
+                    .await;
+            }
+        }
+        ProtocolPacket::CallEndedNotification { target_address } => {
+            info!("Call ended notification from {}", target_address.short_id());
+            session_ref.set_target_address(None);
+            if let Some(tx) = session_ref.get_call_notification_handler() {
+                let _ = tx
+                    .send(CallNotification::Error(
+                        target_address,
+                        "Call ended by remote user".to_string(),
+                    ))
+                    .await;
+            }
+        }
+        ProtocolPacket::ServerTargetedAudio { audio_data, .. }
+        | ProtocolPacket::PeerTargetedAudio { audio_data, .. } => {
+            let samples: Vec<f32> = audio_data
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| f32::from_le_bytes(*chunk).clamp(-1.0, 1.0))
+                .collect();
+
+            audio_buffer.push_slice(&samples);
+        }
+        ProtocolPacket::Ping { timestamp } => {
+            let pong = ProtocolPacket::Pong { timestamp };
+            let _ = dc_init.send(BytesMut::from(pong.encode().as_slice())).await;
+        }
+        ProtocolPacket::Pong { .. } => {}
+        _ => {}
+    }
 }
 
 /// Create and attach room 'audio' DataChannel to PeerConnection.

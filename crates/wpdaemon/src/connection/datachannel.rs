@@ -118,54 +118,7 @@ pub(crate) async fn handle_client_datachannel_events(
                     continue;
                 }
 
-                let sender_addr = Some(user_address.clone());
-                match packet {
-                    ProtocolPacket::ClientTargetedAudio {
-                        target_address,
-                        audio_data,
-                        ..
-                    } => {
-                        handle_client_targeted_audio(
-                            client_id,
-                            sender_addr,
-                            target_address,
-                            my_node_id,
-                            audio_data,
-                            &dc,
-                        )
-                        .await;
-                    }
-                    ProtocolPacket::CallAcceptResponse { caller_address } => {
-                        handle_call_accept_response(client_id, caller_address).await;
-                    }
-                    ProtocolPacket::CallRejectResponse { caller_address } => {
-                        handle_call_reject_response(client_id, caller_address).await;
-                    }
-                    ProtocolPacket::CallHangup { target_address } => {
-                        handle_call_hangup(client_id, sender_addr, target_address).await;
-                    }
-                    ProtocolPacket::RoomJoinRequest { room_address } => {
-                        handle_room_join(client_id, room_address).await;
-                    }
-                    ProtocolPacket::RoomLeaveRequest { room_address } => {
-                        handle_room_leave(client_id, &room_address).await;
-                    }
-                    ProtocolPacket::RoomGroupAudio {
-                        room_address,
-                        codec_id,
-                        audio_data,
-                    } => {
-                        handle_room_group_audio(client_id, room_address, codec_id, audio_data)
-                            .await;
-                    }
-                    ProtocolPacket::Pong { .. } => {
-                        let now = std::time::Instant::now();
-                        if let Ok(mut reg) = CLIENT_REGISTRY.write() {
-                            reg.last_pong.insert(client_id, now);
-                        }
-                    }
-                    _ => {}
-                }
+                dispatch_daemon_packet(client_id, &user_address, my_node_id, packet, &dc).await;
             }
             DataChannelEvent::OnClose => {
                 info!("Client {} DataChannel closed", client_id);
@@ -177,6 +130,62 @@ pub(crate) async fn handle_client_datachannel_events(
             }
             _ => {}
         }
+    }
+}
+
+async fn dispatch_daemon_packet(
+    client_id: u64,
+    user_address: &UserAddress,
+    my_node_id: u64,
+    packet: ProtocolPacket,
+    dc: &Arc<dyn DataChannel>,
+) {
+    let sender_addr = Some(user_address.clone());
+    match packet {
+        ProtocolPacket::ClientTargetedAudio {
+            target_address,
+            audio_data,
+            ..
+        } => {
+            handle_client_targeted_audio(
+                client_id,
+                sender_addr,
+                target_address,
+                my_node_id,
+                audio_data,
+                dc,
+            )
+            .await;
+        }
+        ProtocolPacket::CallAcceptResponse { caller_address } => {
+            handle_call_accept_response(client_id, caller_address).await;
+        }
+        ProtocolPacket::CallRejectResponse { caller_address } => {
+            handle_call_reject_response(client_id, caller_address).await;
+        }
+        ProtocolPacket::CallHangup { target_address } => {
+            handle_call_hangup(client_id, sender_addr, target_address).await;
+        }
+        ProtocolPacket::RoomJoinRequest { room_address } => {
+            handle_room_join(client_id, room_address).await;
+        }
+        ProtocolPacket::RoomLeaveRequest { room_address } => {
+            handle_room_leave(client_id, &room_address).await;
+        }
+        ProtocolPacket::RoomGroupAudio {
+            room_address,
+            codec_id,
+            audio_data,
+        } => {
+            handle_room_group_audio(client_id, room_address, codec_id, audio_data).await;
+        }
+        ProtocolPacket::Pong { .. } => {
+            let now = std::time::Instant::now();
+            if let Ok(mut reg) = CLIENT_REGISTRY.write() {
+                reg.last_pong.insert(client_id, now);
+            }
+        }
+        _ => {}
     }
 }
 

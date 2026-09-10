@@ -124,36 +124,54 @@ typedef struct WPAPIConfig WPAPIConfig;
 
 /**
  * Function pointer type for log callbacks.
- * # Parameters
- * - `level`: Log level enum (`WPAPILogLevel`).
- * - `message`: Null-terminated C string containing the log message.
- * - `user_data`: User-provided opaque pointer passed when registering the callback.
  */
 typedef void (*WPAPILogCallback)(enum WPAPILogLevel level, const char *message, void *user_data);
 
 /**
- * Retrieve the last thread-local error message string if any C API call returned non-zero error status.
- * The returned pointer is managed internally and must NOT be freed by the caller.
+ * Retrieve the last thread-local C FFI error message.
+ *
+ * # Safety
+ * The returned pointer is managed thread-locally and remains valid until the next FFI call on the same thread.
+ */
+const char *wpapi_get_last_error(void);
+
+/**
+ * Free a C string allocated by `wpapi_list_audio_devices` or other FFI calls.
+ * # Safety
+ * `ptr` must be a pointer allocated by Rust FFI, or NULL.
+ */
+void wpapi_string_free(char *ptr);
+
+/**
+ * Query available audio input and output devices as a JSON object string.
+ * Caller must free `*out_json` using `wpapi_string_free`.
+ * # Safety
+ * `out_json` must be a valid non-null pointer.
+ */
+int wpapi_list_audio_devices(char **out_json);
+
+/**
+ * Query registered user addresses from wpdaemon server as a JSON string array.
+ * Caller must free `*out_json` using `wpapi_string_free`.
+ * # Safety
+ * `config` and `out_json` must be valid non-null pointers.
+ */
+int wpapi_list_addresses(const struct WPAPIConfig *config, char **out_json);
+
+/**
+ * Retrieve the last thread-local error message string.
  */
 const char *wpapi_last_error_message(void);
 
 /**
- * Register a custom C log callback function to receive log messages.
- * Pass `None` (or `NULL` in C) as `callback` to disable log callbacks.
- *
+ * Register a custom C log callback function.
  * # Safety
- * - `callback`: If non-null, must be a valid, thread-safe function pointer (`Send` + `Sync`).
- * - `user_data`: Must remain valid, allocated, and thread-safe (`Send` + `Sync`) for as long as
- *   the callback is registered, or until `wpapi_set_log_callback(None, NULL)` is called.
- * - Unregistering (`callback = None`) atomically clears the callback state to guarantee no subsequent
- *   invocations will occur on `user_data`.
+ * `user_data` must remain valid for the duration of registration.
  */
-void wpapi_set_log_callback(WPAPILogCallback callback,
-                            void *user_data);
+void wpapi_set_log_callback(WPAPILogCallback callback, void *user_data);
 
 /**
  * Initialize tracing subscriber for logging output.
- * Returns 0 on success, or -1 on error.
  */
 int wpapi_init(void);
 
@@ -171,7 +189,6 @@ void wpapi_config_free(struct WPAPIConfig *config);
 
 /**
  * Set server IP address (IPv4 or IPv6 string) and port.
- * Returns 0 on success, or -1 on error.
  * # Safety
  * `config` and `server_ip` must be valid non-null pointers.
  */
@@ -180,8 +197,7 @@ int wpapi_config_set_server(struct WPAPIConfig *config,
                             uint16_t server_port);
 
 /**
- * Set STUN server URL (e.g., "stun:127.0.0.1:3478").
- * Returns 0 on success, or -1 on error.
+ * Set STUN server URL.
  * # Safety
  * `config` and `stun_server` must be valid non-null pointers.
  */
@@ -189,81 +205,48 @@ int wpapi_config_set_stun_server(struct WPAPIConfig *config, const char *stun_se
 
 /**
  * Set auto-accept flag for incoming call requests without CLI prompts.
- * Returns 0 on success, or -1 on error.
  * # Safety
  * `config` must be a valid non-null pointer.
  */
 int wpapi_config_set_auto_accept(struct WPAPIConfig *config, bool auto_accept);
 
 /**
- * Set allow-echoback flag (hear own voice).
- * Returns 0 on success, or -1 on error.
+ * Set allow-echoback flag.
  * # Safety
  * `config` must be a valid non-null pointer.
  */
 int wpapi_config_set_allow_echoback(struct WPAPIConfig *config, bool allow_echoback);
 
 /**
- * Set input/output audio device substring overrides (pass NULL to leave unchanged or use default).
- * Returns 0 on success, or -1 on error.
+ * Set input/output audio device substring overrides.
  * # Safety
- * `config` must be a valid non-null pointer. `input_device` and `output_device` must be valid C strings or NULL.
+ * `config` must be a valid non-null pointer.
  */
 int wpapi_config_set_audio_devices(struct WPAPIConfig *config,
                                    const char *input_device,
                                    const char *output_device);
 
 /**
- * Query registered user addresses from wpdaemon server as a JSON string array.
- * Caller must free `*out_json` using `wpapi_string_free`.
- * Returns 0 on success, or -1 on error.
- * # Safety
- * `config` and `out_json` must be valid non-null pointers.
- */
-int wpapi_list_addresses(const struct WPAPIConfig *config, char **out_json);
-
-/**
- * Query available audio input and output devices as a JSON object.
- * Caller must free `*out_json` using `wpapi_string_free`.
- * Returns 0 on success, or -1 on error.
- * # Safety
- * `out_json` must be a valid non-null pointer.
- */
-int wpapi_list_audio_devices(char **out_json);
-
-/**
  * Start an audio call session in a background worker thread.
- * `target_address` can be NULL to operate in standby mode, or a valid UserAddress SHA-256 string.
- * Returns pointer to `WPAPICallHandle` on success, or NULL on error.
  * # Safety
- * `config` must be a valid non-null pointer. `target_address` must be a valid C string or NULL.
+ * `config` must be a valid non-null pointer.
  */
 struct WPAPICallHandle *wpapi_call_start(const struct WPAPIConfig *config,
                                          const char *target_address);
 
 /**
  * Start an audio group room call (WPIP-08) in a background worker thread.
- * `room_address` must be a valid UserAddress SHA-256 string for the target room.
- * Returns pointer to `WPAPICallHandle` on success, or NULL on error.
  * # Safety
- * `config` must be a valid non-null pointer. `room_address` must be a valid C string pointer.
+ * `config` must be a valid non-null pointer.
  */
 struct WPAPICallHandle *wpapi_room_call_start(const struct WPAPIConfig *config,
                                               const char *room_address);
 
 /**
  * Stop and terminate an active call session, freeing its handle.
- * Returns 0 on success, or -1 on error.
  * # Safety
- * `handle` must be a valid pointer returned by `wpapi_call_start`.
+ * `handle` must be a valid pointer.
  */
 int wpapi_call_stop(struct WPAPICallHandle *handle);
-
-/**
- * Free a C string allocated by `wpapi_list_addresses` or `wpapi_list_audio_devices`.
- * # Safety
- * `ptr` must be a pointer allocated by `wpapi_list_addresses` or `wpapi_list_audio_devices`, or NULL.
- */
-void wpapi_string_free(char *ptr);
 
 #endif  /* WPAPI_H */

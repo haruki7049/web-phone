@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use tracing::info;
-use wpapi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, UserAddress};
+use wpapi::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
 
 /// Command-line arguments for the audio client TUI.
 #[derive(Debug, Parser)]
@@ -231,13 +231,7 @@ async fn main() -> Result<()> {
             let pass = passphrase.as_deref().or(global_passphrase);
             let nk = nostr_key.as_deref().or(global_nostr_key);
             let keypair = load_or_create_client_keypair(is_anon, pass, nk);
-
-            if let Some(target) = to {
-                info!("Starting direct call to target: {}", target);
-                wpapi::call::start_call(&loaded_config, Some(UserAddress::new(target))).await?;
-            } else {
-                wpclient::tui::run_tui_with_keypair(loaded_config, Some(keypair)).await?;
-            }
+            wpclient::commands::execute_call(&loaded_config, to, keypair).await?;
         }
         Some(Commands::Room {
             id,
@@ -249,18 +243,13 @@ async fn main() -> Result<()> {
             let pass = passphrase.as_deref().or(global_passphrase);
             let nk = nostr_key.as_deref().or(global_nostr_key);
             let keypair = load_or_create_client_keypair(is_anon, pass, nk);
-            info!(
-                "Joining room: {} with address {}",
-                id,
-                keypair.public_key_address()
-            );
-            wpapi::call::start_room_call(&loaded_config, UserAddress::new(id)).await?;
+            wpclient::commands::execute_room(&loaded_config, id, keypair).await?;
         }
         Some(Commands::ListAddresses) => {
-            list_registered_addresses(&loaded_config).await?;
+            wpclient::commands::list_registered_addresses(&loaded_config).await?;
         }
         Some(Commands::ListDevices) => {
-            list_audio_devices()?;
+            wpclient::commands::list_audio_devices()?;
         }
         None => {
             let keypair = load_or_create_client_keypair(
@@ -272,53 +261,5 @@ async fn main() -> Result<()> {
         }
     }
 
-    Ok(())
-}
-
-fn list_audio_devices() -> Result<()> {
-    use cpal::traits::{DeviceTrait, HostTrait};
-    let host = cpal::default_host();
-    println!("Audio Input Devices (Microphones):");
-    if let Ok(devices) = host.input_devices() {
-        for dev in devices {
-            if let Ok(desc) = dev.description() {
-                println!("  • {}", desc.name());
-            }
-        }
-    }
-    println!("\nAudio Output Devices (Speakers):");
-    if let Ok(devices) = host.output_devices() {
-        for dev in devices {
-            if let Ok(desc) = dev.description() {
-                println!("  • {}", desc.name());
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn list_registered_addresses(config: &Configuration) -> Result<()> {
-    let endpoint = format!("{}/addresses", config.server_url());
-    println!(
-        "Fetching registered addresses from daemon at {}...",
-        endpoint
-    );
-    let client = reqwest::Client::new();
-    let keypair = wpapi::UserKeypair::generate();
-    let (_, auth_hdr) = wpapi::build_authorization_header(&keypair, "");
-    let resp = client
-        .get(&endpoint)
-        .header(reqwest::header::AUTHORIZATION, auth_hdr)
-        .send()
-        .await?;
-    if resp.status().is_success() {
-        let addrs: Vec<UserAddress> = resp.json().await?;
-        println!("Registered User Addresses (Total: {}):", addrs.len());
-        for addr in addrs {
-            println!("  • Short ID: {} | Full: {}", addr.short_id(), addr);
-        }
-    } else {
-        println!("Server returned status code: {}", resp.status());
-    }
     Ok(())
 }

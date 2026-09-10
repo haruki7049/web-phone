@@ -6,8 +6,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::{error, info};
 use wpdaemon::{
-    CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, connection::handle_sdp_offer,
-    peer::connect_to_peer, peer::handle_peer_sdp, rate_limit_middleware, stun::run_stun_server,
+    CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, peer::connect_to_peer,
+    rate_limit_middleware, stun::run_stun_server,
 };
 
 /// Main entry point for the audio server daemon.
@@ -80,13 +80,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let address = SocketAddr::new(config.ip, config.port);
 
     let app = Router::new()
-        .route("/sdp", post(handle_sdp_offer))
-        .route("/peer/sdp", post(handle_peer_sdp))
+        .route("/sdp", post(wpdaemon::handlers::handle_sdp_offer))
+        .route("/peer/sdp", post(wpdaemon::handlers::handle_peer_sdp))
         .layer(middleware::from_fn(rate_limit_middleware))
-        .route("/addresses", axum::routing::get(list_registered_addresses))
+        .route("/addresses", axum::routing::get(wpdaemon::handlers::list_registered_addresses))
         .route(
             "/addresses/:id",
-            axum::routing::get(resolve_registered_address),
+            axum::routing::get(wpdaemon::handlers::resolve_registered_address),
         );
 
     let listener = tokio::net::TcpListener::bind(address).await?;
@@ -109,32 +109,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     Ok(())
-}
-
-/// Handler to retrieve all registered wpclient user addresses (WPIP-02 Section 2.3).
-async fn list_registered_addresses() -> axum::extract::Json<Vec<wpapi::UserAddress>> {
-    axum::extract::Json(wpdaemon::connection::get_registered_addresses())
-}
-
-/// Handler to resolve a client UserAddress by Short ID prefix (WPIP-02 Section 5).
-async fn resolve_registered_address(
-    axum::extract::Path(id): axum::extract::Path<String>,
-) -> Result<axum::extract::Json<wpapi::UserAddress>, wpdaemon::error::SignalingError> {
-    let dummy_addr = wpapi::UserAddress::new(id);
-    match wpdaemon::connection::find_client_by_address(&dummy_addr) {
-        wpdaemon::registry::AddressSearchResult::Found(cid) => {
-            let addr = wpdaemon::connection::get_client_address(cid).ok_or_else(|| {
-                wpdaemon::error::SignalingError::NotFound("Client address not found".into())
-            })?;
-            Ok(axum::extract::Json(addr))
-        }
-        wpdaemon::registry::AddressSearchResult::Ambiguous => {
-            Err(wpdaemon::error::SignalingError::AddressAmbiguous)
-        }
-        wpdaemon::registry::AddressSearchResult::NotFound => Err(
-            wpdaemon::error::SignalingError::NotFound("Address prefix not found".into()),
-        ),
-    }
 }
 
 /// Command-line arguments for the audio server daemon.
