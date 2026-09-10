@@ -292,7 +292,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_peer_loop_prevention_origin_and_ttl() {
-        let my_node_id = 100u64;
+        let my_node_id = 99900u64;
         let mut rx = AUDIO_BROADCAST.subscribe();
 
         // Drain any messages sent by other concurrent tests
@@ -300,7 +300,7 @@ mod tests {
 
         // 1. Packet originating from my_node_id: Should be dropped (loop prevention)
         let loop_packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
-            sender_id: 1,
+            sender_id: 99901,
             origin_node: my_node_id,
             target_address: UserAddress::new("target_addr_12345"),
             sender_address: UserAddress::new("sender_addr_12345"),
@@ -311,12 +311,15 @@ mod tests {
         let encoded_loop = loop_packet.encode();
         handle_peer_incoming_message(&encoded_loop, my_node_id);
         while let Ok(msg) = rx.try_recv() {
-            assert_ne!(msg.sender_id, 1, "Loop packet should not be re-broadcasted");
+            assert_ne!(
+                msg.sender_id, 99901,
+                "Loop packet should not be re-broadcasted"
+            );
         }
 
         // 2. Packet with TTL == 0: Should be dropped
         let ttl_zero_packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
-            sender_id: 2,
+            sender_id: 99902,
             origin_node: 200u64,
             target_address: UserAddress::new("target_addr_12345"),
             sender_address: UserAddress::new("sender_addr_12345"),
@@ -328,14 +331,14 @@ mod tests {
         handle_peer_incoming_message(&encoded_zero, my_node_id);
         while let Ok(msg) = rx.try_recv() {
             assert_ne!(
-                msg.sender_id, 2,
+                msg.sender_id, 99902,
                 "TTL 0 packet should not be re-broadcasted"
             );
         }
 
         // 3. Valid peer packet (origin_node != my_node_id, ttl = 8): Should decrement TTL to 7 and broadcast
         let valid_packet = wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
-            sender_id: 3,
+            sender_id: 99903,
             origin_node: 300u64,
             target_address: UserAddress::new("target_addr_12345"),
             sender_address: UserAddress::new("sender_addr_12345"),
@@ -348,7 +351,7 @@ mod tests {
 
         let mut found_valid = false;
         while let Ok(recv_msg) = rx.try_recv() {
-            if recv_msg.sender_id == 3 {
+            if recv_msg.sender_id == 99903 {
                 assert_eq!(recv_msg.origin_node, 300u64);
                 assert_eq!(recv_msg.ttl, 7); // Decremented from 8 to 7
                 found_valid = true;
