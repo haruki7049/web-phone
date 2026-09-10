@@ -29,6 +29,7 @@ ______________________________________________________________________
   - `CLIENT_REGISTRY` is protected by `std::sync::RwLock`. NEVER hold `RwLock` read/write guards across `.await` points when sending over WebRTC DataChannels or performing async I/O.
   - Clone necessary `Arc` handles (`RTCDataChannel`, `RTCPeerConnection`, `UserAddress`) inside short synchronous blocks, drop the guard, and then perform async `.await` calls.
 - **Error Handling**: Preserve full log tracebacks and return proper `Result` types. Do not mask errors with superficial fallbacks or silent swallows.
+- **Issue Verification**: Before starting any task or feature implementation, agents MUST check relevant GitHub Issues and existing discussions to confirm requirements and prevent duplicate or redundant work.
 - **Documentation**: Retain existing doc comments and docstrings.
 
 ______________________________________________________________________
