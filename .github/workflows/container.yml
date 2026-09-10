@@ -113,7 +113,7 @@ jobs:
           echo "Contents of /tmp/digests:"
           ls -la
 
-          DIGESTS=$(find . -maxdepth 1 -type f -exec basename {} \; | grep -v '^\.' | sed 's/^/ghcr.io\/${{ github.repository }}\/wpdaemon@sha256:/' | tr '\n' ' ')
+          DIGESTS=$(find . -maxdepth 1 -type f -exec basename {} \; | grep -v '^\.' | sed "s#^#ghcr.io/${{ github.repository }}/wpdaemon@sha256:#" | tr '\n' ' ')
           if [ -z "$DIGESTS" ]; then
             echo "Error: No digests found in /tmp/digests"
             exit 1
