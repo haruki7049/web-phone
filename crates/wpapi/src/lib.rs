@@ -12,7 +12,10 @@ pub mod turn_auth;
 pub mod webrtc_session;
 
 pub use address::{
-    UserAddress, UserKeypair, verify_authorization_header, verify_secp256k1_authorization_header,
+    AntiReplayCache, GLOBAL_ANTI_REPLAY_CACHE, UserAddress, UserKeypair,
+    build_authorization_header, verify_authorization_header,
+    verify_authorization_header_with_cache, verify_secp256k1_authorization_header,
+    verify_secp256k1_authorization_header_with_cache,
 };
 pub use audio::AudioEngine;
 pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};

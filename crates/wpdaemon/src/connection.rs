@@ -947,4 +947,76 @@ mod tests {
 
         CLIENT_REGISTRY.write().unwrap().unregister_client(99999);
     }
+
+    #[tokio::test]
+    async fn test_handle_sdp_offer_auth_failures() {
+        use axum::http::HeaderMap;
+
+        let keypair = wpapi::UserKeypair::generate();
+        let sdp_text = "v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n";
+        let offer = RTCSessionDescription::offer(sdp_text.to_string()).unwrap();
+
+        let (_, header_val) = wpapi::build_authorization_header(&keypair, sdp_text);
+
+        // 1. Expired timestamp (+301s)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let expired_ts = now.saturating_sub(301);
+        let expired_payload = format!("{}:{}", expired_ts, sdp_text);
+        let expired_sig = keypair.sign(expired_payload.as_bytes());
+        let expired_header = format!(
+            "WP-Ed25519 {}:{}:{}",
+            keypair.public_key_address().id,
+            expired_ts,
+            expired_sig
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            expired_header.parse().unwrap(),
+        );
+
+        let res = handle_sdp_offer(headers, Json(offer.clone())).await;
+        assert!(res.is_err());
+        let (status, msg) = res.unwrap_err();
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert!(msg.contains("timestamp drift too large"));
+
+        // 2. Tampered SDP payload signature
+        let tampered_sdp_text = "v=0\r\no=- 99999 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n";
+        let tampered_offer = RTCSessionDescription::offer(tampered_sdp_text.to_string()).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            header_val.parse().unwrap(),
+        );
+        let res = handle_sdp_offer(headers, Json(tampered_offer)).await;
+        assert!(res.is_err());
+        let (status, msg) = res.unwrap_err();
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert!(msg.contains("Invalid Ed25519 cryptographic signature"));
+
+        // 3. First valid attempt: OK (or fails later at PeerConnection creation if SDP invalid, but auth passes)
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            header_val.parse().unwrap(),
+        );
+        let _ = handle_sdp_offer(headers, Json(offer.clone())).await;
+
+        // 4. Replayed signature: Rejected (401 Unauthorized)
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            header_val.parse().unwrap(),
+        );
+        let res = handle_sdp_offer(headers, Json(offer)).await;
+        assert!(res.is_err());
+        let (status, msg) = res.unwrap_err();
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert!(msg.contains("Replay attack detected"));
+    }
 }

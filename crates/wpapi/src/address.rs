@@ -5,8 +5,12 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::LazyLock;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -443,10 +447,57 @@ pub fn build_authorization_header(keypair: &UserKeypair, sdp_offer: &str) -> (u6
     (timestamp, header)
 }
 
-/// Verify HTTP `Authorization` header value per WPIP-02 Section 2.2.
-pub fn verify_authorization_header(
+/// Anti-replay signature cache to prevent handshake replay attacks within the valid timestamp window.
+#[derive(Debug, Clone, Default)]
+pub struct AntiReplayCache {
+    signatures: Arc<RwLock<HashMap<String, u64>>>,
+}
+
+impl AntiReplayCache {
+    pub fn new() -> Self {
+        Self {
+            signatures: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Check if a signature has already been used within the acceptable time window.
+    /// If signature is unique, records it and returns `Ok(())`.
+    /// Otherwise returns `Err("Replay attack detected: signature already used")`.
+    pub fn check_and_insert(
+        &self,
+        signature: &str,
+        timestamp: u64,
+        now: u64,
+    ) -> Result<(), String> {
+        let mut map = self.signatures.write().unwrap();
+
+        // Retain entries within 300s window relative to current time `now`
+        map.retain(|_, &mut ts| now.abs_diff(ts) <= 300);
+
+        if map.contains_key(signature) {
+            return Err("Replay attack detected: signature already used".to_string());
+        }
+
+        map.insert(signature.to_string(), timestamp);
+        Ok(())
+    }
+
+    /// Clear all stored signatures from cache.
+    pub fn clear(&self) {
+        let mut map = self.signatures.write().unwrap();
+        map.clear();
+    }
+}
+
+/// Global anti-replay cache shared across signaling handshake verifications.
+pub static GLOBAL_ANTI_REPLAY_CACHE: LazyLock<AntiReplayCache> =
+    LazyLock::new(AntiReplayCache::new);
+
+/// Verify HTTP `Authorization` header value per WPIP-02 Section 2.2 with a specific Anti-Replay cache.
+pub fn verify_authorization_header_with_cache(
     header_val: &str,
     sdp_offer: &str,
+    cache: &AntiReplayCache,
 ) -> Result<UserAddress, String> {
     let val = header_val
         .strip_prefix("WP-Ed25519 ")
@@ -475,21 +526,32 @@ pub fn verify_authorization_header(
 
     let addr = UserAddress::new(pubkey_hex);
     let payload = format!("{}:{}", timestamp, sdp_offer);
-    if UserKeypair::verify(&addr, payload.as_bytes(), sig_hex) {
-        Ok(addr)
-    } else {
-        Err("Invalid Ed25519 cryptographic signature".into())
+    if !UserKeypair::verify(&addr, payload.as_bytes(), sig_hex) {
+        return Err("Invalid Ed25519 cryptographic signature".into());
     }
+
+    cache.check_and_insert(sig_hex, timestamp, now)?;
+
+    Ok(addr)
+}
+
+/// Verify HTTP `Authorization` header value per WPIP-02 Section 2.2 using the global Anti-Replay cache.
+pub fn verify_authorization_header(
+    header_val: &str,
+    sdp_offer: &str,
+) -> Result<UserAddress, String> {
+    verify_authorization_header_with_cache(header_val, sdp_offer, &GLOBAL_ANTI_REPLAY_CACHE)
 }
 
 use k256::schnorr::{
     Signature as SchnorrSignature, VerifyingKey as SchnorrVerifyingKey, signature::Verifier,
 };
 
-/// Verify HTTP `Authorization` header value per WPIP-16 (secp256k1 BIP-340 Schnorr signature).
-pub fn verify_secp256k1_authorization_header(
+/// Verify HTTP `Authorization` header value per WPIP-16 (secp256k1 BIP-340 Schnorr signature) with a specific Anti-Replay cache.
+pub fn verify_secp256k1_authorization_header_with_cache(
     header_val: &str,
     sdp_offer: &str,
+    cache: &AntiReplayCache,
 ) -> Result<UserAddress, String> {
     let val = header_val
         .strip_prefix("WP-Secp256k1 ")
@@ -526,11 +588,28 @@ pub fn verify_secp256k1_authorization_header(
         .map_err(|_| "Invalid Schnorr signature bytes")?;
 
     let payload = format!("{}:{}", timestamp, sdp_offer);
-    if verifying_key.verify(payload.as_bytes(), &signature).is_ok() {
-        Ok(UserAddress::new(pubkey_hex))
-    } else {
-        Err("Invalid secp256k1 Schnorr cryptographic signature".into())
+    if verifying_key
+        .verify(payload.as_bytes(), &signature)
+        .is_err()
+    {
+        return Err("Invalid secp256k1 Schnorr cryptographic signature".into());
     }
+
+    cache.check_and_insert(sig_hex, timestamp, now)?;
+
+    Ok(UserAddress::new(pubkey_hex))
+}
+
+/// Verify HTTP `Authorization` header value per WPIP-16 (secp256k1 BIP-340 Schnorr signature) using the global Anti-Replay cache.
+pub fn verify_secp256k1_authorization_header(
+    header_val: &str,
+    sdp_offer: &str,
+) -> Result<UserAddress, String> {
+    verify_secp256k1_authorization_header_with_cache(
+        header_val,
+        sdp_offer,
+        &GLOBAL_ANTI_REPLAY_CACHE,
+    )
 }
 
 impl Default for UserAddress {
@@ -691,5 +770,86 @@ mod tests {
         let nostr_kp = UserKeypair::from_nostr_key(&nsec_encoded).expect("Failed to parse nsec");
         assert!(nostr_kp.is_secp256k1());
         assert_eq!(nostr_kp.public_key_address(), keypair.public_key_address());
+    }
+
+    #[test]
+    fn test_authorization_header_expired_timestamps() {
+        let keypair = UserKeypair::generate();
+        let sdp = "v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\n";
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let cache = AntiReplayCache::new();
+
+        // Expired in past (+301s drift)
+        let past_ts = now.saturating_sub(301);
+        let payload_past = format!("{}:{}", past_ts, sdp);
+        let sig_past = keypair.sign(payload_past.as_bytes());
+        let header_past = format!(
+            "WP-Ed25519 {}:{}:{}",
+            keypair.public_key_address().id,
+            past_ts,
+            sig_past
+        );
+        let err_past =
+            verify_authorization_header_with_cache(&header_past, sdp, &cache).unwrap_err();
+        assert!(err_past.contains("timestamp drift too large"));
+
+        // Expired in future (-301s drift)
+        let future_ts = now + 301;
+        let payload_future = format!("{}:{}", future_ts, sdp);
+        let sig_future = keypair.sign(payload_future.as_bytes());
+        let header_future = format!(
+            "WP-Ed25519 {}:{}:{}",
+            keypair.public_key_address().id,
+            future_ts,
+            sig_future
+        );
+        let err_future =
+            verify_authorization_header_with_cache(&header_future, sdp, &cache).unwrap_err();
+        assert!(err_future.contains("timestamp drift too large"));
+
+        // Valid boundary (-300s drift)
+        let valid_past_ts = now.saturating_sub(300);
+        let payload_valid = format!("{}:{}", valid_past_ts, sdp);
+        let sig_valid = keypair.sign(payload_valid.as_bytes());
+        let header_valid = format!(
+            "WP-Ed25519 {}:{}:{}",
+            keypair.public_key_address().id,
+            valid_past_ts,
+            sig_valid
+        );
+        assert!(verify_authorization_header_with_cache(&header_valid, sdp, &cache).is_ok());
+    }
+
+    #[test]
+    fn test_authorization_header_tampered_sdp() {
+        let keypair = UserKeypair::generate();
+        let original_sdp = "v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\n";
+        let tampered_sdp = "v=0\r\no=- 999 999 IN IP4 10.0.0.1\r\n";
+
+        let (_, header) = build_authorization_header(&keypair, original_sdp);
+        let cache = AntiReplayCache::new();
+
+        let err =
+            verify_authorization_header_with_cache(&header, tampered_sdp, &cache).unwrap_err();
+        assert!(err.contains("Invalid Ed25519 cryptographic signature"));
+    }
+
+    #[test]
+    fn test_authorization_header_anti_replay() {
+        let keypair = UserKeypair::generate();
+        let sdp = "v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\n";
+        let (_, header) = build_authorization_header(&keypair, sdp);
+        let cache = AntiReplayCache::new();
+
+        // First attempt: OK
+        assert!(verify_authorization_header_with_cache(&header, sdp, &cache).is_ok());
+
+        // Replay attempt: Rejected
+        let err = verify_authorization_header_with_cache(&header, sdp, &cache).unwrap_err();
+        assert!(err.contains("Replay attack detected"));
     }
 }
