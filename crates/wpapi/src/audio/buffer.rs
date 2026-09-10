@@ -52,29 +52,17 @@ impl AudioRingBuffer {
         self.len() == 0
     }
 
-    /// Push a single audio sample into the buffer using atomic CAS.
+    /// Push a single audio sample into the buffer (SPSC lock-free).
     /// Returns `false` if the buffer is full.
     pub fn push(&self, sample: f32) -> bool {
-        loop {
-            let head = self.head.load(Ordering::Relaxed);
-            let tail = self.tail.load(Ordering::Acquire);
-            if head.wrapping_sub(tail) >= self.capacity {
-                return false;
-            }
-            if self
-                .head
-                .compare_exchange_weak(
-                    head,
-                    head.wrapping_add(1),
-                    Ordering::AcqRel,
-                    Ordering::Relaxed,
-                )
-                .is_ok()
-            {
-                self.buffer[head & self.mask].store(sample.to_bits(), Ordering::Release);
-                return true;
-            }
+        let head = self.head.load(Ordering::Relaxed);
+        let tail = self.tail.load(Ordering::Acquire);
+        if head.wrapping_sub(tail) >= self.capacity {
+            return false;
         }
+        self.buffer[head & self.mask].store(sample.to_bits(), Ordering::Release);
+        self.head.store(head.wrapping_add(1), Ordering::Release);
+        true
     }
 
     /// Push a slice of audio samples into the buffer and enforce low-latency bounds.
@@ -85,29 +73,17 @@ impl AudioRingBuffer {
         self.cap_latency(4800, 1920);
     }
 
-    /// Pop a single audio sample from the buffer.
+    /// Pop a single audio sample from the buffer (SPSC lock-free).
     /// Returns `None` if the buffer is empty.
     pub fn pop(&self) -> Option<f32> {
-        loop {
-            let tail = self.tail.load(Ordering::Relaxed);
-            let head = self.head.load(Ordering::Acquire);
-            if tail == head {
-                return None;
-            }
-            let bits = self.buffer[tail & self.mask].load(Ordering::Acquire);
-            if self
-                .tail
-                .compare_exchange_weak(
-                    tail,
-                    tail.wrapping_add(1),
-                    Ordering::AcqRel,
-                    Ordering::Relaxed,
-                )
-                .is_ok()
-            {
-                return Some(f32::from_bits(bits));
-            }
+        let tail = self.tail.load(Ordering::Relaxed);
+        let head = self.head.load(Ordering::Acquire);
+        if tail == head {
+            return None;
         }
+        let bits = self.buffer[tail & self.mask].load(Ordering::Acquire);
+        self.tail.store(tail.wrapping_add(1), Ordering::Release);
+        Some(f32::from_bits(bits))
     }
 
     /// Clear all pending samples from the buffer.
@@ -174,5 +150,38 @@ mod tests {
         ring.cap_latency(400, 100);
         assert_eq!(ring.len(), 100);
         assert_eq!(ring.pop(), Some(400.0));
+    }
+
+    #[test]
+    fn test_concurrent_producer_consumer() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let ring = Arc::new(AudioRingBuffer::new(16384));
+        let ring_producer = Arc::clone(&ring);
+        let count = 50_000;
+
+        let producer_handle = thread::spawn(move || {
+            for i in 0..count {
+                while !ring_producer.push(i as f32) {
+                    thread::yield_now();
+                }
+            }
+        });
+
+        let mut received = Vec::with_capacity(count);
+        while received.len() < count {
+            if let Some(sample) = ring.pop() {
+                received.push(sample);
+            } else {
+                thread::yield_now();
+            }
+        }
+
+        producer_handle.join().unwrap();
+        assert_eq!(received.len(), count);
+        for (idx, &val) in received.iter().enumerate() {
+            assert_eq!(val, idx as f32);
+        }
     }
 }
