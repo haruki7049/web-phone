@@ -93,7 +93,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
     let listener = tokio::net::TcpListener::bind(address).await?;
-    let scheme = if config.tls_cert.is_some() { "https" } else { "http" };
+    let scheme = if config.tls_cert.is_some() {
+        "https"
+    } else {
+        "http"
+    };
 
     if config.tls_cert.is_none() && !config.ip.is_loopback() {
         tracing::warn!(

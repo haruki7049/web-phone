@@ -20,7 +20,9 @@ fn check_address_request_authorization(headers: &HeaderMap) -> Result<(), Signal
     } else if daemon_config.allow_anonymous {
         Ok(())
     } else {
-        Err(SignalingError::Unauthorized(wpapi::AuthError::MissingHeader))
+        Err(SignalingError::Unauthorized(
+            wpapi::AuthError::MissingHeader,
+        ))
     }
 }
 

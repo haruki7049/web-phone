@@ -134,7 +134,9 @@ pub async fn handle_sdp_offer(
         addr
     } else {
         warn!("Rejected unauthenticated SDP offer: Authorization header is required.");
-        return Err(SignalingError::Unauthorized(wpapi::AuthError::MissingHeader));
+        return Err(SignalingError::Unauthorized(
+            wpapi::AuthError::MissingHeader,
+        ));
     };
 
     // 2. Active Connection limits check
@@ -229,7 +231,8 @@ pub async fn handle_sdp_offer(
     })?;
 
     let ice_servers = if daemon_config.turn_enabled {
-        let cred = generate_turn_credentials_for_client(&user_address, daemon_config.turn_credential_ttl);
+        let cred =
+            generate_turn_credentials_for_client(&user_address, daemon_config.turn_credential_ttl);
         Some(vec![cred])
     } else {
         None
@@ -258,11 +261,19 @@ mod tests {
         // Missing Authorization header when allow_anonymous = false (default)
         let empty_headers = HeaderMap::new();
         let res = handle_sdp_offer(empty_headers, Json(dummy_offer.clone())).await;
-        assert!(matches!(res, Err(SignalingError::Unauthorized(wpapi::AuthError::MissingHeader))));
+        assert!(matches!(
+            res,
+            Err(SignalingError::Unauthorized(
+                wpapi::AuthError::MissingHeader
+            ))
+        ));
 
         // Invalid Authorization header format
         let mut bad_headers = HeaderMap::new();
-        bad_headers.insert(axum::http::header::AUTHORIZATION, HeaderValue::from_static("Bearer invalid_token"));
+        bad_headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer invalid_token"),
+        );
         let res = handle_sdp_offer(bad_headers, Json(dummy_offer.clone())).await;
         assert!(matches!(res, Err(SignalingError::Unauthorized(_))));
     }

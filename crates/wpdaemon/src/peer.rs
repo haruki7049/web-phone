@@ -131,8 +131,8 @@ impl PeerConnectionEventHandler for MeshPeerEventHandler {
     }
 }
 
-use axum::http::HeaderMap;
 use crate::error::SignalingError;
+use axum::http::HeaderMap;
 
 /// Handle incoming SDP offer from another peer wpdaemon node.
 pub async fn handle_peer_sdp(
@@ -150,19 +150,27 @@ pub async fn handle_peer_sdp(
     if let Some(secret) = &config.peer_secret {
         let expected_bearer = format!("Bearer {}", secret);
         let expected_auth = format!("WP-PeerAuth {}", secret);
-        let is_valid = auth_header.is_some_and(|hdr| hdr == secret || hdr == expected_bearer || hdr == expected_auth);
+        let is_valid = auth_header
+            .is_some_and(|hdr| hdr == secret || hdr == expected_bearer || hdr == expected_auth);
         if !is_valid {
             warn!("Rejected peer SDP offer: Invalid peer_secret token.");
-            return Err(SignalingError::Unauthorized(wpapi::AuthError::InvalidTurnSignature));
+            return Err(SignalingError::Unauthorized(
+                wpapi::AuthError::InvalidTurnSignature,
+            ));
         }
     } else if let Some(auth_val) = auth_header {
         if let Err(err) = wpapi::verify_any_authorization_header(auth_val, &offer.sdp) {
-            warn!("Rejected peer SDP offer: Signature verification failed ({})", err);
+            warn!(
+                "Rejected peer SDP offer: Signature verification failed ({})",
+                err
+            );
             return Err(SignalingError::Unauthorized(err));
         }
     } else if !config.allow_anonymous {
         warn!("Rejected peer SDP offer: Missing peer authorization header.");
-        return Err(SignalingError::Unauthorized(wpapi::AuthError::MissingHeader));
+        return Err(SignalingError::Unauthorized(
+            wpapi::AuthError::MissingHeader,
+        ));
     }
 
     let active_connections = CLIENT_REGISTRY.read().unwrap().peer_connections.len();
@@ -236,7 +244,11 @@ pub async fn connect_to_peer(
     let config = CONFIGURATION.get().cloned().unwrap_or_default();
     info!("Connecting to peer wpdaemon at {}...", peer_url);
 
-    if peer_url.starts_with("http://") && !peer_url.contains("127.0.0.1") && !peer_url.contains("localhost") && !peer_url.contains("[::1]") {
+    if peer_url.starts_with("http://")
+        && !peer_url.contains("127.0.0.1")
+        && !peer_url.contains("localhost")
+        && !peer_url.contains("[::1]")
+    {
         warn!(
             "SECURITY WARNING: Connecting to peer daemon {} using unencrypted HTTP. HTTPS transport security is strongly recommended for non-loopback mesh peers!",
             peer_url
