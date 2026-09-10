@@ -128,7 +128,10 @@ pub async fn rate_limit_middleware(req: Request, next: Next) -> Response {
     let ip = extract_ip(&headers, socket_ip);
 
     if !GLOBAL_RATE_LIMITER.check_and_consume(ip) {
-        warn!("Rate limit exceeded for IP: {}", sanitize_ip(&ip.to_string()));
+        warn!(
+            "Rate limit exceeded for IP: {}",
+            sanitize_ip(&ip.to_string())
+        );
         return (
             StatusCode::TOO_MANY_REQUESTS,
             "429 Too Many Requests: Rate limit exceeded\n",

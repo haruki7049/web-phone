@@ -944,4 +944,24 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, AuthError::InvalidScheme(_)));
     }
+
+    #[test]
+    fn test_secret_key_non_transmission_in_network_payloads() {
+        let secp_hex = "3bf0e6984b71239c4a86161427a206a1ed93ee14e04ed96f2a893339f4ad1600";
+        let nostr_kp = UserKeypair::from_nostr_key(secp_hex).unwrap();
+        let ed_kp = UserKeypair::generate();
+        let sdp = "v=0\r\no=- 12345 67890 IN IP4 127.0.0.1\r\ns=WebPhone\r\n";
+
+        let (_, nostr_header) = build_authorization_header(&nostr_kp, sdp);
+        let (_, ed_header) = build_authorization_header(&ed_kp, sdp);
+
+        // Ensure private key string or hex bytes are NEVER included in HTTP authorization headers
+        assert!(!nostr_header.contains(secp_hex));
+        let ed_secret_hex = hex::encode(ed_kp.to_bytes());
+        assert!(!ed_header.contains(&ed_secret_hex));
+
+        // Ensure SDP payload does not leak keypair secret bytes
+        assert!(!sdp.contains(secp_hex));
+        assert!(!sdp.contains(&ed_secret_hex));
+    }
 }
