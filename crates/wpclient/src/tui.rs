@@ -182,6 +182,33 @@ mod tests {
         assert!(resp_rx.await.unwrap());
     }
 
+    #[tokio::test]
+    async fn test_caller_auto_accepts_incoming_call() {
+        let (tx, _rx) = mpsc::channel(10);
+        let mut app = TuiApp::new(Configuration::default(), tx);
+        assert!(!app.config.auto_accept);
+
+        // Client initiates call to "target_user_id"
+        app.call_state = CallState::Connecting("target_user_id".to_string());
+
+        let (resp_tx, resp_rx) = oneshot::channel::<bool>();
+        handle_app_event(
+            &mut app,
+            AppEvent::IncomingCall {
+                from: "target_user_id".to_string(),
+                responder: resp_tx,
+            },
+        );
+
+        // Modal should NOT be opened for caller, and input_mode remains Normal
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert_eq!(
+            app.call_state,
+            CallState::InCall("target_user_id".to_string())
+        );
+        assert!(resp_rx.await.unwrap());
+    }
+
     #[test]
     fn test_parse_key_event() {
         let key_ctrl_c = crossterm::event::KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);

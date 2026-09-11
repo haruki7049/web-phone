@@ -188,36 +188,71 @@ async fn dispatch_client_packet(
         }
         ProtocolPacket::CallRequest { caller_address, .. } => {
             info!("Incoming Call Request from {}", caller_address.short_id());
-            session_ref.set_target_address(Some(caller_address.clone()));
-            if auto_accept {
-                info!("Auto-accepting call from {}", caller_address.short_id());
-                let accept = ProtocolPacket::CallAcceptResponse {
-                    caller_address: caller_address.clone(),
-                };
-                let _ = dc_init
-                    .send(BytesMut::from(accept.encode().as_slice()))
-                    .await;
-            } else if let Some(tx) = session_ref.get_incoming_call_handler() {
-                let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-                let dc_reply = Arc::clone(dc_init);
-                let caller_addr = caller_address.clone();
-                tokio::spawn(async move {
-                    if let Ok(accepted) = resp_rx.await {
-                        let packet = if accepted {
-                            ProtocolPacket::CallAcceptResponse {
-                                caller_address: caller_addr,
-                            }
-                        } else {
-                            ProtocolPacket::CallRejectResponse {
-                                caller_address: caller_addr,
-                            }
-                        };
-                        let _ = dc_reply
-                            .send(BytesMut::from(packet.encode().as_slice()))
-                            .await;
-                    }
-                });
-                let _ = tx.send((caller_address, resp_tx)).await;
+            let my_addr_opt = session_ref.get_user_address();
+            let is_self_call = my_addr_opt
+                .as_ref()
+                .map(|my_addr| {
+                    my_addr == &caller_address
+                        || my_addr.short_id() == caller_address.short_id()
+                        || my_addr.id.starts_with(caller_address.short_id())
+                        || caller_address.id.starts_with(my_addr.short_id())
+                })
+                .unwrap_or(false);
+
+            if is_self_call {
+                info!(
+                    "Ignoring self-incoming CallRequest from {}",
+                    caller_address.short_id()
+                );
+            } else {
+                let current_target = session_ref.get_target_address();
+                let is_already_calling_target = current_target
+                    .as_ref()
+                    .map(|tgt| {
+                        tgt == &caller_address
+                            || tgt.short_id() == caller_address.short_id()
+                            || tgt.id.starts_with(caller_address.short_id())
+                            || caller_address.id.starts_with(tgt.short_id())
+                    })
+                    .unwrap_or(false);
+
+                if auto_accept || is_already_calling_target {
+                    info!(
+                        "Auto-accepting call from {} (auto_accept: {}, is_already_calling: {})",
+                        caller_address.short_id(),
+                        auto_accept,
+                        is_already_calling_target
+                    );
+                    session_ref.set_target_address(Some(caller_address.clone()));
+                    let accept = ProtocolPacket::CallAcceptResponse {
+                        caller_address: caller_address.clone(),
+                    };
+                    let _ = dc_init
+                        .send(BytesMut::from(accept.encode().as_slice()))
+                        .await;
+                } else if let Some(tx) = session_ref.get_incoming_call_handler() {
+                    session_ref.set_target_address(Some(caller_address.clone()));
+                    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                    let dc_reply = Arc::clone(dc_init);
+                    let caller_addr = caller_address.clone();
+                    tokio::spawn(async move {
+                        if let Ok(accepted) = resp_rx.await {
+                            let packet = if accepted {
+                                ProtocolPacket::CallAcceptResponse {
+                                    caller_address: caller_addr,
+                                }
+                            } else {
+                                ProtocolPacket::CallRejectResponse {
+                                    caller_address: caller_addr,
+                                }
+                            };
+                            let _ = dc_reply
+                                .send(BytesMut::from(packet.encode().as_slice()))
+                                .await;
+                        }
+                    });
+                    let _ = tx.send((caller_address, resp_tx)).await;
+                }
             }
         }
         ProtocolPacket::CallAcceptResponse { caller_address } => {

@@ -213,6 +213,21 @@ async fn handle_client_targeted_audio(
     } else if let crate::registry::AddressSearchResult::Found(target_cid) =
         super::find_client_by_address(&target_address)
     {
+        if target_cid == client_id {
+            warn!(
+                "Rejecting Client {} call to {}: target is self",
+                client_id,
+                target_address.short_id()
+            );
+            let err_packet = ProtocolPacket::ConnectionError {
+                target_address: target_address.clone(),
+            };
+            let _ = dc
+                .send(BytesMut::from(err_packet.encode().as_slice()))
+                .await;
+            return;
+        }
+
         if super::is_call_rejected(target_cid, &caller_user_addr) {
             warn!(
                 "Rejecting Client {} call to {}: call rejected by recipient",

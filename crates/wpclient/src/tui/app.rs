@@ -453,7 +453,17 @@ pub(crate) fn handle_app_event(app: &mut TuiApp, evt: AppEvent) {
         }
         AppEvent::IncomingCall { from, responder } => {
             app.add_log(format!("Incoming call request from: {}", from));
-            if app.config.auto_accept {
+            let is_outgoing_target = match &app.call_state {
+                CallState::Connecting(target) => {
+                    target == &from || from.starts_with(target) || target.starts_with(&from)
+                }
+                CallState::InCall(target) => {
+                    target == &from || from.starts_with(target) || target.starts_with(&from)
+                }
+                _ => false,
+            };
+
+            if app.config.auto_accept || is_outgoing_target {
                 let _ = responder.send(true);
                 app.add_log("Auto-accepted incoming call.".to_string());
                 app.call_state = CallState::InCall(from);
