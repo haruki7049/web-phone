@@ -75,7 +75,7 @@ fn default_use_tls() -> bool {
 }
 
 fn default_stun_server() -> String {
-    "stun:127.0.0.1:3478".to_string()
+    "stun:stun.l.google.com:19302".to_string()
 }
 
 impl Configuration {
@@ -354,7 +354,7 @@ mod tests {
         assert_eq!(config.sample_rate, 48000);
         assert_eq!(config.channels, 1);
         assert!(!config.allow_echoback);
-        assert_eq!(config.stun_server, "stun:127.0.0.1:3478");
+        assert_eq!(config.stun_server, "stun:stun.l.google.com:19302");
     }
 
     #[test]
