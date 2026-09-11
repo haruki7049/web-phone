@@ -39,6 +39,8 @@ const STUN_BINDING_RESPONSE: u16 = 0x0101;
 const TURN_ALLOCATE_REQUEST: u16 = 0x0003;
 /// TURN Allocate Error Response message type (WPIP-10)
 const TURN_ALLOCATE_ERROR_RESPONSE: u16 = 0x0113;
+/// MAPPED-ADDRESS attribute type (RFC 3489 / RFC 5389 compatibility)
+const STUN_ATTR_MAPPED_ADDRESS: u16 = 0x0001;
 /// XOR-MAPPED-ADDRESS attribute type
 const STUN_ATTR_XOR_MAPPED_ADDRESS: u16 = 0x0020;
 /// STUN Attribute USERNAME (0x0006)
@@ -122,6 +124,7 @@ pub async fn run_stun_server(
 }
 
 /// Construct a STUN Binding Success Response with XOR-MAPPED-ADDRESS (IPv4 and IPv6).
+/// Construct a STUN Binding Success Response with both MAPPED-ADDRESS and XOR-MAPPED-ADDRESS (IPv4 and IPv6).
 fn build_stun_binding_response(
     src: SocketAddr,
     transaction_id: &[u8],
@@ -130,14 +133,14 @@ fn build_stun_binding_response(
         return Err("Transaction ID must be 12 bytes");
     }
 
-    let mut resp = Vec::with_capacity(40);
+    let mut resp = Vec::with_capacity(68);
 
     // Message Type: 0x0101 (Binding Response)
     resp.extend_from_slice(&STUN_BINDING_RESPONSE.to_be_bytes());
 
     let (family, value_len, attr_len) = match src {
-        SocketAddr::V4(_) => (0x01u8, 8u16, 12u16),
-        SocketAddr::V6(_) => (0x02u8, 20u16, 24u16),
+        SocketAddr::V4(_) => (0x01u8, 8u16, 24u16),
+        SocketAddr::V6(_) => (0x02u8, 20u16, 48u16),
     };
 
     // Attribute length
@@ -149,15 +152,23 @@ fn build_stun_binding_response(
     // Transaction ID (12 bytes)
     resp.extend_from_slice(transaction_id);
 
-    // XOR-MAPPED-ADDRESS Attribute (0x0020)
+    // 1. MAPPED-ADDRESS Attribute (0x0001)
+    resp.extend_from_slice(&STUN_ATTR_MAPPED_ADDRESS.to_be_bytes());
+    resp.extend_from_slice(&value_len.to_be_bytes());
+    resp.push(0x00);
+    resp.push(family);
+    resp.extend_from_slice(&src.port().to_be_bytes());
+    match src {
+        SocketAddr::V4(addr) => resp.extend_from_slice(&addr.ip().octets()),
+        SocketAddr::V6(addr) => resp.extend_from_slice(&addr.ip().octets()),
+    }
+
+    // 2. XOR-MAPPED-ADDRESS Attribute (0x0020)
     resp.extend_from_slice(&STUN_ATTR_XOR_MAPPED_ADDRESS.to_be_bytes());
     resp.extend_from_slice(&value_len.to_be_bytes());
-
-    // Reserved (1 byte: 0x00), Family (1 byte: 0x01 for IPv4, 0x02 for IPv6)
     resp.push(0x00);
     resp.push(family);
 
-    // XOR-ed Port
     let port = src.port();
     let xor_port = port ^ ((STUN_MAGIC_COOKIE >> 16) as u16);
     resp.extend_from_slice(&xor_port.to_be_bytes());
@@ -294,15 +305,15 @@ mod tests {
         assert_eq!(&resp[0..2], &STUN_BINDING_RESPONSE.to_be_bytes());
         assert_eq!(&resp[4..8], &STUN_MAGIC_COOKIE.to_be_bytes());
         assert_eq!(&resp[8..20], &transaction_id);
-        // Verify family byte for IPv6
-        assert_eq!(resp[25], 0x02);
+        // Verify family byte for IPv6 XOR-MAPPED-ADDRESS
+        assert_eq!(resp[49], 0x02);
 
         // Verify IPv6 address XOR unmasking
         let mut xor_mask = [0u8; 16];
         xor_mask[0..4].copy_from_slice(&STUN_MAGIC_COOKIE.to_be_bytes());
         xor_mask[4..16].copy_from_slice(&transaction_id);
 
-        let xored_ip = &resp[28..44];
+        let xored_ip = &resp[52..68];
         let mut unmasked_ip = [0u8; 16];
         for i in 0..16 {
             unmasked_ip[i] = xored_ip[i] ^ xor_mask[i];
