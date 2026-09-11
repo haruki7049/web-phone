@@ -28,8 +28,21 @@ struct ApiEventHandler {
 #[async_trait]
 impl PeerConnectionEventHandler for ApiEventHandler {
     async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
+        tracing::info!("ICE Gathering State changed: {:?}", state);
         if state == RTCIceGatheringState::Complete {
             let _ = self.gather_complete_tx.send(()).await;
+        }
+    }
+
+    async fn on_ice_connection_state_change(
+        &self,
+        state: webrtc::peer_connection::RTCIceConnectionState,
+    ) {
+        tracing::info!("ICE Connection State changed: {:?}", state);
+        if state == webrtc::peer_connection::RTCIceConnectionState::Failed {
+            tracing::error!(
+                "ICE Connection FAILED: WebRTC UDP media/DataChannel connection to daemon could not be established."
+            );
         }
     }
 }
@@ -440,14 +453,29 @@ pub async fn perform_sdp_handshake(
         crate::address::build_authorization_header(client_keypair, &local_desc.sdp);
 
     let http_client = reqwest::Client::builder().build()?;
-    let resp = http_client
+    let resp = match http_client
         .post(&sdp_endpoint)
         .header("Content-Type", "application/json")
         .header(reqwest::header::AUTHORIZATION, auth_header_val.clone())
         .header("X-WebPhone-Sign", auth_header_val)
         .json(&local_desc)
         .send()
-        .await?;
+        .await
+    {
+        Ok(res) => res,
+        Err(err) => {
+            tracing::error!(
+                "Failed to send SDP offer HTTP POST to {}: {}",
+                sdp_endpoint,
+                err
+            );
+            return Err(anyhow!(
+                "Failed to send SDP offer to {}: {}",
+                sdp_endpoint,
+                err
+            ));
+        }
+    };
 
     if !resp.status().is_success() {
         let status = resp.status();

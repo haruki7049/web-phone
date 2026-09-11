@@ -91,6 +91,13 @@ pub struct Configuration {
     /// Time-To-Live (seconds) for Ephemeral TURN credentials (default: 900s / 15m).
     #[serde(default = "default_turn_ttl")]
     pub turn_credential_ttl: u64,
+    /// List of STUN/TURN server URLs for WebRTC ICE candidate gathering.
+    #[serde(default = "default_ice_servers")]
+    pub ice_servers: Vec<String>,
+}
+
+fn default_ice_servers() -> Vec<String> {
+    vec!["stun:stun.l.google.com:19302".to_string()]
 }
 
 fn default_true() -> bool {
@@ -151,6 +158,7 @@ impl Default for Configuration {
             tls_cert: None,
             tls_key: None,
             turn_credential_ttl: default_turn_ttl(),
+            ice_servers: default_ice_servers(),
         }
     }
 }

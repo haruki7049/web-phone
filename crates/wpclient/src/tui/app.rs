@@ -264,12 +264,20 @@ pub(crate) fn start_standby(app: &mut TuiApp) {
 
     let session_clone = session.clone();
     tokio::spawn(async move {
+        let mut assigned = false;
         for _ in 0..100 {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             if let Some(addr) = session_clone.get_user_address() {
+                tracing::info!("Daemon user address assigned successfully: {}", addr);
                 let _ = assigned_tx.send(addr).await;
+                assigned = true;
                 break;
             }
+        }
+        if !assigned {
+            tracing::warn!(
+                "Daemon address assignment (ClientAssignment) timed out (5s). WebRTC DataChannel/UDP connection to daemon was not established."
+            );
         }
     });
 

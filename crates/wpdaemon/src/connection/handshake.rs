@@ -161,7 +161,28 @@ pub async fn handle_sdp_offer(
         gather_tx,
     });
 
-    let config = RTCConfigurationBuilder::default().build();
+    let mut ice_servers = Vec::new();
+
+    for url in &daemon_config.ice_servers {
+        ice_servers.push(webrtc::peer_connection::RTCIceServer {
+            urls: vec![url.clone()],
+            ..Default::default()
+        });
+    }
+
+    if daemon_config.turn_enabled {
+        let local_stun = format!("stun:{}:{}", daemon_config.ip, daemon_config.stun_port);
+        if !daemon_config.ice_servers.contains(&local_stun) {
+            ice_servers.push(webrtc::peer_connection::RTCIceServer {
+                urls: vec![local_stun],
+                ..Default::default()
+            });
+        }
+    }
+
+    let config = RTCConfigurationBuilder::default()
+        .with_ice_servers(ice_servers)
+        .build();
 
     let pc = PeerConnectionBuilder::new()
         .with_configuration(config)
