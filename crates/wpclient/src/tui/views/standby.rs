@@ -41,6 +41,28 @@ pub fn render_standby_view(f: &mut Frame, app: &TuiApp, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled(
+                " Microphone: ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                if app.is_muted {
+                    "MUTED ([m] to unmute)"
+                } else {
+                    "UNMUTED ([m] to mute)"
+                },
+                Style::default()
+                    .fg(if app.is_muted {
+                        Color::Red
+                    } else {
+                        Color::Green
+                    })
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
                 " Echo Back: ",
                 Style::default()
                     .fg(Color::Yellow)

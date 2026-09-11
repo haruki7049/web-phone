@@ -56,9 +56,14 @@ pub fn render_room_view(f: &mut Frame, app: &TuiApp, room: &str, area: Rect) {
     f.render_widget(Paragraph::new(room_header).block(header_block), chunks[0]);
 
     // Mic Level
+    let (mic_title, mic_color) = if app.is_muted {
+        (" Mic Level (MUTED - Press [m] to unmute) ", Color::Red)
+    } else {
+        (" Mic Level ", Color::Green)
+    };
     let mic_gauge = Gauge::default()
-        .block(Block::default().title(" Mic Level ").borders(Borders::ALL))
-        .gauge_style(Style::default().fg(Color::Green))
+        .block(Block::default().title(mic_title).borders(Borders::ALL))
+        .gauge_style(Style::default().fg(mic_color))
         .ratio(app.input_level.clamp(0.0, 1.0) as f64);
     f.render_widget(mic_gauge, chunks[1]);
 

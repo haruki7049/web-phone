@@ -73,6 +73,17 @@ fn render_header(f: &mut Frame, app: &TuiApp, area: Rect) {
                 .fg(status_color)
                 .add_modifier(Modifier::BOLD),
         ),
+        Span::raw(" | Mic: "),
+        Span::styled(
+            if app.is_muted { "MUTED" } else { "ON" },
+            Style::default()
+                .fg(if app.is_muted {
+                    Color::Red
+                } else {
+                    Color::Green
+                })
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" | Echoback: "),
         Span::styled(
             if app.config.allow_echoback {
