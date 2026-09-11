@@ -95,6 +95,14 @@ pub fn render_call_view(f: &mut Frame, app: &TuiApp, target: &str, area: Rect) {
                 "DISABLED"
             }
         )),
+        Line::from(format!(
+            "Auto Accept: {} (Press [a] to toggle)",
+            if app.config.auto_accept {
+                "ENABLED"
+            } else {
+                "DISABLED"
+            }
+        )),
         Line::from("Press [h] to hang up call."),
     ];
     let details_block = Block::default()

@@ -81,9 +81,29 @@ pub fn render_standby_view(f: &mut Frame, app: &TuiApp, area: Rect) {
                 }),
             ),
         ]),
+        Line::from(vec![
+            Span::styled(
+                " Auto Accept: ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                if app.config.auto_accept {
+                    "ENABLED ([a] to disable)"
+                } else {
+                    "DISABLED ([a] to enable)"
+                },
+                Style::default().fg(if app.config.auto_accept {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+        ]),
         Line::from(""),
         Line::from(Span::styled(
-            "Press [c] to initiate 1-to-1 call, [r] to join SFU group room, [e] to toggle echoback, [l] to list online peers.",
+            "Press [c] to initiate 1-to-1 call, [r] to join SFU group room, [a] to toggle auto accept, [e] to toggle echoback, [l] to list online peers.",
             Style::default().fg(Color::DarkGray),
         )),
     ];

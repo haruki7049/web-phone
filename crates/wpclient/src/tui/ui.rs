@@ -99,6 +99,17 @@ fn render_header(f: &mut Frame, app: &TuiApp, area: Rect) {
                 })
                 .add_modifier(Modifier::BOLD),
         ),
+        Span::raw(" | AutoAccept: "),
+        Span::styled(
+            if app.config.auto_accept { "ON" } else { "OFF" },
+            Style::default()
+                .fg(if app.config.auto_accept {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                })
+                .add_modifier(Modifier::BOLD),
+        ),
     ];
 
     let header_block = Block::default()

@@ -95,6 +95,14 @@ pub fn render_room_view(f: &mut Frame, app: &TuiApp, room: &str, area: Rect) {
                 "DISABLED"
             }
         )),
+        Line::from(format!(
+            "Auto Accept: {} (Press [a] to toggle)",
+            if app.config.auto_accept {
+                "ENABLED"
+            } else {
+                "DISABLED"
+            }
+        )),
         Line::from("Press [h] to leave room."),
     ];
     let details_block = Block::default()
