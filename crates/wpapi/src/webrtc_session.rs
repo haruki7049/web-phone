@@ -305,12 +305,7 @@ async fn dispatch_client_packet(
             info!("Call ended notification from {}", target_address.short_id());
             session_ref.set_target_address(None);
             if let Some(tx) = session_ref.get_call_notification_handler() {
-                let _ = tx
-                    .send(CallNotification::Error(
-                        target_address,
-                        "Call ended by remote user".to_string(),
-                    ))
-                    .await;
+                let _ = tx.send(CallNotification::Hangup(target_address)).await;
             }
         }
         ProtocolPacket::ServerTargetedAudio { audio_data, .. }

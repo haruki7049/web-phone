@@ -248,4 +248,32 @@ mod tests {
         );
         assert!(!registry.addresses.contains_key(&1));
     }
+
+    #[test]
+    fn test_clear_call_session_clears_targets_and_allows_reconnection() {
+        let mut registry = ClientRegistry::new();
+        let addr1 = UserAddress::generate_from_time();
+        let addr2 = UserAddress::generate_from_time();
+
+        registry.addresses.insert(1, addr1.clone());
+        registry.addresses.insert(2, addr2.clone());
+
+        // Simulate active call session
+        registry.targets.insert(1, addr2.clone());
+        registry.targets.insert(2, addr1.clone());
+        registry.mark_call_approved(2, addr1.clone());
+
+        // Target should be full while call is active
+        assert!(registry.is_room_or_target_full(&addr2));
+
+        // Hangup operation
+        registry.clear_call_session(1, &addr2);
+
+        // Targets must be cleared for both clients
+        assert!(registry.targets.get(&1).is_none());
+        assert!(registry.targets.get(&2).is_none());
+
+        // Target user is no longer full and immediate reconnection/re-call is permitted
+        assert!(!registry.is_room_or_target_full(&addr2));
+    }
 }

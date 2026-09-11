@@ -37,6 +37,9 @@ impl ClientRegistry {
 
     /// Unregister a disconnected client and cleanup all associated state.
     pub fn unregister_client(&mut self, client_id: u64) {
+        let my_addr = self.addresses.get(&client_id).cloned();
+        let my_target = self.targets.get(&client_id).cloned();
+
         self.peer_connections.remove(&client_id);
         self.addresses.remove(&client_id);
         self.targets.remove(&client_id);
@@ -46,6 +49,18 @@ impl ClientRegistry {
         self.notified_requests.remove(&client_id);
         self.last_pong.remove(&client_id);
         self.connected_at.remove(&client_id);
+
+        if let Some(ref target) = my_target {
+            self.clear_call_session(client_id, target);
+        }
+        if let Some(ref addr) = my_addr {
+            for list in self.approved_calls.values_mut() {
+                list.retain(|a| !matches_address(a, addr));
+            }
+            for list in self.rejected_calls.values_mut() {
+                list.retain(|a| !matches_address(a, addr));
+            }
+        }
 
         for members in self.room_members.values_mut() {
             members.retain(|&cid| cid != client_id);
@@ -127,17 +142,29 @@ impl ClientRegistry {
         }
     }
 
-    /// Clear call approval state for a given client and target UserAddress.
+    /// Clear call approval state, active targets, and notifications for a given client and target UserAddress.
     pub fn clear_call_session(&mut self, client_id: u64, target_key: &UserAddress) {
         let target_cid = self.find_client_by_address(target_key);
         let my_addr = self.addresses.get(&client_id).cloned();
 
+        self.targets.remove(&client_id);
+
         if let Some(list) = self.approved_calls.get_mut(&client_id) {
+            list.retain(|a| !matches_address(a, target_key));
+        }
+        if let Some(list) = self.rejected_calls.get_mut(&client_id) {
             list.retain(|a| !matches_address(a, target_key));
         }
 
         if let AddressSearchResult::Found(t_cid) = target_cid {
+            self.targets.remove(&t_cid);
+
             if let Some(list) = self.approved_calls.get_mut(&t_cid)
+                && let Some(ref addr) = my_addr
+            {
+                list.retain(|a| !matches_address(a, addr));
+            }
+            if let Some(list) = self.rejected_calls.get_mut(&t_cid)
                 && let Some(ref addr) = my_addr
             {
                 list.retain(|a| !matches_address(a, addr));
@@ -149,6 +176,26 @@ impl ClientRegistry {
                 list.retain(|&cid| cid != t_cid);
             }
         }
+
+        self.targets.retain(|&cid, addr| {
+            if cid == client_id {
+                return false;
+            }
+            if let AddressSearchResult::Found(t_cid) = target_cid
+                && cid == t_cid
+            {
+                return false;
+            }
+            if matches_address(addr, target_key) || matches_address_prefix(addr, target_key) {
+                return false;
+            }
+            if let Some(ref ma) = my_addr
+                && (matches_address(addr, ma) || matches_address_prefix(addr, ma))
+            {
+                return false;
+            }
+            true
+        });
     }
 
     /// Get sorted and deduplicated list of registered user addresses.
