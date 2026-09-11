@@ -49,18 +49,10 @@ pub fn generate_node_id() -> u64 {
 /// Server configuration for the WebRTC audio daemon.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Configuration {
-    /// IP address to bind the server and STUN/TURN services to (supports IPv4 or IPv6).
+    /// IP address to bind the server service to (supports IPv4 or IPv6).
     pub ip: IpAddr,
     /// Port number for HTTP/WebRTC signaling and peer API.
     pub port: u16,
-    /// UDP port for STUN/TURN service.
-    pub stun_port: u16,
-    /// Whether STUN/TURN service is enabled.
-    #[serde(default = "default_true")]
-    pub turn_enabled: bool,
-    /// Secret key for STUN/TURN Ephemeral HMAC-SHA1 Token Authentication (WPIP-10).
-    #[serde(default = "default_turn_server_secret")]
-    pub turn_server_secret: String,
     /// List of peer wpdaemon signaling addresses to connect to for mesh federation.
     #[serde(default)]
     pub peers: Vec<String>,
@@ -88,9 +80,6 @@ pub struct Configuration {
     /// Path to TLS private key file for HTTPS signaling.
     #[serde(default)]
     pub tls_key: Option<PathBuf>,
-    /// Time-To-Live (seconds) for Ephemeral TURN credentials (default: 900s / 15m).
-    #[serde(default = "default_turn_ttl")]
-    pub turn_credential_ttl: u64,
     /// List of STUN/TURN server URLs for WebRTC ICE candidate gathering.
     #[serde(default = "default_ice_servers")]
     pub ice_servers: Vec<String>,
@@ -98,34 +87,6 @@ pub struct Configuration {
 
 fn default_ice_servers() -> Vec<String> {
     vec!["stun:stun.l.google.com:19302".to_string()]
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_turn_ttl() -> u64 {
-    900 // 15 minutes
-}
-
-/// Generate a cryptographically secure 256-bit random hex secret for TURN authentication.
-pub fn generate_random_turn_secret() -> String {
-    let rand_bytes: [u8; 32] = rand::random();
-    hex::encode(rand_bytes)
-}
-
-static DEFAULT_DYNAMIC_TURN_SECRET: LazyLock<String> = LazyLock::new(generate_random_turn_secret);
-
-/// Get the active TURN server secret key (from CONFIGURATION or fallback lazy static secret).
-pub fn get_turn_server_secret() -> Vec<u8> {
-    CONFIGURATION
-        .get()
-        .map(|c| c.turn_server_secret.as_bytes().to_vec())
-        .unwrap_or_else(|| DEFAULT_DYNAMIC_TURN_SECRET.as_bytes().to_vec())
-}
-
-fn default_turn_server_secret() -> String {
-    generate_random_turn_secret()
 }
 
 fn default_max_connections() -> usize {
@@ -145,9 +106,6 @@ impl Default for Configuration {
         Self {
             ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             port: 15000,
-            stun_port: 3478,
-            turn_enabled: true,
-            turn_server_secret: default_turn_server_secret(),
             peers: Vec::new(),
             node_id: generate_node_id(),
             max_connections: default_max_connections(),
@@ -157,7 +115,6 @@ impl Default for Configuration {
             peer_secret: None,
             tls_cert: None,
             tls_key: None,
-            turn_credential_ttl: default_turn_ttl(),
             ice_servers: default_ice_servers(),
         }
     }
@@ -172,8 +129,6 @@ mod tests {
         let config = Configuration::default();
         assert_eq!(config.ip, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
         assert_eq!(config.port, 15000);
-        assert_eq!(config.stun_port, 3478);
-        assert!(config.turn_enabled);
         assert!(config.peers.is_empty());
         assert_ne!(config.node_id, 0);
         assert_eq!(config.max_connections, 1000);
@@ -194,7 +149,6 @@ mod tests {
         let toml_str = toml::to_string(&config).expect("Failed to serialize configuration");
         assert!(toml_str.contains("ip"));
         assert!(toml_str.contains("port"));
-        assert!(toml_str.contains("stun_port"));
     }
 
     #[test]
@@ -202,27 +156,13 @@ mod tests {
         let toml_str = r#"
             ip = "192.168.1.1"
             port = 16000
-            stun_port = 3479
-            turn_enabled = true
             peers = ["http://192.168.1.2:15000"]
             node_id = 42
         "#;
         let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
         assert_eq!(config.ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
         assert_eq!(config.port, 16000);
-        assert_eq!(config.stun_port, 3479);
         assert_eq!(config.peers, vec!["http://192.168.1.2:15000"]);
         assert_eq!(config.node_id, 42);
-    }
-
-    #[test]
-    fn test_generate_random_turn_secret() {
-        let secret1 = generate_random_turn_secret();
-        let secret2 = generate_random_turn_secret();
-
-        assert_eq!(secret1.len(), 64);
-        assert_eq!(secret2.len(), 64);
-        assert_ne!(secret1, secret2);
-        assert!(secret1.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

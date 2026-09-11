@@ -21,25 +21,6 @@ use super::datachannel::handle_client_datachannel_events;
 /// Counter for connected clients.
 static CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 
-/// Generate Ephemeral TURN credentials for an authenticated UserAddress (WPIP-10).
-pub fn generate_turn_credentials_for_client(
-    user_address: &UserAddress,
-    ttl_seconds: u64,
-) -> wpapi::TurnCredential {
-    let daemon_config = CONFIGURATION.get().cloned().unwrap_or_default();
-    let secret = crate::config::get_turn_server_secret();
-    let stun_host = if daemon_config.ip.is_unspecified() {
-        "127.0.0.1".to_string()
-    } else {
-        daemon_config.ip.to_string()
-    };
-    let turn_urls = vec![format!(
-        "turn:{}:{}?transport=udp",
-        stun_host, daemon_config.stun_port
-    )];
-    wpapi::generate_ephemeral_turn_credential(&secret, user_address, turn_urls, ttl_seconds)
-}
-
 struct ClientConnectionHandler {
     client_id: u64,
     user_address: UserAddress,
@@ -175,21 +156,6 @@ pub async fn handle_sdp_offer(
         });
     }
 
-    if daemon_config.turn_enabled {
-        let stun_host = if daemon_config.ip.is_unspecified() {
-            "127.0.0.1".to_string()
-        } else {
-            daemon_config.ip.to_string()
-        };
-        let local_stun = format!("stun:{}:{}", stun_host, daemon_config.stun_port);
-        if !daemon_config.ice_servers.contains(&local_stun) {
-            ice_servers.push(webrtc::peer_connection::RTCIceServer {
-                urls: vec![local_stun],
-                ..Default::default()
-            });
-        }
-    }
-
     let config = RTCConfigurationBuilder::default()
         .with_ice_servers(ice_servers)
         .build();
@@ -261,13 +227,7 @@ pub async fn handle_sdp_offer(
         SignalingError::InternalError("No local description available".to_string())
     })?;
 
-    let ice_servers = if daemon_config.turn_enabled {
-        let cred =
-            generate_turn_credentials_for_client(&user_address, daemon_config.turn_credential_ttl);
-        Some(vec![cred])
-    } else {
-        None
-    };
+    let ice_servers = None;
 
     Ok(Json(SdpAnswerResponse {
         r#type: local_desc.sdp_type.to_string(),

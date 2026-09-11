@@ -1,7 +1,7 @@
 [package]
 name = "wpdaemon"
 version.workspace = true
-description = "WebRTC server daemon, STUN/TURN server, and peer mesh daemon"
+description = "WebRTC server daemon and peer mesh daemon"
 edition.workspace = true
 
 [dependencies]
@@ -33,4 +33,3 @@ wpapi = { path = "../wpapi" }
 
 [dev-dependencies]
 toml.workspace = true
-rtc-stun = "0.20.5"

@@ -23,12 +23,6 @@ pub const HTTP_SDP_RATE_LIMIT_REFILL: f64 = 5.0;
 /// HTTP SDP signaling endpoint rate limiter: bucket capacity (max burst).
 pub const HTTP_SDP_RATE_LIMIT_BURST: f64 = 10.0;
 
-/// STUN UDP endpoint rate limiter: token refill rate (tokens/sec).
-pub const STUN_RATE_LIMIT_REFILL: f64 = 20.0;
-
-/// STUN UDP endpoint rate limiter: bucket capacity (max burst).
-pub const STUN_RATE_LIMIT_BURST: f64 = 50.0;
-
 /// WebRTC DataChannel packet rate limiter: token refill rate (packets/sec).
 pub const DATACHANNEL_RATE_LIMIT_REFILL: f64 = 100.0;
 

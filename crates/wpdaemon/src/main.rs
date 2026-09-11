@@ -1,4 +1,4 @@
-//! WebRTC audio daemon, STUN/TURN server, and peer mesh entry point.
+//! WebRTC audio daemon and peer mesh entry point.
 
 use axum::{Router, middleware, routing::post};
 use clap::Parser;
@@ -6,8 +6,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::{error, info};
 use wpdaemon::{
-    CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, peer::connect_to_peer,
-    rate_limit_middleware, stun::run_stun_server,
+    CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH, peer::connect_to_peer, rate_limit_middleware,
 };
 
 /// Main entry point for the audio server daemon.
@@ -27,9 +26,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(port) = args.port {
         loaded_config.port = port;
     }
-    if let Some(stun_port) = args.stun_port {
-        loaded_config.stun_port = stun_port;
-    }
     if let Some(node_id) = args.node_id {
         loaded_config.node_id = node_id;
     } else if loaded_config.node_id == 0 {
@@ -47,20 +43,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config: &Configuration = CONFIGURATION
         .get()
         .ok_or("Failed to get Configuration from CONFIGURATION")?;
-
-    // Spawn STUN/TURN UDP server if enabled
-    if config.turn_enabled {
-        let stun_addr = SocketAddr::new(config.ip, config.stun_port);
-        info!(
-            "STUN/TURN HMAC authentication active (node ID: {})",
-            config.node_id
-        );
-        tokio::spawn(async move {
-            if let Err(e) = run_stun_server(stun_addr).await {
-                error!("STUN/TURN server error: {}", e);
-            }
-        });
-    }
 
     // Connect to peer wpdaemon instances if specified
     for peer_url in config.peers.clone() {
@@ -107,13 +89,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "WebRTC audio daemon node {} running on {}://{} (max_connections: {}, allow_anonymous: {})",
         config.node_id, scheme, &address, config.max_connections, config.allow_anonymous
     );
-    if config.turn_enabled {
-        info!(
-            "STUN/TURN server running on UDP {} (TTL: {}s)",
-            SocketAddr::new(config.ip, config.stun_port),
-            config.turn_credential_ttl
-        );
-    }
     info!("Waiting for wpclient audio calls & peer daemon mesh connections...");
 
     axum::serve(
@@ -135,10 +110,6 @@ struct CLIArgs {
     /// HTTP/WebRTC signaling port override.
     #[arg(short, long)]
     port: Option<u16>,
-
-    /// STUN/TURN UDP port override.
-    #[arg(short, long)]
-    stun_port: Option<u16>,
 
     /// Unique node ID override for this daemon node.
     #[arg(long)]

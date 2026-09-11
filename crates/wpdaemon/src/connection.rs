@@ -7,7 +7,7 @@ pub mod handshake;
 pub mod keepalive;
 
 pub use datachannel::validate_packet_sender_identity;
-pub use handshake::{generate_turn_credentials_for_client, handle_sdp_offer};
+pub use handshake::handle_sdp_offer;
 pub use keepalive::start_keepalive_task;
 
 use crate::registry::CLIENT_REGISTRY;

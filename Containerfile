@@ -35,9 +35,8 @@ USER nobody:nogroup
 # Copy release binary from builder stage
 COPY --from=builder --chown=nobody:nogroup /app/target/release/wpdaemon /app/wpdaemon
 
-# Expose HTTP/WebRTC signaling port (15000/tcp) and STUN port (3478/udp)
+# Expose HTTP/WebRTC signaling port (15000/tcp)
 EXPOSE 15000/tcp
-EXPOSE 3478/udp
 
 ENTRYPOINT ["/app/wpdaemon"]
-CMD ["--port", "15000", "--stun-port", "3478"]
+CMD ["--port", "15000"]
