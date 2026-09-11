@@ -13,6 +13,21 @@ impl ClientRegistry {
         user_address: UserAddress,
         peer_connection: Arc<dyn PeerConnection>,
     ) {
+        let old_cids: Vec<u64> = self
+            .addresses
+            .iter()
+            .filter_map(|(&cid, addr)| {
+                if cid != client_id && addr.id == user_address.id {
+                    Some(cid)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for old_cid in old_cids {
+            self.unregister_client(old_cid);
+        }
+
         let now = std::time::Instant::now();
         self.peer_connections.insert(client_id, peer_connection);
         self.addresses.insert(client_id, user_address);

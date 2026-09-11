@@ -213,6 +213,29 @@ async fn handle_client_targeted_audio(
     } else if let crate::registry::AddressSearchResult::Found(target_cid) =
         super::find_client_by_address(&target_address)
     {
+        let is_stale = {
+            let reg = CLIENT_REGISTRY.read().unwrap();
+            reg.get_stale_clients(15).contains(&target_cid)
+        };
+        if is_stale {
+            warn!(
+                "Rejecting Client {} call to {}: target peer connection is stale/unresponsive (waiting for keep-alive cleanup)",
+                client_id,
+                target_address.short_id()
+            );
+            CLIENT_REGISTRY
+                .write()
+                .unwrap()
+                .unregister_client(target_cid);
+            let err_packet = ProtocolPacket::ConnectionError {
+                target_address: target_address.clone(),
+            };
+            let _ = dc
+                .send(BytesMut::from(err_packet.encode().as_slice()))
+                .await;
+            return;
+        }
+
         if target_cid == client_id {
             warn!(
                 "Rejecting Client {} call to {}: target is self",

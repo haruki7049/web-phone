@@ -296,7 +296,7 @@ async fn dispatch_client_packet(
                 let _ = tx
                     .send(CallNotification::Error(
                         target_address,
-                        "Target user not found or offline".to_string(),
+                        "Target user is unavailable or connection is stale (waiting for keep-alive cleanup). Operation explicitly blocked.".to_string(),
                     ))
                     .await;
             }

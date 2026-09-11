@@ -204,4 +204,46 @@ mod tests {
             AddressSearchResult::Ambiguous
         );
     }
+
+    #[tokio::test]
+    async fn test_register_client_evicts_duplicate_address() {
+        use webrtc::peer_connection::{PeerConnectionBuilder, PeerConnectionEventHandler};
+
+        struct DummyHandler;
+        impl PeerConnectionEventHandler for DummyHandler {}
+
+        let mut registry = ClientRegistry::new();
+        let addr = UserAddress::generate_from_time();
+
+        let pc1: Arc<dyn webrtc::peer_connection::PeerConnection> = Arc::new(
+            PeerConnectionBuilder::new()
+                .with_handler(Arc::new(DummyHandler))
+                .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
+                .build()
+                .await
+                .unwrap(),
+        );
+        let pc2: Arc<dyn webrtc::peer_connection::PeerConnection> = Arc::new(
+            PeerConnectionBuilder::new()
+                .with_handler(Arc::new(DummyHandler))
+                .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
+                .build()
+                .await
+                .unwrap(),
+        );
+
+        registry.register_client(1, addr.clone(), pc1);
+        assert_eq!(
+            registry.find_client_by_address(&addr),
+            AddressSearchResult::Found(1)
+        );
+
+        // New client registers with same address (e.g. reconnect after crash)
+        registry.register_client(2, addr.clone(), pc2);
+        assert_eq!(
+            registry.find_client_by_address(&addr),
+            AddressSearchResult::Found(2)
+        );
+        assert!(!registry.addresses.contains_key(&1));
+    }
 }
