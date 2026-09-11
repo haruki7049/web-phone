@@ -212,25 +212,27 @@ mod tests {
         struct DummyHandler;
         impl PeerConnectionEventHandler for DummyHandler {}
 
+        let (Ok(pc1), Ok(pc2)) = (
+            PeerConnectionBuilder::new()
+                .with_handler(Arc::new(DummyHandler))
+                .with_udp_addrs(vec!["127.0.0.1:0".to_string()])
+                .build()
+                .await,
+            PeerConnectionBuilder::new()
+                .with_handler(Arc::new(DummyHandler))
+                .with_udp_addrs(vec!["127.0.0.1:0".to_string()])
+                .build()
+                .await,
+        ) else {
+            // In network-isolated sandbox environments (e.g. nix build), socket binding is unavailable
+            return;
+        };
+
         let mut registry = ClientRegistry::new();
         let addr = UserAddress::generate_from_time();
 
-        let pc1: Arc<dyn webrtc::peer_connection::PeerConnection> = Arc::new(
-            PeerConnectionBuilder::new()
-                .with_handler(Arc::new(DummyHandler))
-                .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
-                .build()
-                .await
-                .unwrap(),
-        );
-        let pc2: Arc<dyn webrtc::peer_connection::PeerConnection> = Arc::new(
-            PeerConnectionBuilder::new()
-                .with_handler(Arc::new(DummyHandler))
-                .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
-                .build()
-                .await
-                .unwrap(),
-        );
+        let pc1: Arc<dyn webrtc::peer_connection::PeerConnection> = Arc::new(pc1);
+        let pc2: Arc<dyn webrtc::peer_connection::PeerConnection> = Arc::new(pc2);
 
         registry.register_client(1, addr.clone(), pc1);
         assert_eq!(
