@@ -57,6 +57,10 @@ struct CLIArgs {
     #[arg(long, short = 'n', alias = "nsec")]
     nostr_key: Option<String>,
 
+    /// Path to file for writing tracing logs without corrupting TUI screen.
+    #[arg(long, alias = "log-file")]
+    log_file: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -188,6 +192,23 @@ fn load_or_create_client_keypair(
 async fn main() -> Result<()> {
     color_eyre::install().expect("Failed to install color_eyre panic handler");
     let args: CLIArgs = CLIArgs::parse();
+
+    let log_file_path = args
+        .log_file
+        .clone()
+        .or_else(|| std::env::var_os("WPCLIENT_LOG_FILE").map(PathBuf::from));
+
+    if let Some(path) = log_file_path
+        && let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+    {
+        tracing_subscriber::fmt()
+            .with_writer(std::sync::Mutex::new(file))
+            .with_ansi(false)
+            .init();
+    }
 
     let mut loaded_config: Configuration =
         confy::load_path(&args.config_path).unwrap_or_else(|_| {
