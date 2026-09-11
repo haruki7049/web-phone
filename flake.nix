@@ -57,6 +57,7 @@
               pkgs.libXrandr
               pkgs.libxkbcommon
               pkgs.wayland
+              pkgs.cacert
             ]
             ++ [
               pkgs.llvmPackages.libclang.lib
