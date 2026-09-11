@@ -5,7 +5,7 @@
 
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex, OnceLock};
 
@@ -49,12 +49,9 @@ pub fn generate_node_id() -> u64 {
 /// Server configuration settings (`[server]`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
-    /// IP address to bind the server service to (supports IPv4 or IPv6).
-    #[serde(default = "default_ip")]
-    pub ip: IpAddr,
-    /// Port number for HTTP/WebRTC signaling and peer API.
-    #[serde(default = "default_port")]
-    pub port: u16,
+    /// Socket address (IP:port) to bind the server service to.
+    #[serde(default = "default_bind_address")]
+    pub bind_address: SocketAddr,
     /// Maximum allowed concurrent WebRTC peer connections.
     #[serde(default = "default_max_connections")]
     pub max_connections: usize,
@@ -66,12 +63,8 @@ pub struct ServerConfig {
     pub allow_anonymous: bool,
 }
 
-fn default_ip() -> IpAddr {
-    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
-}
-
-fn default_port() -> u16 {
-    15000
+fn default_bind_address() -> SocketAddr {
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 15000))
 }
 
 fn default_max_connections() -> usize {
@@ -85,8 +78,7 @@ fn default_max_room_members() -> usize {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            ip: default_ip(),
-            port: default_port(),
+            bind_address: default_bind_address(),
             max_connections: default_max_connections(),
             max_room_members: default_max_room_members(),
             allow_anonymous: false,
@@ -181,8 +173,10 @@ mod tests {
     #[test]
     fn test_configuration_default() {
         let config = Configuration::default();
-        assert_eq!(config.server.ip, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
-        assert_eq!(config.server.port, 15000);
+        assert_eq!(
+            config.server.bind_address,
+            "127.0.0.1:15000".parse::<SocketAddr>().unwrap()
+        );
         assert!(config.mesh.peers.is_empty());
         assert_ne!(config.mesh.node_id, 0);
         assert_eq!(config.server.max_connections, 1000);
@@ -203,24 +197,24 @@ mod tests {
         let toml_str = toml::to_string(&config).expect("Failed to serialize configuration");
         assert!(toml_str.contains("[server]"));
         assert!(toml_str.contains("[mesh]"));
-        assert!(toml_str.contains("ip"));
-        assert!(toml_str.contains("port"));
+        assert!(toml_str.contains("bind_address"));
     }
 
     #[test]
     fn test_configuration_deserialization() {
         let toml_str = r#"
             [server]
-            ip = "192.168.1.1"
-            port = 16000
+            bind_address = "192.168.1.1:16000"
 
             [mesh]
             peers = ["http://192.168.1.2:15000"]
             node_id = 42
         "#;
         let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
-        assert_eq!(config.server.ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
-        assert_eq!(config.server.port, 16000);
+        assert_eq!(
+            config.server.bind_address,
+            "192.168.1.1:16000".parse::<SocketAddr>().unwrap()
+        );
         assert_eq!(config.mesh.peers, vec!["http://192.168.1.2:15000"]);
         assert_eq!(config.mesh.node_id, 42);
     }

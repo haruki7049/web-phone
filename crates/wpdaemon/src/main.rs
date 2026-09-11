@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
     if let Some(port) = args.port {
-        loaded_config.server.port = port;
+        loaded_config.server.bind_address.set_port(port);
     }
     if let Some(node_id) = args.node_id {
         loaded_config.mesh.node_id = node_id;
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn background keep-alive heartbeat task (WPIP-09)
     wpdaemon::connection::start_keepalive_task();
 
-    let address = SocketAddr::new(config.server.ip, config.server.port);
+    let address = config.server.bind_address;
 
     let app = Router::new()
         .route("/sdp", post(wpdaemon::handlers::handle_sdp_offer))
@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "http"
     };
 
-    if config.tls.tls_cert.is_none() && !config.server.ip.is_loopback() {
+    if config.tls.tls_cert.is_none() && !config.server.bind_address.ip().is_loopback() {
         tracing::warn!(
             "SECURITY WARNING: WebRTC audio daemon node {} is binding to public/external IP {} over unencrypted HTTP! HTTPS/TLS termination is strongly recommended for production deployments.",
             config.mesh.node_id,

@@ -128,8 +128,7 @@ Configuration files are automatically stored in platform-specific default direct
 
 ```toml
 [server]
-ip = "127.0.0.1"
-port = 15000
+bind_address = "127.0.0.1:15000"
 max_connections = 1000
 max_room_members = 50
 allow_anonymous = false
@@ -144,9 +143,8 @@ max_mesh_peers = 16
 
 ```toml
 [server]
-url = "http://127.0.0.1:15000" # Optional: specify full URL or hostname (overrides ip/port)
-ip = "127.0.0.1"
-port = 15000
+url = "http://127.0.0.1:15000" # Optional: specify full URL or hostname (overrides address)
+address = "127.0.0.1:15000"
 use_tls = true
 
 [network]

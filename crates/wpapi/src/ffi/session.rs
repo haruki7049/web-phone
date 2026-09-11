@@ -64,7 +64,7 @@ pub unsafe extern "C" fn wpapi_config_set_server(
                 return -1;
             }
         };
-        let ip_addr = match ip_str.parse() {
+        let ip_addr: std::net::IpAddr = match ip_str.parse() {
             Ok(ip) => ip,
             Err(e) => {
                 set_last_error(format!("Invalid IP address '{}': {}", ip_str, e));
@@ -72,8 +72,7 @@ pub unsafe extern "C" fn wpapi_config_set_server(
             }
         };
         let cfg = unsafe { &mut (*config).0 };
-        cfg.server.ip = ip_addr;
-        cfg.server.port = server_port;
+        cfg.server.address = format!("{}:{}", ip_addr, server_port);
         0
     }))
     .unwrap_or(-1)

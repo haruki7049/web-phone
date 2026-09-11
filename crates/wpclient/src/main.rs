@@ -236,15 +236,18 @@ async fn main() -> Result<()> {
                 return Err(anyhow::anyhow!("Invalid --server-ip: {}", e));
             }
         } else if let Ok(ip) = server_ip_raw.parse::<IpAddr>() {
-            loaded_config.server.ip = ip;
+            let port = loaded_config.server.port();
+            loaded_config.server.address = format!("{}:{}", ip, port);
             loaded_config.server.host = Some(ip.to_string());
         } else {
+            let port = loaded_config.server.port();
+            loaded_config.server.address = format!("{}:{}", server_ip_raw, port);
             loaded_config.server.host = Some(server_ip_raw.clone());
         }
     }
 
     if let Some(server_port) = args.server_port {
-        loaded_config.server.port = server_port;
+        loaded_config.server.set_port(server_port);
     }
     if let Some(stun_server) = args.stun_server {
         loaded_config.network.stun_server = stun_server;

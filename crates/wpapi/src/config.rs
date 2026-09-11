@@ -26,12 +26,9 @@ pub static CONFIGURATION: OnceLock<Configuration> = OnceLock::new();
 /// Server configuration settings (`[server]`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
-    /// IP address of the audio server to connect to (supports IPv4 or IPv6).
-    #[serde(default = "default_server_ip")]
-    pub ip: IpAddr,
-    /// Port number of the audio server.
-    #[serde(default = "default_server_port")]
-    pub port: u16,
+    /// Server address (IP:port or host:port, e.g. "127.0.0.1:15000", "daemon.example.com:8443").
+    #[serde(default = "default_server_address")]
+    pub address: String,
     /// Hostname or domain name override for the audio server (e.g. "localhost", "daemon.example.com").
     #[serde(default)]
     pub host: Option<String>,
@@ -43,23 +40,56 @@ pub struct ServerConfig {
     pub use_tls: bool,
 }
 
-fn default_server_ip() -> IpAddr {
-    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
-}
-
-fn default_server_port() -> u16 {
-    15000
+fn default_server_address() -> String {
+    "127.0.0.1:15000".to_string()
 }
 
 fn default_use_tls() -> bool {
     true
 }
 
+impl ServerConfig {
+    /// Extract IP address if `address` parses as SocketAddr or IpAddr.
+    pub fn ip(&self) -> IpAddr {
+        if let Ok(socket_addr) = self.address.parse::<std::net::SocketAddr>() {
+            socket_addr.ip()
+        } else if let Ok(ip) = self.address.parse::<IpAddr>() {
+            ip
+        } else {
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+        }
+    }
+
+    /// Extract port number if present in `address`, or default to 15000.
+    pub fn port(&self) -> u16 {
+        if let Ok(socket_addr) = self.address.parse::<std::net::SocketAddr>() {
+            socket_addr.port()
+        } else if let Some((_, port_str)) = self.address.rsplit_once(':')
+            && let Ok(port) = port_str.parse::<u16>()
+        {
+            port
+        } else {
+            15000
+        }
+    }
+
+    /// Update port in `address`.
+    pub fn set_port(&mut self, port: u16) {
+        if let Ok(mut socket_addr) = self.address.parse::<std::net::SocketAddr>() {
+            socket_addr.set_port(port);
+            self.address = socket_addr.to_string();
+        } else if let Some((host_part, _)) = self.address.rsplit_once(':') {
+            self.address = format!("{}:{}", host_part, port);
+        } else {
+            self.address = format!("{}:{}", self.address, port);
+        }
+    }
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            ip: default_server_ip(),
-            port: default_server_port(),
+            address: default_server_address(),
             host: None,
             url_override: None,
             use_tls: default_use_tls(),
@@ -198,27 +228,26 @@ impl Configuration {
 
         if let Some(host_str) = parsed.host_str() {
             let clean_host = host_str.trim_matches('[').trim_matches(']').to_string();
+            let port = parsed
+                .port()
+                .unwrap_or(if self.server.use_tls { 443 } else { 80 });
+
             if let Ok(ip) = clean_host.parse::<IpAddr>() {
-                self.server.ip = ip;
+                self.server.address = match ip {
+                    IpAddr::V4(v4) => format!("{}:{}", v4, port),
+                    IpAddr::V6(v6) => format!("[{}]:{}", v6, port),
+                };
                 self.server.host = Some(clean_host);
             } else {
                 if clean_host.eq_ignore_ascii_case("localhost") {
-                    self.server.ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+                    self.server.address = format!("127.0.0.1:{}", port);
+                } else {
+                    self.server.address = format!("{}:{}", clean_host, port);
                 }
                 self.server.host = Some(clean_host);
             }
         } else {
             return Err(format!("No host specified in server URL '{}'", input));
-        }
-
-        if let Some(port) = parsed.port() {
-            self.server.port = port;
-        } else if scheme_specified {
-            match parsed.scheme() {
-                "https" | "wss" => self.server.port = 443,
-                "http" | "ws" => self.server.port = 80,
-                _ => {}
-            }
         }
 
         Ok(())
@@ -234,26 +263,31 @@ impl Configuration {
         Ok(())
     }
 
-    /// Helper to get the display host string (either server.host or formatted server.ip).
+    /// Helper to get the display host string (either server.host or formatted host part from server.address).
     pub fn host_str(&self) -> String {
         if let Some(ref host) = self.server.host {
             host.clone()
-        } else {
-            match self.server.ip {
+        } else if let Ok(socket_addr) = self.server.address.parse::<std::net::SocketAddr>() {
+            match socket_addr.ip() {
                 IpAddr::V4(ip) => ip.to_string(),
                 IpAddr::V6(ip) => format!("[{}]", ip),
             }
+        } else if let Some((host_part, _)) = self.server.address.rsplit_once(':') {
+            host_part.to_string()
+        } else {
+            self.server.address.clone()
         }
     }
 
-    /// Construct full HTTP/HTTPS server base URL according to TLS settings, server host/IP, and port.
+    /// Construct full HTTP/HTTPS server base URL according to TLS settings, server address, and port.
     pub fn server_url(&self) -> String {
         let host = self.host_str();
+        let port = self.server.port();
         let is_loopback = host == "localhost"
             || host == "127.0.0.1"
             || host == "::1"
             || host == "[::1]"
-            || self.server.ip.is_loopback();
+            || self.server.ip().is_loopback();
 
         let scheme = if self.server.use_tls {
             "https"
@@ -267,23 +301,22 @@ impl Configuration {
             "http"
         };
 
-        if (scheme == "http" && self.server.port == 80)
-            || (scheme == "https" && self.server.port == 443)
-        {
+        if (scheme == "http" && port == 80) || (scheme == "https" && port == 443) {
             format!("{}://{}", scheme, host)
         } else {
-            format!("{}://{}:{}", scheme, host, self.server.port)
+            format!("{}://{}:{}", scheme, host, port)
         }
     }
 
-    /// Construct full WS/WSS WebSocket server URL according to TLS settings, server host/IP, and port.
+    /// Construct full WS/WSS WebSocket server URL according to TLS settings, server address, and port.
     pub fn websocket_url(&self) -> String {
         let host = self.host_str();
+        let port = self.server.port();
         let is_loopback = host == "localhost"
             || host == "127.0.0.1"
             || host == "::1"
             || host == "[::1]"
-            || self.server.ip.is_loopback();
+            || self.server.ip().is_loopback();
 
         let scheme = if self.server.use_tls {
             "wss"
@@ -297,18 +330,16 @@ impl Configuration {
             "ws"
         };
 
-        if (scheme == "ws" && self.server.port == 80)
-            || (scheme == "wss" && self.server.port == 443)
-        {
+        if (scheme == "ws" && port == 80) || (scheme == "wss" && port == 443) {
             format!("{}://{}", scheme, host)
         } else {
-            format!("{}://{}:{}", scheme, host, self.server.port)
+            format!("{}://{}:{}", scheme, host, port)
         }
     }
 
     /// Validate configuration settings.
     pub fn validate(&self) -> Result<(), String> {
-        if self.server.port == 0 {
+        if self.server.port() == 0 {
             return Err("Server port cannot be 0".to_string());
         }
         if self.audio.sample_rate < 8000 || self.audio.sample_rate > 96000 {
@@ -352,12 +383,16 @@ impl ConfigurationBuilder {
     }
 
     pub fn server_ip(mut self, ip: IpAddr) -> Self {
-        self.config.server.ip = ip;
+        let port = self.config.server.port();
+        self.config.server.address = match ip {
+            IpAddr::V4(v4) => format!("{}:{}", v4, port),
+            IpAddr::V6(v6) => format!("[{}]:{}", v6, port),
+        };
         self
     }
 
     pub fn server_port(mut self, port: u16) -> Self {
-        self.config.server.port = port;
+        self.config.server.set_port(port);
         self
     }
 
@@ -404,8 +439,9 @@ mod tests {
     #[test]
     fn test_configuration_default() {
         let config = Configuration::default();
-        assert_eq!(config.server.ip, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
-        assert_eq!(config.server.port, 15000);
+        assert_eq!(config.server.address, "127.0.0.1:15000");
+        assert_eq!(config.server.ip(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(config.server.port(), 15000);
         assert_eq!(config.audio.sample_rate, 48000);
         assert_eq!(config.audio.channels, 1);
         assert!(!config.audio.allow_echoback);
@@ -420,8 +456,7 @@ mod tests {
         assert!(toml_str.contains("[network]"));
         assert!(toml_str.contains("[audio]"));
         assert!(toml_str.contains("[client]"));
-        assert!(toml_str.contains("ip"));
-        assert!(toml_str.contains("port"));
+        assert!(toml_str.contains("address"));
         assert!(toml_str.contains("sample_rate"));
         assert!(toml_str.contains("channels"));
     }
@@ -430,8 +465,7 @@ mod tests {
     fn test_configuration_deserialization() {
         let toml_str = r#"
             [server]
-            ip = "192.168.1.1"
-            port = 16000
+            address = "192.168.1.1:16000"
 
             [network]
             stun_server = "stun:stun.l.google.com:19302"
@@ -444,8 +478,11 @@ mod tests {
             output_device = "MacBook"
         "#;
         let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
-        assert_eq!(config.server.ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
-        assert_eq!(config.server.port, 16000);
+        assert_eq!(
+            config.server.ip(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))
+        );
+        assert_eq!(config.server.port(), 16000);
         assert_eq!(config.network.stun_server, "stun:stun.l.google.com:19302");
         assert_eq!(config.audio.sample_rate, 44100);
         assert_eq!(config.audio.channels, 2);
@@ -467,9 +504,12 @@ mod tests {
         let mut config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
         config.normalize().expect("Normalize should succeed");
         assert_eq!(config.server_url(), "http://192.168.1.50:16000");
-        assert_eq!(config.server.port, 16000);
+        assert_eq!(config.server.port(), 16000);
         assert!(!config.server.use_tls);
-        assert_eq!(config.server.ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 50)));
+        assert_eq!(
+            config.server.ip(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 50))
+        );
     }
 
     #[test]
@@ -480,7 +520,7 @@ mod tests {
         assert_eq!(config.websocket_url(), "wss://127.0.0.1:15000");
 
         // Non-loopback IP with use_tls = true -> https
-        config.server.ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100));
+        config.server.address = "192.168.1.100:15000".to_string();
         assert_eq!(config.server_url(), "https://192.168.1.100:15000");
         assert_eq!(config.websocket_url(), "wss://192.168.1.100:15000");
 
@@ -499,8 +539,11 @@ mod tests {
             .parse_and_apply_server_url("http://192.168.1.50:16000")
             .unwrap();
         assert!(!config.server.use_tls);
-        assert_eq!(config.server.port, 16000);
-        assert_eq!(config.server.ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 50)));
+        assert_eq!(config.server.port(), 16000);
+        assert_eq!(
+            config.server.ip(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 50))
+        );
         assert_eq!(config.server_url(), "http://192.168.1.50:16000");
 
         // 2. HTTPS Domain URL
@@ -508,7 +551,7 @@ mod tests {
             .parse_and_apply_server_url("https://daemon.example.com:8443")
             .unwrap();
         assert!(config.server.use_tls);
-        assert_eq!(config.server.port, 8443);
+        assert_eq!(config.server.port(), 8443);
         assert_eq!(config.server.host.as_deref(), Some("daemon.example.com"));
         assert_eq!(config.server_url(), "https://daemon.example.com:8443");
 
@@ -517,26 +560,26 @@ mod tests {
             .parse_and_apply_server_url("http://localhost:15000")
             .unwrap();
         assert!(!config.server.use_tls);
-        assert_eq!(config.server.port, 15000);
-        assert_eq!(config.server.ip, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(config.server.port(), 15000);
+        assert_eq!(config.server.ip(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
         assert_eq!(config.server_url(), "http://localhost:15000");
 
         // 4. IP with port (no scheme)
         config.parse_and_apply_server_url("10.0.0.5:17000").unwrap();
-        assert_eq!(config.server.port, 17000);
-        assert_eq!(config.server.ip, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)));
+        assert_eq!(config.server.port(), 17000);
+        assert_eq!(config.server.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)));
 
         // 5. Scheme default ports
         config
             .parse_and_apply_server_url("https://example.com")
             .unwrap();
-        assert_eq!(config.server.port, 443);
+        assert_eq!(config.server.port(), 443);
         assert_eq!(config.server_url(), "https://example.com");
 
         config
             .parse_and_apply_server_url("http://example.com")
             .unwrap();
-        assert_eq!(config.server.port, 80);
+        assert_eq!(config.server.port(), 80);
         assert_eq!(config.server_url(), "http://example.com");
     }
 
@@ -545,10 +588,10 @@ mod tests {
         let mut config = Configuration::default();
         assert!(config.validate().is_ok());
 
-        config.server.port = 0;
+        config.server.set_port(0);
         assert!(config.validate().is_err());
 
-        config.server.port = 15000;
+        config.server.set_port(15000);
         config.audio.sample_rate = 500;
         assert!(config.validate().is_err());
 
@@ -571,7 +614,7 @@ mod tests {
             .build()
             .expect("Build should succeed");
 
-        assert_eq!(config.server.port, 18000);
+        assert_eq!(config.server.port(), 18000);
         assert_eq!(config.audio.sample_rate, 44100);
         assert_eq!(config.audio.channels, 2);
         assert_eq!(config.network.stun_server, "stun:stun.l.google.com:19302");
