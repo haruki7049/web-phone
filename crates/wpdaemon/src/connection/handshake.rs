@@ -28,9 +28,14 @@ pub fn generate_turn_credentials_for_client(
 ) -> wpapi::TurnCredential {
     let daemon_config = CONFIGURATION.get().cloned().unwrap_or_default();
     let secret = crate::config::get_turn_server_secret();
+    let stun_host = if daemon_config.ip.is_unspecified() {
+        "127.0.0.1".to_string()
+    } else {
+        daemon_config.ip.to_string()
+    };
     let turn_urls = vec![format!(
         "turn:{}:{}?transport=udp",
-        daemon_config.ip, daemon_config.stun_port
+        stun_host, daemon_config.stun_port
     )];
     wpapi::generate_ephemeral_turn_credential(&secret, user_address, turn_urls, ttl_seconds)
 }
@@ -171,7 +176,12 @@ pub async fn handle_sdp_offer(
     }
 
     if daemon_config.turn_enabled {
-        let local_stun = format!("stun:{}:{}", daemon_config.ip, daemon_config.stun_port);
+        let stun_host = if daemon_config.ip.is_unspecified() {
+            "127.0.0.1".to_string()
+        } else {
+            daemon_config.ip.to_string()
+        };
+        let local_stun = format!("stun:{}:{}", stun_host, daemon_config.stun_port);
         if !daemon_config.ice_servers.contains(&local_stun) {
             ice_servers.push(webrtc::peer_connection::RTCIceServer {
                 urls: vec![local_stun],

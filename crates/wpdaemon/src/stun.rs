@@ -262,6 +262,24 @@ mod tests {
     }
 
     #[test]
+    fn test_webrtc_stun_unmarshal() {
+        use rtc_stun::message::Getter;
+        use rtc_stun::message::Message;
+        use rtc_stun::xoraddr::XorMappedAddress;
+        let src = SocketAddr::V4(SocketAddrV4::new("127.0.0.1".parse().unwrap(), 12345));
+        let transaction_id = [1u8; 12];
+        let resp =
+            build_stun_binding_response(src, &transaction_id).expect("Failed to build response");
+        let mut msg = Message::new();
+        msg.unmarshal_binary(&resp)
+            .expect("Failed to unmarshal binary STUN response");
+        let mut xor_addr = XorMappedAddress::default();
+        xor_addr
+            .get_from(&msg)
+            .expect("Failed to get XorMappedAddress from message");
+    }
+
+    #[test]
     fn test_build_stun_binding_response_v6() {
         let src = SocketAddr::V6(SocketAddrV6::new(
             "2001:db8::1".parse().unwrap(),

@@ -33,3 +33,4 @@ wpapi = { path = "../wpapi" }
 
 [dev-dependencies]
 toml.workspace = true
+rtc-stun = "0.20.5"
