@@ -302,10 +302,15 @@ async fn dispatch_client_packet(
             }
         }
         ProtocolPacket::CallEndedNotification { target_address } => {
-            info!("Call ended notification from {}", target_address.short_id());
+            info!(
+                "Received CallEndedNotification from remote client {}, emitting CallNotification::Hangup",
+                target_address.short_id()
+            );
             session_ref.set_target_address(None);
             if let Some(tx) = session_ref.get_call_notification_handler() {
-                let _ = tx.send(CallNotification::Hangup(target_address)).await;
+                let _ = tx
+                    .send(CallNotification::Hangup(target_address.clone()))
+                    .await;
             }
         }
         ProtocolPacket::ServerTargetedAudio { audio_data, .. }

@@ -465,8 +465,14 @@ async fn handle_call_hangup(
 
     if let Some(target_dc) = target_dc {
         let ended_pkt = ProtocolPacket::CallEndedNotification {
-            target_address: my_addr,
+            target_address: my_addr.clone(),
         };
+        info!(
+            "Sent CallEndedNotification to target {} for call ended by Client {} ({})",
+            target_address.short_id(),
+            client_id,
+            my_addr.short_id()
+        );
         let _ = target_dc
             .send(BytesMut::from(ended_pkt.encode().as_slice()))
             .await;
