@@ -82,6 +82,14 @@ pub fn render_call_view(f: &mut Frame, app: &TuiApp, target: &str, area: Rect) {
                 "ACTIVE (Press [m] to mute)"
             }
         )),
+        Line::from(format!(
+            "Echo Back: {} (Press [e] to toggle)",
+            if app.config.allow_echoback {
+                "ENABLED"
+            } else {
+                "DISABLED"
+            }
+        )),
         Line::from("Press [h] to hang up call."),
     ];
     let details_block = Block::default()

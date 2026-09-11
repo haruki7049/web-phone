@@ -82,6 +82,14 @@ pub fn render_room_view(f: &mut Frame, app: &TuiApp, room: &str, area: Rect) {
                 "ACTIVE (Press [m] to mute)"
             }
         )),
+        Line::from(format!(
+            "Echo Back: {} (Press [e] to toggle)",
+            if app.config.allow_echoback {
+                "ENABLED"
+            } else {
+                "DISABLED"
+            }
+        )),
         Line::from("Press [h] to leave room."),
     ];
     let details_block = Block::default()

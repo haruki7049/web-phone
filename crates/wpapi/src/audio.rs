@@ -128,6 +128,7 @@ impl AudioEngine {
         tx_audio: mpsc::Sender<Vec<u8>>,
         session: &ClientSession,
     ) -> Result<Self> {
+        session.set_allow_echoback(config.allow_echoback);
         let host = cpal::default_host();
 
         let input_device = find_input_device(&host, config.input_device.as_deref())?;
@@ -192,6 +193,9 @@ impl AudioEngine {
                             mono_samples.push(sum / channels as f32);
                         }
                         let resampled = resampler.process(&mono_samples);
+                        if sess.allow_echoback() {
+                            sess.audio_buffer.push_slice(&resampled);
+                        }
                         let bytes: Vec<u8> = resampled
                             .iter()
                             .flat_map(|&sample| sample.to_le_bytes())

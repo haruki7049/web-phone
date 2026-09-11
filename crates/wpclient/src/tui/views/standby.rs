@@ -39,9 +39,29 @@ pub fn render_standby_view(f: &mut Frame, app: &TuiApp, area: Rect) {
                     .unwrap_or_else(|| "Assigning...".into()),
             ),
         ]),
+        Line::from(vec![
+            Span::styled(
+                " Echo Back: ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                if app.config.allow_echoback {
+                    "ENABLED ([e] to disable)"
+                } else {
+                    "DISABLED ([e] to enable)"
+                },
+                Style::default().fg(if app.config.allow_echoback {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+        ]),
         Line::from(""),
         Line::from(Span::styled(
-            "Press [c] to initiate 1-to-1 call, [r] to join SFU group room, [l] to list online peers.",
+            "Press [c] to initiate 1-to-1 call, [r] to join SFU group room, [e] to toggle echoback, [l] to list online peers.",
             Style::default().fg(Color::DarkGray),
         )),
     ];

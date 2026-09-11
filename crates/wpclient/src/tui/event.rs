@@ -16,6 +16,7 @@ pub enum AppAction {
     EnterRoomInput,
     ToggleMute,
     ToggleAutoAccept,
+    ToggleEchoback,
     Hangup,
     FetchRegisteredAddresses,
     SubmitCallInput,
@@ -46,6 +47,7 @@ pub fn parse_key_event(input_mode: &InputMode, key: crossterm::event::KeyEvent) 
             KeyCode::Char('r') => AppAction::EnterRoomInput,
             KeyCode::Char('m') => AppAction::ToggleMute,
             KeyCode::Char('a') | KeyCode::Char('A') => AppAction::ToggleAutoAccept,
+            KeyCode::Char('e') | KeyCode::Char('E') => AppAction::ToggleEchoback,
             KeyCode::Char('h') | KeyCode::Char('x') => AppAction::Hangup,
             KeyCode::Char('l') => AppAction::FetchRegisteredAddresses,
             _ => AppAction::None,
@@ -105,6 +107,18 @@ pub async fn execute_action(app: &mut TuiApp, action: AppAction) -> Result<bool>
                 "disabled"
             };
             app.add_log(format!("Auto Accept is now {}", status));
+        }
+        AppAction::ToggleEchoback => {
+            app.config.allow_echoback = !app.config.allow_echoback;
+            if let Some(ref session) = app.session {
+                session.set_allow_echoback(app.config.allow_echoback);
+            }
+            let status = if app.config.allow_echoback {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            app.add_log(format!("Echo Back is now {}", status));
         }
         AppAction::Hangup => {
             app.hangup();

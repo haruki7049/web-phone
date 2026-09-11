@@ -90,6 +90,7 @@ impl TuiApp {
         } else {
             ClientSession::new()
         };
+        session.set_allow_echoback(config.allow_echoback);
         let mut app = Self {
             config,
             input_mode: InputMode::Normal,

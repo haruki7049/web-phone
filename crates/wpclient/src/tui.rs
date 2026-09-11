@@ -135,6 +135,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_echoback_toggle() {
+        let (tx, _rx) = mpsc::channel(10);
+        let mut app = TuiApp::new(Configuration::default(), tx);
+        assert!(!app.config.allow_echoback);
+
+        let key = crossterm::event::KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);
+        let res = handle_key_input(&mut app, key).await.unwrap();
+        assert!(!res);
+        assert!(app.config.allow_echoback);
+        if let Some(ref session) = app.session {
+            assert!(session.allow_echoback());
+        }
+
+        let key_cap = crossterm::event::KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE);
+        let res = handle_key_input(&mut app, key_cap).await.unwrap();
+        assert!(!res);
+        assert!(!app.config.allow_echoback);
+        if let Some(ref session) = app.session {
+            assert!(!session.allow_echoback());
+        }
+    }
+
+    #[tokio::test]
     async fn test_incoming_call_manual_accept_and_reject() {
         let (tx, _rx) = mpsc::channel(10);
         let mut app = TuiApp::new(Configuration::default(), tx);

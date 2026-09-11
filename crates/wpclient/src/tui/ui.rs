@@ -73,6 +73,21 @@ fn render_header(f: &mut Frame, app: &TuiApp, area: Rect) {
                 .fg(status_color)
                 .add_modifier(Modifier::BOLD),
         ),
+        Span::raw(" | Echoback: "),
+        Span::styled(
+            if app.config.allow_echoback {
+                "ON"
+            } else {
+                "OFF"
+            },
+            Style::default()
+                .fg(if app.config.allow_echoback {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                })
+                .add_modifier(Modifier::BOLD),
+        ),
     ];
 
     let header_block = Block::default()
@@ -227,6 +242,13 @@ fn render_footer(f: &mut Frame, app: &TuiApp, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" Auto Accept |"),
+            Span::styled(
+                " [e]",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" Echoback |"),
             Span::styled(
                 " [h]",
                 Style::default()

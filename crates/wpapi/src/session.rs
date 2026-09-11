@@ -57,6 +57,8 @@ pub struct ClientSession {
     pub output_level: Arc<AtomicU32>,
     /// Mute toggle flag for audio input capture.
     pub is_muted: Arc<AtomicBool>,
+    /// Allow echo back (hear your own voice) toggle flag.
+    pub allow_echoback: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for ClientSession {
@@ -67,6 +69,7 @@ impl std::fmt::Debug for ClientSession {
             .field("active_target", &self.active_target)
             .field("active_room", &self.active_room)
             .field("data_channel_open", &self.get_data_channel().is_some())
+            .field("allow_echoback", &self.allow_echoback())
             .finish()
     }
 }
@@ -98,6 +101,7 @@ impl ClientSession {
             input_level: Arc::new(AtomicU32::new(0)),
             output_level: Arc::new(AtomicU32::new(0)),
             is_muted: Arc::new(AtomicBool::new(false)),
+            allow_echoback: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -126,6 +130,7 @@ impl ClientSession {
         self.input_level.store(0, Ordering::Relaxed);
         self.output_level.store(0, Ordering::Relaxed);
         self.is_muted.store(false, Ordering::Relaxed);
+        self.allow_echoback.store(false, Ordering::Relaxed);
     }
 
     /// Set current input audio energy level.
@@ -156,6 +161,16 @@ impl ClientSession {
     /// Check if microphone is muted.
     pub fn is_muted(&self) -> bool {
         self.is_muted.load(Ordering::Relaxed)
+    }
+
+    /// Set allow-echoback flag.
+    pub fn set_allow_echoback(&self, allow: bool) {
+        self.allow_echoback.store(allow, Ordering::Relaxed);
+    }
+
+    /// Check if allow-echoback is enabled.
+    pub fn allow_echoback(&self) -> bool {
+        self.allow_echoback.load(Ordering::Relaxed)
     }
 
     /// Set active 1-to-1 call target address.
