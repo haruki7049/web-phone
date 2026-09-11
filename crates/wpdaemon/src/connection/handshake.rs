@@ -92,7 +92,7 @@ pub async fn handle_sdp_offer(
     Json(offer): Json<RTCSessionDescription>,
 ) -> Result<Json<SdpAnswerResponse>, SignalingError> {
     let daemon_config = CONFIGURATION.get().cloned().unwrap_or_default();
-    let my_node_id = daemon_config.node_id;
+    let my_node_id = daemon_config.mesh.node_id;
 
     // 1. Mandatory Identity Authentication check (WPIP-02 / Security Audit)
     let auth_header = headers
@@ -111,7 +111,7 @@ pub async fn handle_sdp_offer(
                 return Err(SignalingError::Unauthorized(err));
             }
         }
-    } else if daemon_config.allow_anonymous {
+    } else if daemon_config.server.allow_anonymous {
         let addr = UserAddress::generate_from_time();
         info!(
             "No Authorization header present (allow_anonymous=true). Generated temporary User ID: {}",
@@ -127,13 +127,13 @@ pub async fn handle_sdp_offer(
 
     // 2. Active Connection limits check
     let active_connections = CLIENT_REGISTRY.read().unwrap().peer_connections.len();
-    if active_connections >= daemon_config.max_connections {
+    if active_connections >= daemon_config.server.max_connections {
         warn!(
             "Rejected SDP offer: active connections ({}) reached max limit ({})",
-            active_connections, daemon_config.max_connections
+            active_connections, daemon_config.server.max_connections
         );
         return Err(SignalingError::MaxConnectionsReached(
-            daemon_config.max_connections,
+            daemon_config.server.max_connections,
         ));
     }
 
@@ -149,7 +149,7 @@ pub async fn handle_sdp_offer(
 
     let mut ice_servers = Vec::new();
 
-    for url in &daemon_config.ice_servers {
+    for url in &daemon_config.network.ice_servers {
         ice_servers.push(webrtc::peer_connection::RTCIceServer {
             urls: vec![url.clone()],
             ..Default::default()

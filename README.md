@@ -127,28 +127,40 @@ Configuration files are automatically stored in platform-specific default direct
 #### Server Configuration (`config.toml`)
 
 ```toml
+[server]
 ip = "127.0.0.1"
 port = 15000
+max_connections = 1000
+max_room_members = 50
+allow_anonymous = false
+
+[mesh]
 peers = ["http://127.0.0.1:15001"]
 node_id = 1
-max_connections = 1000
 max_mesh_peers = 16
-max_room_members = 50
 ```
 
 #### Client Configuration (`config.toml`)
 
 ```toml
-server_url = "http://127.0.0.1:15000" # Optional: specify full URL or hostname (overrides server_ip/server_port)
-server_ip = "127.0.0.1"
-server_port = 15000
+[server]
+url = "http://127.0.0.1:15000" # Optional: specify full URL or hostname (overrides ip/port)
+ip = "127.0.0.1"
+port = 15000
+use_tls = true
+
+[network]
 stun_server = "stun:stun.l.google.com:19302"
+
+[audio]
 sample_rate = 48000
 channels = 1
 allow_echoback = false
-auto_accept = false
 input_device = "Microphone" # Optional device name substring
 output_device = "Speaker"   # Optional device name substring
+
+[client]
+auto_accept = false
 ```
 
 ## Architecture

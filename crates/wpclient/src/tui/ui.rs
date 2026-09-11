@@ -56,7 +56,7 @@ fn render_header(f: &mut Frame, app: &TuiApp, area: Rect) {
         ),
         Span::raw(" | Server: "),
         Span::styled(
-            format!("{}:{}", app.config.host_str(), app.config.server_port),
+            format!("{}:{}", app.config.host_str(), app.config.server.port),
             Style::default().fg(Color::Yellow),
         ),
         Span::raw(" | My ID: "),
@@ -86,13 +86,13 @@ fn render_header(f: &mut Frame, app: &TuiApp, area: Rect) {
         ),
         Span::raw(" | Echoback: "),
         Span::styled(
-            if app.config.allow_echoback {
+            if app.config.audio.allow_echoback {
                 "ON"
             } else {
                 "OFF"
             },
             Style::default()
-                .fg(if app.config.allow_echoback {
+                .fg(if app.config.audio.allow_echoback {
                     Color::Green
                 } else {
                     Color::DarkGray
@@ -101,9 +101,13 @@ fn render_header(f: &mut Frame, app: &TuiApp, area: Rect) {
         ),
         Span::raw(" | AutoAccept: "),
         Span::styled(
-            if app.config.auto_accept { "ON" } else { "OFF" },
+            if app.config.client.auto_accept {
+                "ON"
+            } else {
+                "OFF"
+            },
             Style::default()
-                .fg(if app.config.auto_accept {
+                .fg(if app.config.client.auto_accept {
                     Color::Green
                 } else {
                     Color::DarkGray

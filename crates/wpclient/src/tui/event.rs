@@ -100,8 +100,8 @@ pub async fn execute_action(app: &mut TuiApp, action: AppAction) -> Result<bool>
             app.add_log(format!("Microphone is now {}", status));
         }
         AppAction::ToggleAutoAccept => {
-            app.config.auto_accept = !app.config.auto_accept;
-            let status = if app.config.auto_accept {
+            app.config.client.auto_accept = !app.config.client.auto_accept;
+            let status = if app.config.client.auto_accept {
                 "enabled"
             } else {
                 "disabled"
@@ -109,11 +109,11 @@ pub async fn execute_action(app: &mut TuiApp, action: AppAction) -> Result<bool>
             app.add_log(format!("Auto Accept is now {}", status));
         }
         AppAction::ToggleEchoback => {
-            app.config.allow_echoback = !app.config.allow_echoback;
+            app.config.audio.allow_echoback = !app.config.audio.allow_echoback;
             if let Some(ref session) = app.session {
-                session.set_allow_echoback(app.config.allow_echoback);
+                session.set_allow_echoback(app.config.audio.allow_echoback);
             }
-            let status = if app.config.allow_echoback {
+            let status = if app.config.audio.allow_echoback {
                 "enabled"
             } else {
                 "disabled"

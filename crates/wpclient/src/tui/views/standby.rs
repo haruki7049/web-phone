@@ -69,12 +69,12 @@ pub fn render_standby_view(f: &mut Frame, app: &TuiApp, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                if app.config.allow_echoback {
+                if app.config.audio.allow_echoback {
                     "ENABLED ([e] to disable)"
                 } else {
                     "DISABLED ([e] to enable)"
                 },
-                Style::default().fg(if app.config.allow_echoback {
+                Style::default().fg(if app.config.audio.allow_echoback {
                     Color::Green
                 } else {
                     Color::DarkGray
@@ -89,12 +89,12 @@ pub fn render_standby_view(f: &mut Frame, app: &TuiApp, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                if app.config.auto_accept {
+                if app.config.client.auto_accept {
                     "ENABLED ([a] to disable)"
                 } else {
                     "DISABLED ([a] to enable)"
                 },
-                Style::default().fg(if app.config.auto_accept {
+                Style::default().fg(if app.config.client.auto_accept {
                     Color::Green
                 } else {
                     Color::DarkGray

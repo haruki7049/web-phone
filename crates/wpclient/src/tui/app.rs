@@ -90,7 +90,7 @@ impl TuiApp {
         } else {
             ClientSession::new()
         };
-        session.set_allow_echoback(config.allow_echoback);
+        session.set_allow_echoback(config.audio.allow_echoback);
         let mut app = Self {
             config,
             input_mode: InputMode::Normal,
@@ -463,7 +463,7 @@ pub(crate) fn handle_app_event(app: &mut TuiApp, evt: AppEvent) {
                 _ => false,
             };
 
-            if app.config.auto_accept || is_outgoing_target {
+            if app.config.client.auto_accept || is_outgoing_target {
                 let _ = responder.send(true);
                 app.add_log("Auto-accepted incoming call.".to_string());
                 app.call_state = CallState::InCall(from);

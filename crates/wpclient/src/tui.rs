@@ -121,29 +121,29 @@ mod tests {
     async fn test_auto_accept_toggle() {
         let (tx, _rx) = mpsc::channel(10);
         let mut app = TuiApp::new(Configuration::default(), tx);
-        assert!(!app.config.auto_accept);
+        assert!(!app.config.client.auto_accept);
 
         let key = crossterm::event::KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
         let res = handle_key_input(&mut app, key).await.unwrap();
         assert!(!res);
-        assert!(app.config.auto_accept);
+        assert!(app.config.client.auto_accept);
 
         let key_cap = crossterm::event::KeyEvent::new(KeyCode::Char('A'), KeyModifiers::NONE);
         let res = handle_key_input(&mut app, key_cap).await.unwrap();
         assert!(!res);
-        assert!(!app.config.auto_accept);
+        assert!(!app.config.client.auto_accept);
     }
 
     #[tokio::test]
     async fn test_echoback_toggle() {
         let (tx, _rx) = mpsc::channel(10);
         let mut app = TuiApp::new(Configuration::default(), tx);
-        assert!(!app.config.allow_echoback);
+        assert!(!app.config.audio.allow_echoback);
 
         let key = crossterm::event::KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);
         let res = handle_key_input(&mut app, key).await.unwrap();
         assert!(!res);
-        assert!(app.config.allow_echoback);
+        assert!(app.config.audio.allow_echoback);
         if let Some(ref session) = app.session {
             assert!(session.allow_echoback());
         }
@@ -151,7 +151,7 @@ mod tests {
         let key_cap = crossterm::event::KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE);
         let res = handle_key_input(&mut app, key_cap).await.unwrap();
         assert!(!res);
-        assert!(!app.config.allow_echoback);
+        assert!(!app.config.audio.allow_echoback);
         if let Some(ref session) = app.session {
             assert!(!session.allow_echoback());
         }
@@ -161,7 +161,7 @@ mod tests {
     async fn test_incoming_call_manual_accept_and_reject() {
         let (tx, _rx) = mpsc::channel(10);
         let mut app = TuiApp::new(Configuration::default(), tx);
-        assert!(!app.config.auto_accept);
+        assert!(!app.config.client.auto_accept);
 
         let (resp_tx, resp_rx) = oneshot::channel::<bool>();
         handle_app_event(
@@ -186,7 +186,7 @@ mod tests {
     async fn test_caller_auto_accepts_incoming_call() {
         let (tx, _rx) = mpsc::channel(10);
         let mut app = TuiApp::new(Configuration::default(), tx);
-        assert!(!app.config.auto_accept);
+        assert!(!app.config.client.auto_accept);
 
         // Client initiates call to "target_user_id"
         app.call_state = CallState::Connecting("target_user_id".to_string());

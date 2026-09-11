@@ -72,8 +72,8 @@ pub unsafe extern "C" fn wpapi_config_set_server(
             }
         };
         let cfg = unsafe { &mut (*config).0 };
-        cfg.server_ip = ip_addr;
-        cfg.server_port = server_port;
+        cfg.server.ip = ip_addr;
+        cfg.server.port = server_port;
         0
     }))
     .unwrap_or(-1)
@@ -132,7 +132,7 @@ pub unsafe extern "C" fn wpapi_config_set_stun_server(
             }
         };
         let cfg = unsafe { &mut (*config).0 };
-        cfg.stun_server = stun_str;
+        cfg.network.stun_server = stun_str;
         0
     }))
     .unwrap_or(-1)
@@ -152,7 +152,7 @@ pub unsafe extern "C" fn wpapi_config_set_auto_accept(
             return -1;
         }
         let cfg = unsafe { &mut (*config).0 };
-        cfg.auto_accept = auto_accept;
+        cfg.client.auto_accept = auto_accept;
         0
     }))
     .unwrap_or(-1)
@@ -172,7 +172,7 @@ pub unsafe extern "C" fn wpapi_config_set_allow_echoback(
             return -1;
         }
         let cfg = unsafe { &mut (*config).0 };
-        cfg.allow_echoback = allow_echoback;
+        cfg.audio.allow_echoback = allow_echoback;
         0
     }))
     .unwrap_or(-1)
@@ -196,12 +196,12 @@ pub unsafe extern "C" fn wpapi_config_set_audio_devices(
         if !input_device.is_null()
             && let Ok(s) = unsafe { CStr::from_ptr(input_device) }.to_str()
         {
-            cfg.input_device = Some(s.to_string());
+            cfg.audio.input_device = Some(s.to_string());
         }
         if !output_device.is_null()
             && let Ok(s) = unsafe { CStr::from_ptr(output_device) }.to_str()
         {
-            cfg.output_device = Some(s.to_string());
+            cfg.audio.output_device = Some(s.to_string());
         }
         0
     }))

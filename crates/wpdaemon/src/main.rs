@@ -24,18 +24,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
     if let Some(port) = args.port {
-        loaded_config.port = port;
+        loaded_config.server.port = port;
     }
     if let Some(node_id) = args.node_id {
-        loaded_config.node_id = node_id;
-    } else if loaded_config.node_id == 0 {
-        loaded_config.node_id = wpdaemon::config::generate_node_id();
+        loaded_config.mesh.node_id = node_id;
+    } else if loaded_config.mesh.node_id == 0 {
+        loaded_config.mesh.node_id = wpdaemon::config::generate_node_id();
     }
     if let Some(max_conn) = args.max_connections {
-        loaded_config.max_connections = max_conn;
+        loaded_config.server.max_connections = max_conn;
     }
     if !args.peer.is_empty() {
-        loaded_config.peers.extend(args.peer);
+        loaded_config.mesh.peers.extend(args.peer);
     }
 
     CONFIGURATION.set(loaded_config).unwrap();
@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("Failed to get Configuration from CONFIGURATION")?;
 
     // Connect to peer wpdaemon instances if specified
-    for peer_url in config.peers.clone() {
+    for peer_url in config.mesh.peers.clone() {
         let url = peer_url.clone();
         tokio::spawn(async move {
             // Small delay to allow peer servers to start if launched simultaneously
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn background keep-alive heartbeat task (WPIP-09)
     wpdaemon::connection::start_keepalive_task();
 
-    let address = SocketAddr::new(config.ip, config.port);
+    let address = SocketAddr::new(config.server.ip, config.server.port);
 
     let app = Router::new()
         .route("/sdp", post(wpdaemon::handlers::handle_sdp_offer))
@@ -71,23 +71,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
     let listener = tokio::net::TcpListener::bind(address).await?;
-    let scheme = if config.tls_cert.is_some() {
+    let scheme = if config.tls.tls_cert.is_some() {
         "https"
     } else {
         "http"
     };
 
-    if config.tls_cert.is_none() && !config.ip.is_loopback() {
+    if config.tls.tls_cert.is_none() && !config.server.ip.is_loopback() {
         tracing::warn!(
             "SECURITY WARNING: WebRTC audio daemon node {} is binding to public/external IP {} over unencrypted HTTP! HTTPS/TLS termination is strongly recommended for production deployments.",
-            config.node_id,
+            config.mesh.node_id,
             address
         );
     }
 
     info!(
         "WebRTC audio daemon node {} running on {}://{} (max_connections: {}, allow_anonymous: {})",
-        config.node_id, scheme, &address, config.max_connections, config.allow_anonymous
+        config.mesh.node_id,
+        scheme,
+        &address,
+        config.server.max_connections,
+        config.server.allow_anonymous
     );
     info!("Waiting for wpclient audio calls & peer daemon mesh connections...");
 

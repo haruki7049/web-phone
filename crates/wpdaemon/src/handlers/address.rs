@@ -17,7 +17,7 @@ fn check_address_request_authorization(headers: &HeaderMap) -> Result<(), Signal
         wpapi::verify_any_authorization_header(auth_val, "")
             .map_err(SignalingError::Unauthorized)?;
         Ok(())
-    } else if daemon_config.allow_anonymous {
+    } else if daemon_config.server.allow_anonymous {
         Ok(())
     } else {
         Err(SignalingError::Unauthorized(

@@ -89,7 +89,7 @@ pub fn render_room_view(f: &mut Frame, app: &TuiApp, room: &str, area: Rect) {
         )),
         Line::from(format!(
             "Echo Back: {} (Press [e] to toggle)",
-            if app.config.allow_echoback {
+            if app.config.audio.allow_echoback {
                 "ENABLED"
             } else {
                 "DISABLED"
@@ -97,7 +97,7 @@ pub fn render_room_view(f: &mut Frame, app: &TuiApp, room: &str, area: Rect) {
         )),
         Line::from(format!(
             "Auto Accept: {} (Press [a] to toggle)",
-            if app.config.auto_accept {
+            if app.config.client.auto_accept {
                 "ENABLED"
             } else {
                 "DISABLED"

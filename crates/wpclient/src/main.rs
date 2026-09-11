@@ -236,27 +236,27 @@ async fn main() -> Result<()> {
                 return Err(anyhow::anyhow!("Invalid --server-ip: {}", e));
             }
         } else if let Ok(ip) = server_ip_raw.parse::<IpAddr>() {
-            loaded_config.server_ip = ip;
-            loaded_config.server_host = Some(ip.to_string());
+            loaded_config.server.ip = ip;
+            loaded_config.server.host = Some(ip.to_string());
         } else {
-            loaded_config.server_host = Some(server_ip_raw.clone());
+            loaded_config.server.host = Some(server_ip_raw.clone());
         }
     }
 
     if let Some(server_port) = args.server_port {
-        loaded_config.server_port = server_port;
+        loaded_config.server.port = server_port;
     }
     if let Some(stun_server) = args.stun_server {
-        loaded_config.stun_server = stun_server;
+        loaded_config.network.stun_server = stun_server;
     }
     if let Some(input_device) = args.input_device {
-        loaded_config.input_device = Some(input_device);
+        loaded_config.audio.input_device = Some(input_device);
     }
     if let Some(output_device) = args.output_device {
-        loaded_config.output_device = Some(output_device);
+        loaded_config.audio.output_device = Some(output_device);
     }
     if args.auto_accept {
-        loaded_config.auto_accept = true;
+        loaded_config.client.auto_accept = true;
     }
 
     CONFIGURATION.set(loaded_config.clone()).unwrap();
@@ -274,7 +274,7 @@ async fn main() -> Result<()> {
             nostr_key,
         }) => {
             if auto_accept {
-                loaded_config.auto_accept = true;
+                loaded_config.client.auto_accept = true;
             }
             let is_anon = global_anonymous || anonymous;
             let pass = passphrase.as_deref().or(global_passphrase);

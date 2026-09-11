@@ -115,13 +115,14 @@ impl PeerConnectionEventHandler for MeshPeerEventHandler {
                             let dc_inner = Arc::clone(&dc_task);
                             tokio::spawn(async move {
                                 let config = CONFIGURATION.get().cloned().unwrap_or_default();
-                                process_peer_audio_send_loop(dc_inner, rx, config.node_id).await;
+                                process_peer_audio_send_loop(dc_inner, rx, config.mesh.node_id)
+                                    .await;
                             });
                         }
                     }
                     DataChannelEvent::OnMessage(msg) => {
                         let config = CONFIGURATION.get().cloned().unwrap_or_default();
-                        handle_peer_incoming_message(&msg.data, config.node_id);
+                        handle_peer_incoming_message(&msg.data, config.mesh.node_id);
                     }
                     DataChannelEvent::OnClose => break,
                     _ => {}
@@ -147,7 +148,7 @@ pub async fn handle_peer_sdp(
         .or_else(|| headers.get("X-Peer-Auth"))
         .and_then(|v| v.to_str().ok());
 
-    if let Some(secret) = &config.peer_secret {
+    if let Some(secret) = &config.mesh.peer_secret {
         let expected_bearer = format!("Bearer {}", secret);
         let expected_auth = format!("WP-PeerAuth {}", secret);
         let is_valid = auth_header
@@ -166,7 +167,7 @@ pub async fn handle_peer_sdp(
             );
             return Err(SignalingError::Unauthorized(err));
         }
-    } else if !config.allow_anonymous {
+    } else if !config.server.allow_anonymous {
         warn!("Rejected peer SDP offer: Missing peer authorization header.");
         return Err(SignalingError::Unauthorized(
             wpapi::AuthError::MissingHeader,
@@ -174,23 +175,25 @@ pub async fn handle_peer_sdp(
     }
 
     let active_connections = CLIENT_REGISTRY.read().unwrap().peer_connections.len();
-    if active_connections >= config.max_connections {
+    if active_connections >= config.server.max_connections {
         warn!(
             "Rejected peer SDP offer: active connections ({}) reached max limit ({})",
-            active_connections, config.max_connections
+            active_connections, config.server.max_connections
         );
         return Err(SignalingError::MaxConnectionsReached(
-            config.max_connections,
+            config.server.max_connections,
         ));
     }
 
     let current_peers = PEER_DAEMONS.lock().unwrap().len();
-    if current_peers >= config.max_mesh_peers {
+    if current_peers >= config.mesh.max_mesh_peers {
         warn!(
             "Rejected peer SDP offer: mesh peer connections ({}) reached max limit ({})",
-            current_peers, config.max_mesh_peers
+            current_peers, config.mesh.max_mesh_peers
         );
-        return Err(SignalingError::MaxMeshPeersReached(config.max_mesh_peers));
+        return Err(SignalingError::MaxMeshPeersReached(
+            config.mesh.max_mesh_peers,
+        ));
     }
 
     let (gather_tx, mut gather_rx) = mpsc::channel(1);
@@ -285,13 +288,13 @@ pub async fn connect_to_peer(
                         let dc_inner = Arc::clone(&dc_task);
                         tokio::spawn(async move {
                             let config = CONFIGURATION.get().cloned().unwrap_or_default();
-                            process_peer_audio_send_loop(dc_inner, rx, config.node_id).await;
+                            process_peer_audio_send_loop(dc_inner, rx, config.mesh.node_id).await;
                         });
                     }
                 }
                 DataChannelEvent::OnMessage(msg) => {
                     let config = CONFIGURATION.get().cloned().unwrap_or_default();
-                    handle_peer_incoming_message(&msg.data, config.node_id);
+                    handle_peer_incoming_message(&msg.data, config.mesh.node_id);
                 }
                 DataChannelEvent::OnClose => break,
                 _ => {}
@@ -312,7 +315,7 @@ pub async fn connect_to_peer(
     let client = reqwest::Client::new();
     let sdp_url = format!("{}/peer/sdp", peer_url.trim_end_matches('/'));
 
-    let auth_header_val = if let Some(secret) = &config.peer_secret {
+    let auth_header_val = if let Some(secret) = &config.mesh.peer_secret {
         format!("Bearer {}", secret)
     } else {
         let keypair = wpapi::UserKeypair::generate();

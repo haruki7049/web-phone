@@ -14,9 +14,9 @@ mod tests {
     #[test]
     fn test_client_configuration_defaults() {
         let config = Configuration::default();
-        assert_eq!(config.server_port, 15000);
-        assert!(!config.auto_accept);
-        assert!(!config.allow_echoback);
+        assert_eq!(config.server.port, 15000);
+        assert!(!config.client.auto_accept);
+        assert!(!config.audio.allow_echoback);
     }
 
     #[test]

@@ -46,40 +46,68 @@ pub fn generate_node_id() -> u64 {
     u64::from_le_bytes(bytes)
 }
 
-/// Server configuration for the WebRTC audio daemon.
+/// Server configuration settings (`[server]`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Configuration {
+pub struct ServerConfig {
     /// IP address to bind the server service to (supports IPv4 or IPv6).
+    #[serde(default = "default_ip")]
     pub ip: IpAddr,
     /// Port number for HTTP/WebRTC signaling and peer API.
+    #[serde(default = "default_port")]
     pub port: u16,
-    /// List of peer wpdaemon signaling addresses to connect to for mesh federation.
-    #[serde(default)]
-    pub peers: Vec<String>,
-    /// Unique identifier for this daemon node.
-    #[serde(default = "generate_node_id")]
-    pub node_id: u64,
     /// Maximum allowed concurrent WebRTC peer connections.
     #[serde(default = "default_max_connections")]
     pub max_connections: usize,
-    /// Maximum allowed inter-daemon mesh peer connections.
-    #[serde(default = "default_max_mesh_peers")]
-    pub max_mesh_peers: usize,
     /// Maximum allowed members per group room.
     #[serde(default = "default_max_room_members")]
     pub max_room_members: usize,
     /// Whether unauthenticated SDP connections are allowed (defaults to false for security).
     #[serde(default)]
     pub allow_anonymous: bool,
-    /// Shared secret or auth token for inter-daemon mesh authentication.
-    #[serde(default)]
-    pub peer_secret: Option<String>,
+}
+
+fn default_ip() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+}
+
+fn default_port() -> u16 {
+    15000
+}
+
+fn default_max_connections() -> usize {
+    1000
+}
+
+fn default_max_room_members() -> usize {
+    50
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            ip: default_ip(),
+            port: default_port(),
+            max_connections: default_max_connections(),
+            max_room_members: default_max_room_members(),
+            allow_anonymous: false,
+        }
+    }
+}
+
+/// TLS configuration settings (`[tls]`).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TlsConfig {
     /// Path to TLS certificate file for HTTPS signaling.
-    #[serde(default)]
+    #[serde(default, rename = "cert")]
     pub tls_cert: Option<PathBuf>,
     /// Path to TLS private key file for HTTPS signaling.
-    #[serde(default)]
+    #[serde(default, rename = "key")]
     pub tls_key: Option<PathBuf>,
+}
+
+/// Network configuration settings (`[network]`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkConfig {
     /// List of STUN/TURN server URLs for WebRTC ICE candidate gathering.
     #[serde(default = "default_ice_servers")]
     pub ice_servers: Vec<String>,
@@ -89,35 +117,61 @@ fn default_ice_servers() -> Vec<String> {
     vec!["stun:stun.l.google.com:19302".to_string()]
 }
 
-fn default_max_connections() -> usize {
-    1000
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            ice_servers: default_ice_servers(),
+        }
+    }
+}
+
+/// Mesh configuration settings (`[mesh]`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeshConfig {
+    /// List of peer wpdaemon signaling addresses to connect to for mesh federation.
+    #[serde(default)]
+    pub peers: Vec<String>,
+    /// Unique identifier for this daemon node.
+    #[serde(default = "generate_node_id")]
+    pub node_id: u64,
+    /// Maximum allowed inter-daemon mesh peer connections.
+    #[serde(default = "default_max_mesh_peers")]
+    pub max_mesh_peers: usize,
+    /// Shared secret or auth token for inter-daemon mesh authentication.
+    #[serde(default)]
+    pub peer_secret: Option<String>,
 }
 
 fn default_max_mesh_peers() -> usize {
     16
 }
 
-fn default_max_room_members() -> usize {
-    50
-}
-
-impl Default for Configuration {
+impl Default for MeshConfig {
     fn default() -> Self {
         Self {
-            ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 15000,
             peers: Vec::new(),
             node_id: generate_node_id(),
-            max_connections: default_max_connections(),
             max_mesh_peers: default_max_mesh_peers(),
-            max_room_members: default_max_room_members(),
-            allow_anonymous: false,
             peer_secret: None,
-            tls_cert: None,
-            tls_key: None,
-            ice_servers: default_ice_servers(),
         }
     }
+}
+
+/// Server configuration for the WebRTC audio daemon.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Configuration {
+    /// Server configuration section (`[server]`).
+    #[serde(default)]
+    pub server: ServerConfig,
+    /// TLS configuration section (`[tls]`).
+    #[serde(default)]
+    pub tls: TlsConfig,
+    /// Network configuration section (`[network]`).
+    #[serde(default)]
+    pub network: NetworkConfig,
+    /// Mesh configuration section (`[mesh]`).
+    #[serde(default)]
+    pub mesh: MeshConfig,
 }
 
 #[cfg(test)]
@@ -127,11 +181,11 @@ mod tests {
     #[test]
     fn test_configuration_default() {
         let config = Configuration::default();
-        assert_eq!(config.ip, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
-        assert_eq!(config.port, 15000);
-        assert!(config.peers.is_empty());
-        assert_ne!(config.node_id, 0);
-        assert_eq!(config.max_connections, 1000);
+        assert_eq!(config.server.ip, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(config.server.port, 15000);
+        assert!(config.mesh.peers.is_empty());
+        assert_ne!(config.mesh.node_id, 0);
+        assert_eq!(config.server.max_connections, 1000);
     }
 
     #[test]
@@ -147,6 +201,8 @@ mod tests {
     fn test_configuration_serialization() {
         let config = Configuration::default();
         let toml_str = toml::to_string(&config).expect("Failed to serialize configuration");
+        assert!(toml_str.contains("[server]"));
+        assert!(toml_str.contains("[mesh]"));
         assert!(toml_str.contains("ip"));
         assert!(toml_str.contains("port"));
     }
@@ -154,15 +210,18 @@ mod tests {
     #[test]
     fn test_configuration_deserialization() {
         let toml_str = r#"
+            [server]
             ip = "192.168.1.1"
             port = 16000
+
+            [mesh]
             peers = ["http://192.168.1.2:15000"]
             node_id = 42
         "#;
         let config: Configuration = toml::from_str(toml_str).expect("Failed to deserialize");
-        assert_eq!(config.ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
-        assert_eq!(config.port, 16000);
-        assert_eq!(config.peers, vec!["http://192.168.1.2:15000"]);
-        assert_eq!(config.node_id, 42);
+        assert_eq!(config.server.ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
+        assert_eq!(config.server.port, 16000);
+        assert_eq!(config.mesh.peers, vec!["http://192.168.1.2:15000"]);
+        assert_eq!(config.mesh.node_id, 42);
     }
 }

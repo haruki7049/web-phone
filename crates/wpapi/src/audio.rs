@@ -128,10 +128,10 @@ impl AudioEngine {
         tx_audio: mpsc::Sender<Vec<u8>>,
         session: &ClientSession,
     ) -> Result<Self> {
-        session.set_allow_echoback(config.allow_echoback);
+        session.set_allow_echoback(config.audio.allow_echoback);
         let host = cpal::default_host();
 
-        let input_device = find_input_device(&host, config.input_device.as_deref())?;
+        let input_device = find_input_device(&host, config.audio.input_device.as_deref())?;
         info!(
             "Using input device: {}",
             input_device
@@ -140,7 +140,7 @@ impl AudioEngine {
                 .unwrap_or_else(|_| "Unknown".into())
         );
 
-        let output_device = find_output_device(&host, config.output_device.as_deref())?;
+        let output_device = find_output_device(&host, config.audio.output_device.as_deref())?;
         info!(
             "Using output device: {}",
             output_device
@@ -150,12 +150,12 @@ impl AudioEngine {
         );
 
         let target_input_config = StreamConfig {
-            channels: config.channels,
-            sample_rate: config.sample_rate,
+            channels: config.audio.channels,
+            sample_rate: config.audio.sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
 
-        let net_sample_rate = config.sample_rate;
+        let net_sample_rate = config.audio.sample_rate;
 
         // Build Input Stream (Microphone -> Resampler -> tx_audio)
         let (input_stream, _actual_input_rate, _actual_input_channels) = {
@@ -207,8 +207,12 @@ impl AudioEngine {
                 )
             };
 
-            match build(&target_input_config, config.sample_rate, config.channels) {
-                Ok(stream) => (stream, config.sample_rate, config.channels),
+            match build(
+                &target_input_config,
+                config.audio.sample_rate,
+                config.audio.channels,
+            ) {
+                Ok(stream) => (stream, config.audio.sample_rate, config.audio.channels),
                 Err(err) => {
                     info!(
                         "Requested input stream config ({:?}) not supported ({}), falling back to device default config...",
@@ -230,8 +234,8 @@ impl AudioEngine {
 
         // Build Output Stream (audio_buffer -> Resampler -> Speaker)
         let target_output_config = StreamConfig {
-            channels: config.channels,
-            sample_rate: config.sample_rate,
+            channels: config.audio.channels,
+            sample_rate: config.audio.sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -296,8 +300,12 @@ impl AudioEngine {
                 )
             };
 
-            match build(&target_output_config, config.sample_rate, config.channels) {
-                Ok(stream) => (stream, config.sample_rate, config.channels),
+            match build(
+                &target_output_config,
+                config.audio.sample_rate,
+                config.audio.channels,
+            ) {
+                Ok(stream) => (stream, config.audio.sample_rate, config.audio.channels),
                 Err(err) => {
                     info!(
                         "Requested output stream config ({:?}) not supported ({}), falling back to device default config...",

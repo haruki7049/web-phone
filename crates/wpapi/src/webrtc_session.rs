@@ -54,7 +54,7 @@ pub async fn create_peer_connection_with_handler(
 ) -> Result<Arc<dyn PeerConnection>> {
     let rtc_config = RTCConfigurationBuilder::new()
         .with_ice_servers(vec![RTCIceServer {
-            urls: vec![config.stun_server.clone()],
+            urls: vec![config.network.stun_server.clone()],
             ..Default::default()
         }])
         .build();
@@ -96,7 +96,7 @@ pub async fn setup_data_channel(
     let target_addr_init = target_address.clone();
     let dc_init = Arc::clone(&data_channel);
     let session_ref = session.clone();
-    let auto_accept = config.auto_accept;
+    let auto_accept = config.client.auto_accept;
     let mut rx_audio_opt = Some(rx_audio);
 
     tokio::spawn(async move {
