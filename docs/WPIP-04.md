@@ -53,6 +53,14 @@ ______________________________________________________________________
 | `0x0F` | `RoomLeaveRequest` | Client | Daemon | 33 Bytes | Request to leave a group room (See WPIP-08) |
 | `0x10` | `RoomGroupAudio` | Client | Daemon / Client | 34 + N Bytes | Group audio packet tagged with `RoomAddress` (See WPIP-08) |
 | `0x11` | `ActiveSpeakerNotice` | Daemon | Client | 33 + 32×K Bytes | Active speaker addresses notification (See WPIP-08) |
+| `0x12` | `Ping` | Client / Daemon | Client / Daemon | 9 Bytes | Keep-alive ping carrying u64 timestamp (See WPIP-09) |
+| `0x13` | `Pong` | Client / Daemon | Client / Daemon | 9 Bytes | Keep-alive pong response carrying u64 timestamp (See WPIP-09) |
+| `0x14` | `VideoFrameData` | Client | Daemon / Client | 34 + N Bytes | Encoded screen sharing / video payload (See WPIP-20) |
+| `0x15` | `RoomGroupAudioE2EE` | Client | Daemon / Client | 35 + N Bytes | Encrypted group audio with energy metadata (See WPIP-11) |
+
+### 3.1 Unknown Packet Tag Handling
+
+When receiving a DataChannel frame with an unrecognized or unsupported `Header Tag` byte (e.g. unknown experimental tag), compliant implementations MUST drop the unparsable packet safely, log a debug warning, and MUST NOT terminate the DataChannel connection.
 
 ______________________________________________________________________
 
