@@ -101,6 +101,8 @@
 
 #define MIN_LEN_VIDEO_FRAME_DATA ((1 + LEN_USER_ADDR) + 1)
 
+#define MIN_LEN_ROOM_GROUP_AUDIO_E2EE (((1 + LEN_USER_ADDR) + 1) + 1)
+
 /**
  * Maximum allowed TTL for ephemeral TURN credentials (24 hours).
  */
