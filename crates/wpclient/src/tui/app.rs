@@ -337,9 +337,13 @@ pub(crate) fn start_call(app: &mut TuiApp, target_id: String) {
 }
 
 pub(crate) fn start_room(app: &mut TuiApp, room_id: String) {
-    let room_addr = UserAddress::new(room_id.clone());
+    let room_addr = UserAddress::from_room_id(&room_id);
     app.call_state = CallState::InRoom(room_id.clone());
-    app.add_log(format!("Joining SFU group room: {}", room_id));
+    app.add_log(format!(
+        "Joining SFU group room: {} ({})",
+        room_id,
+        room_addr.short_id()
+    ));
 
     if let Some(ref session) = app.session {
         session.set_room_address(Some(room_addr.clone()));

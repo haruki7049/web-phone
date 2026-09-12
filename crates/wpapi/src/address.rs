@@ -292,4 +292,32 @@ mod tests {
         assert!(!addr2.matches_prefix(&addr1));
         assert!(!addr1.matches_prefix(&addr3));
     }
+
+    #[test]
+    fn test_user_address_from_room_id() {
+        // Arbitrary non-hex room name strings should produce valid 64-char hex addresses
+        let room_a = UserAddress::from_room_id("my-awesome-room");
+        let room_b = UserAddress::from_room_id("lobby");
+
+        assert_eq!(room_a.id.len(), 64);
+        assert_eq!(room_b.id.len(), 64);
+        assert_ne!(room_a, room_b);
+
+        // to_bytes() should NOT produce all-zeros for arbitrary room strings
+        let bytes_a = room_a.to_bytes();
+        assert_ne!(bytes_a, [0u8; 32]);
+        assert_eq!(UserAddress::from_bytes(bytes_a), room_a);
+
+        // Exact 64-character hex strings should be preserved
+        let hex_id = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let preserved = UserAddress::from_room_id(hex_id);
+        assert_eq!(preserved.id, hex_id);
+
+        // Host-key cryptographic room derivation (WPIP-08 §1)
+        let keypair = UserKeypair::generate();
+        let host_pub = keypair.public_key_address();
+        let host_room = UserAddress::from_room_id_and_host("general", &host_pub);
+        assert_eq!(host_room.id.len(), 64);
+        assert_ne!(host_room, room_a);
+    }
 }

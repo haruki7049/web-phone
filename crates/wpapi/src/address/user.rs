@@ -39,6 +39,30 @@ impl UserAddress {
         Self { id: hex_id }
     }
 
+    /// Derive a deterministic 32-byte `UserAddress` from a room ID string according to WPIP-08.
+    ///
+    /// If `room_id` is already a valid 64-character hex string, it is used directly.
+    /// Otherwise, a SHA-256 digest of `room_id` is computed to guarantee a valid 32-byte room address.
+    pub fn from_room_id(room_id: &str) -> Self {
+        let trimmed = room_id.trim();
+        if trimmed.len() == 64 && hex::decode(trimmed).is_ok() {
+            Self::new(trimmed)
+        } else {
+            let digest = Sha256::digest(trimmed.as_bytes());
+            Self::from_bytes(digest.into())
+        }
+    }
+
+    /// Derive a cryptographic `UserAddress` for a room host and room ID string according to WPIP-08 §1:
+    /// `SHA-256(host_pubkey_bytes || room_id_bytes)`.
+    pub fn from_room_id_and_host(room_id: &str, host_pubkey: &UserAddress) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(host_pubkey.to_bytes());
+        hasher.update(room_id.trim().as_bytes());
+        let digest = hasher.finalize();
+        Self::from_bytes(digest.into())
+    }
+
     /// Convert 32-byte SHA-256 raw bytes to `UserAddress`.
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         Self {

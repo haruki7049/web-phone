@@ -10,11 +10,13 @@ pub async fn execute_room(
     room_id: String,
     keypair: UserKeypair,
 ) -> Result<()> {
+    let room_address = UserAddress::from_room_id(&room_id);
     info!(
-        "Joining room: {} with address {}",
+        "Joining room: {} (RoomAddress: {}) with address {}",
         room_id,
+        room_address,
         keypair.public_key_address()
     );
-    wpapi::call::start_room_call(config, UserAddress::new(room_id)).await?;
+    wpapi::call::start_room_call(config, room_address).await?;
     Ok(())
 }
