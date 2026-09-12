@@ -351,3 +351,86 @@ pub unsafe extern "C" fn wpapi_call_stop(handle: *mut WPAPICallHandle) -> c_int 
     }))
     .unwrap_or(-1)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ffi_config_lifecycle_and_setters() {
+        unsafe {
+            // Null pointer safety check
+            assert_eq!(
+                wpapi_config_set_server(std::ptr::null_mut(), std::ptr::null(), 0),
+                -1
+            );
+            assert_eq!(
+                wpapi_config_set_server_url(std::ptr::null_mut(), std::ptr::null()),
+                -1
+            );
+            assert_eq!(
+                wpapi_config_set_stun_server(std::ptr::null_mut(), std::ptr::null()),
+                -1
+            );
+            assert_eq!(wpapi_config_set_auto_accept(std::ptr::null_mut(), true), -1);
+            assert_eq!(
+                wpapi_config_set_allow_echoback(std::ptr::null_mut(), true),
+                -1
+            );
+            assert_eq!(
+                wpapi_config_set_audio_devices(
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                    std::ptr::null()
+                ),
+                -1
+            );
+            assert_eq!(wpapi_call_stop(std::ptr::null_mut()), -1);
+            assert!(wpapi_call_start(std::ptr::null(), std::ptr::null()).is_null());
+            assert!(wpapi_room_call_start(std::ptr::null(), std::ptr::null()).is_null());
+
+            // Valid lifecycle
+            let config_ptr = wpapi_config_new();
+            assert!(!config_ptr.is_null());
+
+            let ip_cstr = std::ffi::CString::new("127.0.0.1").unwrap();
+            assert_eq!(
+                wpapi_config_set_server(config_ptr, ip_cstr.as_ptr(), 15000),
+                0
+            );
+
+            let url_cstr = std::ffi::CString::new("http://127.0.0.1:15000").unwrap();
+            assert_eq!(
+                wpapi_config_set_server_url(config_ptr, url_cstr.as_ptr()),
+                0
+            );
+
+            let stun_cstr = std::ffi::CString::new("stun:stun.l.google.com:19302").unwrap();
+            assert_eq!(
+                wpapi_config_set_stun_server(config_ptr, stun_cstr.as_ptr()),
+                0
+            );
+
+            assert_eq!(wpapi_config_set_auto_accept(config_ptr, true), 0);
+            assert_eq!(wpapi_config_set_allow_echoback(config_ptr, true), 0);
+
+            let dev_in = std::ffi::CString::new("Default Mic").unwrap();
+            let dev_out = std::ffi::CString::new("Default Speaker").unwrap();
+            assert_eq!(
+                wpapi_config_set_audio_devices(config_ptr, dev_in.as_ptr(), dev_out.as_ptr()),
+                0
+            );
+
+            // Invalid IP
+            let invalid_ip = std::ffi::CString::new("invalid_ip").unwrap();
+            assert_eq!(
+                wpapi_config_set_server(config_ptr, invalid_ip.as_ptr(), 15000),
+                -1
+            );
+
+            wpapi_config_free(config_ptr);
+            // Free null pointer safety
+            wpapi_config_free(std::ptr::null_mut());
+        }
+    }
+}

@@ -157,3 +157,29 @@ pub extern "C" fn wpapi_init() -> c_int {
     }))
     .unwrap_or(-1)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe extern "C" fn dummy_log_cb(
+        _level: WPAPILogLevel,
+        _message: *const c_char,
+        _user_data: *mut std::ffi::c_void,
+    ) {
+    }
+
+    #[test]
+    fn test_ffi_logging_init_and_callback() {
+        assert_eq!(wpapi_init(), 0);
+
+        unsafe {
+            wpapi_set_log_callback(Some(dummy_log_cb), std::ptr::null_mut());
+            tracing::info!("Test FFI log message");
+            wpapi_set_log_callback(None, std::ptr::null_mut());
+
+            let err_ptr = wpapi_last_error_message();
+            let _ = err_ptr;
+        }
+    }
+}

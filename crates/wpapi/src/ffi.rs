@@ -39,3 +39,22 @@ pub unsafe extern "C" fn wpapi_get_last_error() -> *const c_char {
             .unwrap_or(std::ptr::null())
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ffi_last_error() {
+        unsafe {
+            // Initially null
+            assert!(wpapi_get_last_error().is_null());
+
+            set_last_error("Test FFI error message");
+            let ptr = wpapi_get_last_error();
+            assert!(!ptr.is_null());
+            let cstr = std::ffi::CStr::from_ptr(ptr);
+            assert_eq!(cstr.to_str().unwrap(), "Test FFI error message");
+        }
+    }
+}

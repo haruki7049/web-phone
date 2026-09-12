@@ -116,3 +116,25 @@ pub fn render_standby_view(f: &mut Frame, app: &TuiApp, area: Rect) {
 
     f.render_widget(Paragraph::new(standby_info).block(block), area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn test_render_standby_view() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let app = TuiApp::new(wpapi::Configuration::default(), tx);
+
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render_standby_view(f, &app, area);
+            })
+            .unwrap();
+    }
+}

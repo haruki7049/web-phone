@@ -111,3 +111,25 @@ pub fn render_room_view(f: &mut Frame, app: &TuiApp, room: &str, area: Rect) {
         .border_type(BorderType::Rounded);
     f.render_widget(Paragraph::new(details_text).block(details_block), chunks[3]);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn test_render_room_view() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let app = TuiApp::new(wpapi::Configuration::default(), tx);
+
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render_room_view(f, &app, "test_room_address", area);
+            })
+            .unwrap();
+    }
+}

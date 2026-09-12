@@ -72,3 +72,20 @@ pub unsafe extern "C" fn wpapi_list_addresses(
     }))
     .unwrap_or(-1)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ffi_list_addresses_null_pointers() {
+        unsafe {
+            assert_eq!(
+                wpapi_list_addresses(std::ptr::null(), std::ptr::null_mut()),
+                -1
+            );
+            let mut out = std::ptr::null_mut();
+            assert_eq!(wpapi_list_addresses(std::ptr::null(), &mut out), -1);
+        }
+    }
+}

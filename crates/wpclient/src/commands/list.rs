@@ -52,3 +52,14 @@ pub fn list_audio_devices() -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_list_audio_devices() {
+        let res = list_audio_devices();
+        assert!(res.is_ok());
+    }
+}
