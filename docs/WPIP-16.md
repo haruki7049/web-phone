@@ -17,7 +17,7 @@ ______________________________________________________________________
 ## 1. Cryptographic Identity Mapping
 
 - **Nostr Public Key**: A 32-byte (64-character hex) X-only secp256k1 public key (the underlying raw bytes of a Bech32 `npub` string).
-- **`UserAddress`**: Implementations MUST accept hex-encoded secp256k1 public keys as valid `UserAddress` identifiers.
+- **`UserAddress`**: Implementations MUST accept hex-encoded secp256k1 public keys as valid `UserAddress` identifiers. Because both Ed25519 public keys and X-only secp256k1 public keys pack into 32 raw bytes on the wire (`to_bytes()`), `UserAddress` handles both identity types uniformly across wire protocol packets.
 
 ______________________________________________________________________
 
