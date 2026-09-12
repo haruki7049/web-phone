@@ -43,3 +43,4 @@ Before declaring any task or feature complete, agents MUST run and pass:
 1. `cargo build --release` - Release binaries must build cleanly.
 1. `nix build` - Nix flake derivation build must succeed.
 1. `treefmt` - Code formatting MUST be performed using `treefmt` (installed via `nix develop`). If `treefmt` is not directly available in the execution environment, inspect the `treefmt-nix` configuration defined in `flake.nix` and manually apply the corresponding formatters for each file type (e.g., `rustfmt` for Rust, `nixfmt` for Nix, `taplo` for TOML, `shfmt` for Shell scripts, `mdformat` for Markdown).
+1. `cargo llvm-cov --workspace` - Test coverage MUST be checked using `cargo-llvm-cov`.
