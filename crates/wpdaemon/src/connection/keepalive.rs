@@ -53,3 +53,17 @@ pub fn start_keepalive_task() {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_start_keepalive_task_invocation() {
+        let handle = tokio::spawn(async {
+            start_keepalive_task();
+        });
+        tokio::task::yield_now().await;
+        handle.abort();
+    }
+}

@@ -177,7 +177,7 @@ fn render_right_panel(f: &mut Frame, app: &TuiApp, area: Rect) {
                         Style::default().fg(Color::Green),
                     ),
                     Span::styled(
-                        format!(" ({})", &a.to_string()[..16]),
+                        format!(" ({})", &a.to_string()[..a.to_string().len().min(16)]),
                         Style::default().fg(Color::DarkGray),
                     ),
                 ])
@@ -449,4 +449,46 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use wpapi::UserAddress;
+
+    #[test]
+    fn test_render_ui_all_input_modes_and_call_states() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let mut app = TuiApp::new(wpapi::Configuration::default(), tx);
+
+        // Test 1: Normal mode + Idle
+        app.my_address = Some(UserAddress::new("my_test_address"));
+        app.registered_addresses
+            .push(UserAddress::new("peer_address_1"));
+        app.logs.push_back("Test activity log message".into());
+        terminal.draw(|f| render_ui(f, &app)).unwrap();
+
+        // Test 2: CallInput mode + Connecting
+        app.input_mode = InputMode::CallInput;
+        app.input_buffer = "target_peer_id".into();
+        app.call_state = CallState::Connecting("target_peer_id".into());
+        terminal.draw(|f| render_ui(f, &app)).unwrap();
+
+        // Test 3: RoomInput mode + InRoom
+        app.input_mode = InputMode::RoomInput;
+        app.input_buffer = "room_id_123".into();
+        app.call_state = CallState::InRoom("room_id_123".into());
+        terminal.draw(|f| render_ui(f, &app)).unwrap();
+
+        // Test 4: IncomingCall mode + InCall
+        app.input_mode = InputMode::IncomingCall;
+        app.incoming_from = Some("caller_peer_id".into());
+        app.call_state = CallState::InCall("caller_peer_id".into());
+        terminal.draw(|f| render_ui(f, &app)).unwrap();
+    }
 }

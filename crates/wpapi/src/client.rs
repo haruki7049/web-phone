@@ -63,6 +63,18 @@ mod tests {
 
     #[test]
     fn test_daemon_api_client_instantiation() {
-        let _client = DaemonApiClient::new();
+        let client = DaemonApiClient::new();
+        let _default_client = DaemonApiClient::default();
+        let _cloned = client.clone();
+    }
+
+    #[tokio::test]
+    async fn test_fetch_registered_addresses_unreachable_server() {
+        let client = DaemonApiClient::new();
+        let mut config = Configuration::default();
+        config.server.address = "127.0.0.1:1".into(); // Unreachable port
+
+        let res = client.fetch_registered_addresses(&config).await;
+        assert!(res.is_err());
     }
 }

@@ -18,3 +18,18 @@ pub async fn execute_call(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_execute_call_unreachable() {
+        let mut config = Configuration::default();
+        config.server.address = "127.0.0.1:1".into();
+        let keypair = UserKeypair::generate();
+
+        let res = execute_call(&config, Some("target_user_id".into()), keypair).await;
+        assert!(res.is_err());
+    }
+}

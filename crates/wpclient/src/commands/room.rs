@@ -20,3 +20,18 @@ pub async fn execute_room(
     wpapi::call::start_room_call(config, room_address).await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_execute_room_unreachable() {
+        let mut config = Configuration::default();
+        config.server.address = "127.0.0.1:1".into();
+        let keypair = UserKeypair::generate();
+
+        let res = execute_room(&config, "test_room_name".into(), keypair).await;
+        assert!(res.is_err());
+    }
+}
