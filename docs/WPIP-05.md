@@ -39,7 +39,7 @@ sequenceDiagram
 1. **Signed HTTPS Handshake**: Nodes configured with peer URLs (`--peer <URL>`) MUST issue an HTTP `POST /peer/sdp` over **HTTPS (TLS 1.2 / TLS 1.3)** containing an SDP Offer and a valid Ed25519 Authorization header (`Authorization: WP-Ed25519 <NodePubKeyHex>:<Timestamp>:<SignatureHex>`).
 1. **Mutual Node Authentication**:
    - The receiving node (Node B) MUST verify Node A's Ed25519 signature `SigA` before generating an SDP Answer.
-   - Node B MUST include its own Ed25519 Authorization header (`Authorization: WP-Ed25519 <NodePubKeyB>:<Timestamp>:<SigB>`) in the HTTP `200 OK` response payload/header.
+   - Node B MUST include its own Ed25519 Authorization header (`Authorization: WP-Ed25519 <NodePubKeyB>:<Timestamp>:<SigB>`) in the HTTP `200 OK` response payload/header, calculated over the payload string `"<Timestamp>:<SDP_ANSWER_STRING>"`.
    - Node A MUST verify Node B's signature `SigB` before accepting the SDP Answer, establishing **Mutual Node Authentication**.
 1. **Trusted Node Whitelisting (`trusted_nodes`)**:
    - `wpdaemon` implementations MAY support a `trusted_nodes` whitelist configuration.
