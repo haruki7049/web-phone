@@ -9,7 +9,7 @@ This file provides instructions and guidelines for AI agents working in this cod
 ### Workspace Architecture
 
 - **`crates/wpdaemon`**: WebRTC signaling server daemon, Selective Forwarding Unit (SFU) for group calls (WPIP-08), Keep-Alive heartbeat manager (WPIP-09), rate limiter (WPIP-15), and peer mesh node (WPIP-05).
-- **`crates/wpapi`**: Core WebRTC peer connection manager, protocol packet codec (`ProtocolPacket`), CPAL audio capture/playback engine, audio resampler, encrypted keystore (WPIP-14), Nostr/secp256k1 auth (WPIP-16), and C FFI bindings.
+- **`crates/wpapi`**: Core WebRTC peer connection manager, protocol packet codec (`ProtocolPacket`), CPAL audio capture/playback engine, audio resampler, encrypted keystore (WPIP-14), Nostr/secp256k1 auth (WPIP-16), video frame transport (WPIP-20), SFrame E2EE (WPIP-11), and C FFI bindings.
 - **`crates/wpclient`**: CLI client binary supporting direct 1-to-1 calls (`wpclient call`) and group room calls (`wpclient room`) with TUI interface.
 - **`docs/`**: WPIP specifications (`WPIP-01.md` through `WPIP-21.md`).
 
@@ -18,7 +18,7 @@ ______________________________________________________________________
 ## 2. Specification Compliance
 
 - All code MUST strictly comply with RFC 2119 terminology ("MUST", "MUST NOT", "SHOULD", "SHOULD NOT", "REQUIRED", "RECOMMENDED", "MAY") as defined in `docs/WPIP-*.md`.
-- Maintain backwards compatibility across all supported WPIP packet types (`0x01` through `0x13`).
+- Maintain backwards compatibility across all supported WPIP packet types (`0x01` through `0x14`).
 
 ______________________________________________________________________
 
@@ -26,7 +26,7 @@ ______________________________________________________________________
 
 - **Rust Standards**: Use modern Rust idioms (`as_chunks`, `is_multiple_of`, `let-else`, etc.).
 - **Concurrency & WebRTC Safety**:
-  - `CLIENT_REGISTRY` is protected by `std::sync::RwLock`. NEVER hold `RwLock` read/write guards across `.await` points when sending over WebRTC DataChannels or performing async I/O.
+  - `CLIENT_REGISTRY` and shared state are protected by `std::sync::RwLock`. NEVER hold `RwLock` read/write guards across `.await` points when sending over WebRTC DataChannels or performing async I/O.
   - Clone necessary `Arc` handles (`RTCDataChannel`, `RTCPeerConnection`, `UserAddress`) inside short synchronous blocks, drop the guard, and then perform async `.await` calls.
 - **Error Handling**: Preserve full log tracebacks and return proper `Result` types. Do not mask errors with superficial fallbacks or silent swallows.
 - **Issue Verification**: Before starting any task or feature implementation, agents MUST check relevant GitHub Issues and existing discussions to confirm requirements and prevent duplicate or redundant work.
