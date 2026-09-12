@@ -24,7 +24,7 @@ To prevent traffic flood attacks across different protocol interfaces, compliant
 - Recommended configuration:
   - Refill Rate: `5.0` tokens/second
   - Bucket Capacity (Max Burst): `10.0` tokens
-- Implementations MUST inspect `X-Forwarded-For` and `X-Real-IP` HTTP headers when operating behind a reverse proxy.
+- Implementations MUST inspect `X-Forwarded-For` and `X-Real-IP` HTTP headers ONLY when the immediate connecting peer IP matches a configured list of trusted reverse proxies (`trusted_proxies`). If the direct connection is untrusted, `wpdaemon` MUST ignore client-supplied forwarding headers to prevent rate-limit bypass via IP spoofing.
 - When an IP exceeds the token bucket capacity, the server MUST respond with `HTTP 429 Too Many Requests`.
 
 ### 1.2 STUN UDP Endpoint Rate Limiting
