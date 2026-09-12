@@ -19,7 +19,7 @@ ______________________________________________________________________
 In WPIP-08, multi-participant voice sessions are identified by a 32-byte binary `RoomAddress`:
 
 - **Binary Representation**: A `RoomAddress` MUST be a fixed-length 32-byte array (`[u8; 32]`) corresponding to the SHA-256 digest of the host's Ed25519 Public Key concatenated with a room identifier string.
-- **Host Control**: The client whose Ed25519 key was used to derive the `RoomAddress` is designated as the **Room Host** and MAY issue room moderation commands.
+- **Host Control & Room Persistence**: The client whose Ed25519 key was used to derive the `RoomAddress` is designated as the **Room Host** and MAY issue room moderation commands. When the Room Host leaves (`RoomLeaveRequest` - `0x0F`), `wpdaemon` MUST maintain active audio routing for remaining room participants until all participants have disconnected or left the room, at which point internal room registry state MUST be automatically cleaned up.
 
 ______________________________________________________________________
 
