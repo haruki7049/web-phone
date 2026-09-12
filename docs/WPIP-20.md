@@ -18,7 +18,7 @@ ______________________________________________________________________
 
 Implementations supporting WPIP-20 MUST register new `ProtocolPacket` tag IDs for video frame payloads:
 
-- **`0x14` (`VideoFrameData`)**: Encoded screen sharing / video frame payload.
+- **`0x14` (`VideoFrameData`)**: Encoded screen sharing / video frame payload (registered in [WPIP-04](WPIP-04.md) §3).
 
 ```text
 +-------------------+-----------------------+--------------------+-------------------------+
@@ -43,7 +43,7 @@ ______________________________________________________________________
 
 ## 3. Recommended Performance & Resource Control Guidelines
 
-To prevent network bandwidth saturation and CPU exhaustion when streaming video tracks alongside real-time audio, implementations RECOMMENDED adhering to the following guidelines:
+To prevent network bandwidth saturation and CPU exhaustion when streaming video tracks alongside real-time audio, implementations MUST adhere to the following priority guidelines:
 
 1. **Frame Rate Capping for Screen Sharing**:
 
@@ -54,7 +54,7 @@ To prevent network bandwidth saturation and CPU exhaustion when streaming video 
    - `wpdaemon` SFU implementations RECOMMENDED enforcing a maximum limit on active concurrent video/screen sharing streams per room (RECOMMENDED default: **1 to 2 active streams per room**).
    - Limiting active video publishers prevents exponential bandwidth amplification across group room participants.
 
-1. **Priority-Based Packet Forwarding**:
+1. **Priority-Based Packet Forwarding & Low-Latency Audio Protection**:
 
-   - `wpdaemon` SFU nodes SHOULD assign higher routing priority to audio packets (`0x02`, `0x10`) than video packets (`0x14`).
-   - During network congestion, `wpdaemon` MAY selectively drop video frame payloads (`0x14`) to guarantee uninterrupted, low-latency audio transmission.
+   - `wpdaemon` SFU nodes MUST assign higher routing priority to audio packets (`0x02`, `0x10`, `0x15`) than video packets (`0x14`).
+   - During network congestion, `wpdaemon` MUST selectively drop video frame payloads (`0x14`) to guarantee uninterrupted, low-latency audio transmission.
