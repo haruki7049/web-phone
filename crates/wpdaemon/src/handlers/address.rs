@@ -53,3 +53,48 @@ pub async fn resolve_registered_address(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+
+    #[tokio::test]
+    async fn test_list_and_resolve_address_handlers_unauthorized() {
+        let headers = HeaderMap::new();
+        let res = list_registered_addresses(headers.clone()).await;
+        assert!(res.is_err());
+
+        let res_resolve = resolve_registered_address(headers, Path("nonexistent".into())).await;
+        assert!(res_resolve.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_address_handlers_with_valid_auth_header() {
+        let keypair1 = wpapi::UserKeypair::generate();
+
+        // Header for list request
+        let (_, auth_str1) = wpapi::build_authorization_header(&keypair1, "");
+        let mut headers1 = HeaderMap::new();
+        headers1.insert(
+            axum::http::header::AUTHORIZATION,
+            auth_str1.parse().unwrap(),
+        );
+
+        let res = list_registered_addresses(headers1).await;
+        assert!(res.is_ok());
+
+        // Header for resolve request (using keypair2 to guarantee distinct signature)
+        let keypair2 = wpapi::UserKeypair::generate();
+        let (_, auth_str2) = wpapi::build_authorization_header(&keypair2, "");
+        let mut headers2 = HeaderMap::new();
+        headers2.insert(
+            axum::http::header::AUTHORIZATION,
+            auth_str2.parse().unwrap(),
+        );
+
+        // Resolve not found address returns 404
+        let res_resolve = resolve_registered_address(headers2, Path("nonexistent_id".into())).await;
+        assert!(matches!(res_resolve, Err(SignalingError::NotFound(_))));
+    }
+}

@@ -301,4 +301,73 @@ mod tests {
         assert_eq!(session2.get_client_id(), Some(200));
         assert_eq!(session2.audio_buffer.len(), 2);
     }
+
+    #[test]
+    fn test_client_session_getters_and_setters() {
+        let session = ClientSession::new();
+
+        // Audio levels
+        session.set_input_level(0.75);
+        assert!((session.get_input_level() - 0.75).abs() < f32::EPSILON);
+
+        session.set_output_level(0.25);
+        assert!((session.get_output_level() - 0.25).abs() < f32::EPSILON);
+
+        // Mute & Echoback
+        assert!(!session.is_muted());
+        session.set_muted(true);
+        assert!(session.is_muted());
+
+        assert!(!session.allow_echoback());
+        session.set_allow_echoback(true);
+        assert!(session.allow_echoback());
+
+        // Target and Room addresses
+        let target_addr = UserAddress::new("target_user");
+        session.set_target_address(Some(target_addr.clone()));
+        assert_eq!(session.get_target_address(), Some(target_addr));
+        session.set_target_address(None);
+        assert_eq!(session.get_target_address(), None);
+
+        let room_addr = UserAddress::new("room_test");
+        session.set_room_address(Some(room_addr.clone()));
+        assert_eq!(session.get_room_address(), Some(room_addr));
+        session.set_room_address(None);
+        assert_eq!(session.get_room_address(), None);
+
+        // User address
+        assert_eq!(session.get_user_address(), None);
+        if let Ok(mut guard) = session.user_address.lock() {
+            *guard = Some(UserAddress::new("assigned_addr"));
+        }
+        assert_eq!(
+            session.get_user_address(),
+            Some(UserAddress::new("assigned_addr"))
+        );
+
+        // Handlers
+        let (inc_tx, _inc_rx) = mpsc::channel(1);
+        session.set_incoming_call_handler(inc_tx);
+        assert!(session.get_incoming_call_handler().is_some());
+
+        let (note_tx, _note_rx) = mpsc::channel(1);
+        session.set_call_notification_handler(note_tx);
+        assert!(session.get_call_notification_handler().is_some());
+
+        // Debug formatting
+        let debug_str = format!("{:?}", session);
+        assert!(debug_str.contains("ClientSession"));
+
+        // Reset check including new fields
+        session.reset();
+        assert!(!session.is_muted());
+        assert!(!session.allow_echoback());
+        assert_eq!(session.get_input_level(), 0.0);
+        assert_eq!(session.get_output_level(), 0.0);
+        assert_eq!(session.get_target_address(), None);
+        assert_eq!(session.get_room_address(), None);
+        assert_eq!(session.get_user_address(), None);
+        assert!(session.get_incoming_call_handler().is_none());
+        assert!(session.get_call_notification_handler().is_none());
+    }
 }

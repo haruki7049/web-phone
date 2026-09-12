@@ -44,3 +44,34 @@ pub fn parse_nostr_key_to_bytes(input: &str) -> Result<[u8; 32], String> {
 
     Err("Invalid Nostr key format (expected 64-char Hex or nsec1.../npub1... Bech32)".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_nostr_key_error_branches() {
+        // Invalid Bech32 string
+        assert!(parse_nostr_key_to_bytes("nsec1invalidbech32").is_err());
+
+        // Invalid HRP prefix (e.g. note1...)
+        let invalid_hrp_bech32 = encode_bech32("note", &[0u8; 32]).unwrap();
+        assert!(parse_nostr_key_to_bytes(&invalid_hrp_bech32).is_err());
+
+        // Invalid length (not 32 bytes payload)
+        let invalid_len_bech32 = encode_bech32("nsec", &[1, 2, 3]).unwrap();
+        let res = parse_nostr_key_to_bytes(&invalid_len_bech32);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("Invalid Nostr key byte length"));
+
+        // Invalid 64-char hex string (contains non-hex char)
+        let invalid_hex = "g".repeat(64);
+        assert!(parse_nostr_key_to_bytes(&invalid_hex).is_err());
+
+        // Invalid format altogether
+        assert!(parse_nostr_key_to_bytes("too_short").is_err());
+
+        // Invalid HRP for encode_bech32
+        assert!(encode_bech32("INVALID HRP!", &[1, 2, 3]).is_err());
+    }
+}

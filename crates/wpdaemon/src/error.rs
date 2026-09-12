@@ -58,3 +58,42 @@ impl IntoResponse for SignalingError {
         (status, self.to_string()).into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_signaling_error_status_codes_and_response() {
+        let err_max = SignalingError::MaxConnectionsReached(100);
+        assert_eq!(err_max.status_code(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(err_max.to_string().contains("100"));
+
+        let err_mesh = SignalingError::MaxMeshPeersReached(50);
+        assert_eq!(err_mesh.status_code(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let err_unauth = SignalingError::Unauthorized(wpapi::AuthError::MissingHeader);
+        assert_eq!(err_unauth.status_code(), StatusCode::UNAUTHORIZED);
+
+        let err_sdp = SignalingError::InvalidSdpOffer("bad sdp".into());
+        assert_eq!(err_sdp.status_code(), StatusCode::BAD_REQUEST);
+
+        let err_ambig = SignalingError::AddressAmbiguous;
+        assert_eq!(err_ambig.status_code(), StatusCode::CONFLICT);
+
+        let err_notfound = SignalingError::NotFound("not found".into());
+        assert_eq!(err_notfound.status_code(), StatusCode::NOT_FOUND);
+
+        let err_internal = SignalingError::InternalError("internal".into());
+        assert_eq!(
+            err_internal.status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let err_rate = SignalingError::RateLimitExceeded;
+        assert_eq!(err_rate.status_code(), StatusCode::TOO_MANY_REQUESTS);
+
+        let response = err_sdp.into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
