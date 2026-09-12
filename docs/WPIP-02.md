@@ -149,9 +149,11 @@ A compliant `wpdaemon` MUST track active clients in a thread-safe registry (`Cli
 - `peer_connection` (Arc/Pointer to WebRTC PeerConnection)
 - `data_channel` (Arc/Pointer to WebRTC DataChannel)
 
-### Unregistration Rules
+### Unregistration & Resource Cleanup Rules
 
 When a PeerConnection's state changes to `Failed`, `Closed`, or `Disconnected`, `wpdaemon` MUST remove the associated `client_id` and all routing state from `ClientRegistry`.
+
+Furthermore, to prevent memory leaks from unestablished handshakes (e.g. clients sending `POST /sdp` but dropping ICE/DTLS transport before DataChannel setup), `wpdaemon` MUST enforce a maximum handshake timeout (RECOMMENDED: 30 seconds). Handshake sessions failing to establish DataChannel connectivity within this period MUST be automatically pruned and memory resources freed.
 
 ______________________________________________________________________
 
