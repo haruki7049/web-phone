@@ -191,6 +191,21 @@ impl ProtocolPacket {
                 b.put_slice(frame_data);
                 b
             }
+            Self::RoomGroupAudioE2EE {
+                room_address,
+                codec_id,
+                audio_energy,
+                audio_data,
+            } => {
+                let mut b =
+                    BytesMut::with_capacity(MIN_LEN_ROOM_GROUP_AUDIO_E2EE + audio_data.len());
+                b.put_u8(0x15);
+                b.put_slice(&room_address.to_bytes());
+                b.put_u8(*codec_id);
+                b.put_u8(*audio_energy);
+                b.put_slice(audio_data);
+                b
+            }
             Self::BroadcastAudio {
                 sender_id,
                 audio_data,

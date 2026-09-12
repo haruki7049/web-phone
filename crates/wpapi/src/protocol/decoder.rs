@@ -39,6 +39,7 @@ impl ProtocolPacket {
             0x12 => decode_ping(data),
             0x13 => decode_pong(data),
             0x14 => decode_video_frame_data(data),
+            0x15 => decode_room_group_audio_e2ee(data),
             unknown => Err(ProtocolError::UnknownPacketType(unknown)),
         }
     }
@@ -441,5 +442,32 @@ fn decode_video_frame_data(data: &[u8]) -> Result<ProtocolPacket, ProtocolError>
         target_address,
         video_codec_id,
         frame_data,
+    })
+}
+
+fn decode_room_group_audio_e2ee(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    if data.len() < MIN_LEN_ROOM_GROUP_AUDIO_E2EE {
+        return Err(ProtocolError::InsufficientLength {
+            packet_type: 0x15,
+            actual: data.len(),
+            expected: MIN_LEN_ROOM_GROUP_AUDIO_E2EE,
+        });
+    }
+    let mut buf = &data[1..];
+    let room_address = parse_user_address(&mut buf);
+    let codec_id = buf.get_u8();
+    let audio_energy = buf.get_u8();
+    let audio_data = buf.copy_to_bytes(buf.remaining()).to_vec();
+    if audio_data.len() > MAX_AUDIO_PAYLOAD_SIZE {
+        return Err(ProtocolError::AudioPayloadTooLarge {
+            actual: audio_data.len(),
+            max: MAX_AUDIO_PAYLOAD_SIZE,
+        });
+    }
+    Ok(ProtocolPacket::RoomGroupAudioE2EE {
+        room_address,
+        codec_id,
+        audio_energy,
+        audio_data,
     })
 }

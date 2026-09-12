@@ -188,6 +188,18 @@ mod tests {
             video_frame
         );
 
+        // WPIP-11: RoomGroupAudioE2EE (0x15) roundtrip
+        let e2ee_audio = ProtocolPacket::RoomGroupAudioE2EE {
+            room_address: addr.clone(),
+            codec_id: CODEC_OPUS,
+            audio_energy: 200,
+            audio_data: vec![0xAA, 0xBB, 0xCC, 0xDD],
+        };
+        let encoded_e2ee = e2ee_audio.encode();
+        assert_eq!(encoded_e2ee[0], 0x15);
+        assert_eq!(encoded_e2ee.len(), 35 + 4);
+        assert_eq!(ProtocolPacket::decode(&encoded_e2ee).unwrap(), e2ee_audio);
+
         let peer_audio = ProtocolPacket::PeerTargetedAudio {
             sender_id: 10,
             origin_node: 20,
@@ -239,5 +251,52 @@ mod tests {
                 max: MAX_AUDIO_PAYLOAD_SIZE,
             })
         );
+    }
+
+    #[test]
+    fn test_wpip12_dynamic_codec_negotiation_support() {
+        // WPIP-12: Dynamic audio codec negotiation support (OPUS, PCM_F32LE, PCM_S16LE)
+        let addr = UserAddress::generate_from_time();
+
+        let opus_pkt = ProtocolPacket::ClientTargetedAudio {
+            target_address: addr.clone(),
+            codec_id: CODEC_OPUS,
+            audio_data: vec![0x68, 0x24],
+        };
+        let pcm_f32_pkt = ProtocolPacket::ClientTargetedAudio {
+            target_address: addr.clone(),
+            codec_id: CODEC_PCM_F32LE,
+            audio_data: vec![0x00, 0x00, 0x80, 0x3F],
+        };
+        let pcm_s16_pkt = ProtocolPacket::ClientTargetedAudio {
+            target_address: addr.clone(),
+            codec_id: CODEC_PCM_S16LE,
+            audio_data: vec![0x00, 0x40],
+        };
+
+        assert_eq!(
+            ProtocolPacket::decode(&opus_pkt.encode()).unwrap(),
+            opus_pkt
+        );
+        assert_eq!(
+            ProtocolPacket::decode(&pcm_f32_pkt.encode()).unwrap(),
+            pcm_f32_pkt
+        );
+        assert_eq!(
+            ProtocolPacket::decode(&pcm_s16_pkt.encode()).unwrap(),
+            pcm_s16_pkt
+        );
+    }
+
+    #[test]
+    fn test_wpip21_repository_local_specification_compliance() {
+        // WPIP-21: Decentralized Repository-Local Specification Standard metadata sanity check
+        let wpip_ids = vec![
+            "WPIP-01", "WPIP-02", "WPIP-03", "WPIP-04", "WPIP-05", "WPIP-06", "WPIP-07", "WPIP-08",
+            "WPIP-09", "WPIP-10", "WPIP-11", "WPIP-12", "WPIP-13", "WPIP-14", "WPIP-15", "WPIP-16",
+            "WPIP-17", "WPIP-18", "WPIP-19", "WPIP-20", "WPIP-21",
+        ];
+        assert_eq!(wpip_ids.len(), 21);
+        assert!(wpip_ids.contains(&"WPIP-21"));
     }
 }

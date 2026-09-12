@@ -179,6 +179,21 @@ async fn dispatch_daemon_packet(
         } => {
             handle_room_group_audio(client_id, room_address, codec_id, audio_data).await;
         }
+        ProtocolPacket::RoomGroupAudioE2EE {
+            room_address,
+            codec_id,
+            audio_energy,
+            audio_data,
+        } => {
+            handle_room_group_audio_e2ee(
+                client_id,
+                room_address,
+                codec_id,
+                audio_energy,
+                audio_data,
+            )
+            .await;
+        }
         ProtocolPacket::Pong { .. } => {
             let now = std::time::Instant::now();
             if let Ok(mut reg) = CLIENT_REGISTRY.write() {
@@ -580,6 +595,80 @@ async fn handle_room_group_audio(
     let server_audio_pkt = ProtocolPacket::RoomGroupAudio {
         room_address: room_address.clone(),
         codec_id,
+        audio_data: payload,
+    };
+    let bytes = BytesMut::from(server_audio_pkt.encode().as_slice());
+
+    for member_cid in &member_cids {
+        if *member_cid == client_id {
+            continue;
+        }
+        let dc = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .data_channels
+            .get(member_cid)
+            .cloned();
+        if let Some(dc) = dc {
+            let _ = dc.send(bytes.clone()).await;
+        }
+    }
+
+    if speaker_list_changed && !top_speakers.is_empty() {
+        let notice_pkt = ProtocolPacket::ActiveSpeakerNotice {
+            room_address,
+            speaker_addresses: top_speakers,
+        };
+        let notice_bytes = BytesMut::from(notice_pkt.encode().as_slice());
+        for member_cid in member_cids {
+            let dc = CLIENT_REGISTRY
+                .read()
+                .unwrap()
+                .data_channels
+                .get(&member_cid)
+                .cloned();
+            if let Some(dc) = dc {
+                let _ = dc.send(notice_bytes.clone()).await;
+            }
+        }
+    }
+}
+
+async fn handle_room_group_audio_e2ee(
+    client_id: u64,
+    room_address: UserAddress,
+    codec_id: u8,
+    audio_energy: u8,
+    payload: Vec<u8>,
+) {
+    if payload.len() > MAX_MESSAGE_SIZE {
+        warn!(
+            "Client {} sent oversized e2ee group audio packet ({} bytes), ignoring",
+            client_id,
+            payload.len()
+        );
+        return;
+    }
+
+    let energy = (audio_energy as f64) / 255.0;
+    let (is_top_k, top_speakers, speaker_list_changed) = {
+        let mut reg = CLIENT_REGISTRY.write().unwrap();
+        reg.update_speaker_energy(&room_address, client_id, energy)
+    };
+
+    if !is_top_k {
+        return;
+    }
+
+    let member_cids = CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .get_room_member_ids(&room_address);
+
+    let server_audio_pkt = ProtocolPacket::RoomGroupAudioE2EE {
+        room_address: room_address.clone(),
+        codec_id,
+        audio_energy,
         audio_data: payload,
     };
     let bytes = BytesMut::from(server_audio_pkt.encode().as_slice());

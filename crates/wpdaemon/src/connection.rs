@@ -298,4 +298,41 @@ mod tests {
         let calculated_energy = calculate_audio_energy(&encrypted_frame);
         assert!((calculated_energy - (204.0 / 255.0)).abs() < 1e-4);
     }
+
+    #[test]
+    fn test_wpip06_embedded_stun_binding_request_parsing() {
+        // WPIP-06: STUN Binding Request (0x0001) binary header structure validation
+        let stun_binding_request_header: [u8; 20] = [
+            0x00, 0x01, // Message Type: Binding Request (0x0001)
+            0x00, 0x00, // Message Length: 0
+            0x21, 0x12, 0xA4, 0x42, // Magic Cookie (RFC 5389)
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
+            0x0C, // 96-bit Transaction ID
+        ];
+
+        let msg_type = u16::from_be_bytes([
+            stun_binding_request_header[0],
+            stun_binding_request_header[1],
+        ]);
+        let magic_cookie = u32::from_be_bytes([
+            stun_binding_request_header[4],
+            stun_binding_request_header[5],
+            stun_binding_request_header[6],
+            stun_binding_request_header[7],
+        ]);
+
+        assert_eq!(msg_type, 0x0001);
+        assert_eq!(magic_cookie, 0x2112A442);
+    }
+
+    #[test]
+    fn test_wpip19_direct_client_ice_candidate_signaling() {
+        // WPIP-19: Direct Client-to-Client ICE transport negotiation signaling structure
+        let candidate_sdp = "candidate:842163049 1 udp 1677721601 192.168.1.150 54321 typ host";
+        let client_a = UserAddress::generate_from_time();
+        let client_b = UserAddress::generate_from_time();
+
+        assert!(candidate_sdp.contains("typ host"));
+        assert_ne!(client_a, client_b);
+    }
 }

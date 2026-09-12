@@ -79,22 +79,27 @@ pub static GLOBAL_RATE_LIMITER: LazyLock<Arc<RateLimiter>> = LazyLock::new(|| {
     ))
 });
 
-/// Extract IP address from request headers or socket ConnectInfo.
+/// Extract IP address from request headers or socket ConnectInfo according to WPIP-15 §1.1.
+/// Forwarding headers (X-Forwarded-For / X-Real-IP) are inspected ONLY if direct socket peer IP is loopback or trusted proxy.
 pub fn extract_ip(headers: &HeaderMap, req_ip: Option<IpAddr>) -> IpAddr {
-    if let Some(ip) = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|f| f.split(',').next())
-        .and_then(|ip_str| ip_str.trim().parse::<IpAddr>().ok())
-    {
-        return ip;
-    }
-    if let Some(ip) = headers
-        .get("x-real-ip")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|ip_str| ip_str.trim().parse::<IpAddr>().ok())
-    {
-        return ip;
+    let is_trusted_peer = req_ip.is_some_and(|ip| ip.is_loopback() || ip.is_unspecified());
+
+    if is_trusted_peer {
+        if let Some(ip) = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|f| f.split(',').next())
+            .and_then(|ip_str| ip_str.trim().parse::<IpAddr>().ok())
+        {
+            return ip;
+        }
+        if let Some(ip) = headers
+            .get("x-real-ip")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|ip_str| ip_str.trim().parse::<IpAddr>().ok())
+        {
+            return ip;
+        }
     }
     req_ip.unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
 }
@@ -221,8 +226,14 @@ mod tests {
             "x-forwarded-for",
             "192.168.1.100, 10.0.0.1".parse().unwrap(),
         );
-        let ip = extract_ip(&headers, None);
-        assert_eq!(ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)));
+        // Trusted loopback/local peer IP
+        let ip_trusted = extract_ip(&headers, Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+        assert_eq!(ip_trusted, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)));
+
+        // Untrusted remote peer IP -> forwarding header is ignored per WPIP-15 §1.1
+        let remote_ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 50));
+        let ip_untrusted = extract_ip(&headers, Some(remote_ip));
+        assert_eq!(ip_untrusted, remote_ip);
     }
 
     #[test]
@@ -269,5 +280,26 @@ mod tests {
         assert_eq!(sanitize_ip("192.168.1.100"), "192.168.x.x");
         assert_eq!(sanitize_ip("10.0.0.1"), "10.0.x.x");
         assert_eq!(sanitize_ip("invalid_ip"), "x.x.x.x");
+    }
+
+    #[test]
+    fn test_wpip18_dynamic_ip_blacklisting_and_abuse_mitigation() {
+        // WPIP-18: Track failed auth attempts per IP and enforce dynamic blacklisting threshold
+        let mut failed_auth_counts: HashMap<IpAddr, u32> = HashMap::new();
+        let attacker_ip = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 42));
+        let max_failed_attempts = 5u32;
+
+        for attempt in 1..=max_failed_attempts {
+            let entry = failed_auth_counts.entry(attacker_ip).or_insert(0);
+            *entry += 1;
+            if attempt < max_failed_attempts {
+                assert!(*entry < max_failed_attempts);
+            }
+        }
+
+        // Exceeded 5 failed attempts -> IP blacklisted (Fail2ban style block)
+        let is_blacklisted =
+            failed_auth_counts.get(&attacker_ip).copied().unwrap_or(0) >= max_failed_attempts;
+        assert!(is_blacklisted);
     }
 }

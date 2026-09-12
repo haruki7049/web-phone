@@ -152,6 +152,22 @@ mod tests {
     }
 
     #[test]
+    fn test_wpip08_sfu_group_room_scaling_exceeding_wpip07_two_user_limit() {
+        let mut registry = ClientRegistry::new();
+        let room_addr = UserAddress::from_room_id("sfu-group-conference-room");
+
+        // WPIP-08 allows up to 50+ members (exceeding WPIP-07 2-participant 1-to-1 limit)
+        for cid in 1..=10 {
+            let count = registry.join_room(cid, room_addr.clone());
+            assert_eq!(count, cid as u32);
+        }
+
+        let members = registry.get_room_member_ids(&room_addr);
+        assert_eq!(members.len(), 10);
+        assert_eq!(members, (1..=10).collect::<Vec<u64>>());
+    }
+
+    #[test]
     fn test_wpip09_keep_alive_and_stale_detection() {
         let mut registry = ClientRegistry::new();
         let client_id = 777;

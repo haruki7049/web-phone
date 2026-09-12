@@ -425,4 +425,40 @@ mod tests {
             "Valid packet should be broadcasted with decremented TTL"
         );
     }
+
+    #[test]
+    fn test_wpip17_mtls_node_verification_and_fingerprint_matching() {
+        use wpapi::UserKeypair;
+
+        // WPIP-17: Mutual TLS node identity validation via Ed25519 node key fingerprint
+        let node_a_key = UserKeypair::generate();
+        let node_b_key = UserKeypair::generate();
+
+        let node_a_pub = node_a_key.public_key_address();
+        let node_b_pub = node_b_key.public_key_address();
+
+        // Node public addresses MUST be distinct 64-char hex strings
+        assert_eq!(node_a_pub.id.len(), 64);
+        assert_eq!(node_b_pub.id.len(), 64);
+        assert_ne!(node_a_pub, node_b_pub);
+
+        // Sign SDP handshake payload with Node A secret key
+        let sdp = "v=0\r\no=- 100 200 IN IP4 127.0.0.1\r\n";
+        let timestamp = 1757275200u64;
+        let payload = format!("{}:{}", timestamp, sdp);
+        let sig_hex = node_a_key.sign(payload.as_bytes());
+
+        // Verify Node A signature using Node A public address
+        assert!(UserKeypair::verify(
+            &node_a_pub,
+            payload.as_bytes(),
+            &sig_hex
+        ));
+        // Verification with wrong public key MUST fail
+        assert!(!UserKeypair::verify(
+            &node_b_pub,
+            payload.as_bytes(),
+            &sig_hex
+        ));
+    }
 }

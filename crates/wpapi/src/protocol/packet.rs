@@ -41,6 +41,7 @@ pub const MIN_LEN_ADDRESS_ONLY_PACKET: usize = 1 + LEN_USER_ADDR; // 33
 pub const MIN_LEN_ROOM_STATE_NOTIFICATION: usize = 1 + LEN_USER_ADDR + LEN_PARTICIPANT_COUNT; // 37
 pub const MIN_LEN_PING_PONG: usize = 1 + LEN_TIMESTAMP; // 9
 pub const MIN_LEN_VIDEO_FRAME_DATA: usize = 1 + LEN_USER_ADDR + 1; // 34
+pub const MIN_LEN_ROOM_GROUP_AUDIO_E2EE: usize = 1 + LEN_USER_ADDR + 1 + 1; // 35
 
 /// Errors that can occur during protocol packet decoding.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -151,6 +152,13 @@ pub enum ProtocolPacket {
         target_address: UserAddress,
         video_codec_id: u8,
         frame_data: Vec<u8>,
+    },
+    /// 0x15: Room Group Audio E2EE (WPIP-11) [0x15, room_address (32b raw), codec_id (1b), audio_energy (1b), audio_data...]
+    RoomGroupAudioE2EE {
+        room_address: UserAddress,
+        codec_id: u8,
+        audio_energy: u8,
+        audio_data: Vec<u8>,
     },
     /// Legacy Broadcast Audio [Broadcast tag, sender_id (8b LE), audio_data...]
     BroadcastAudio { sender_id: u64, audio_data: Vec<u8> },
