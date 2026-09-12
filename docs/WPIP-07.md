@@ -12,12 +12,13 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 ______________________________________________________________________
 
-## 1. Capacity Constraints (2-Participant Limit)
+## 1. Capacity Constraints (2-Participant Limit for 1-to-1 Calls)
 
-Implementations adopting WPIP-07 MUST enforce call capacity constraints:
+Implementations adopting WPIP-07 MUST enforce call capacity constraints for direct 1-to-1 calls:
 
-- **Maximum Capacity**: A call session or target `UserAddress` room MUST NOT exceed **2 active participants**.
-- **Rejection**: If a third client attempts to connect or transmit audio to a room with 2 or more participants, `wpdaemon` MUST respond with `ConnectionError` (`0x0A`) and drop the audio payload.
+- **Maximum Capacity**: A direct 1-to-1 call session targeted at a specific client `UserAddress` MUST NOT exceed **2 active participants**.
+- **Group Call Exemption**: The 2-participant limit specified in WPIP-07 applies ONLY to direct 1-to-1 targeted audio streams (`ClientTargetedAudio` - `0x02`). Multi-participant group rooms operating under [WPIP-08](WPIP-08.md) (`RoomJoinRequest` / `RoomGroupAudio` - `0x10`) MUST NOT be restricted by the 2-participant limit.
+- **Rejection**: If a third client attempts to connect or transmit direct audio to a 1-to-1 call session with 2 active participants, `wpdaemon` MUST respond with `ConnectionError` (`0x0A`) and drop the audio payload.
 
 ______________________________________________________________________
 
@@ -27,6 +28,7 @@ ______________________________________________________________________
 
 - When Client A initiates audio to Client B, `wpdaemon` MUST send a `CallRequest` (`0x05`) packet to Client B.
 - `wpdaemon` MUST track notification state (`mark_notified`) to prevent duplicate prompts.
+- **Glare (Simultaneous Call Request) Resolution**: If Client A and Client B issue simultaneous `CallRequest` signals to each other before receiving responses, `wpdaemon` MUST automatically approve the call session by comparing the lexicographical order of their `UserAddress` strings (tie-breaker), resolving the session instantly without duplicate prompts.
 
 ### 2.2 Response Protocols
 
