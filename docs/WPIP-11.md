@@ -18,14 +18,19 @@ ______________________________________________________________________
 
 When E2EE is enabled for a room:
 
-- `wpclient` MUST encrypt Opus audio frames using **AES-256-GCM** before packaging them into `RoomGroupAudio` (`0x10`) packets.
+- `wpclient` MUST encrypt Opus audio frames using **AES-256-GCM** before packaging them into dedicated `RoomGroupAudioE2EE` (`0x15`) packets.
 - The 1-byte unencrypted packet header MUST contain an unencrypted 8-bit audio energy level indicator (`AudioEnergyByte`), allowing `wpdaemon` to perform Top-$K$ active speaker selection without decrypting the audio payload.
+- Dedicated Tag `0x15` MUST be used instead of `0x10` to prevent wire layout offset collisions with unencrypted WPIP-08 group audio frames.
 
 ```text
 +-------------------+-----------------------+--------------------+--------------------+----------------------------+
-| Tag (1b: 0x10)    | RoomAddress (32b raw) | Codec ID (1b: u8)  | AudioEnergy (1b)   | Encrypted SFrame Payload   |
+| Tag (1b: 0x15)    | RoomAddress (32b raw) | Codec ID (1b: u8)  | AudioEnergy (1b)   | Encrypted SFrame Payload   |
 +-------------------+-----------------------+--------------------+--------------------+----------------------------+
 ```
+
+### 1.1 Audio Energy Verification & Abuse Mitigation
+
+To defend against voice suppression attacks (where a malicious participant crafts artificial maximum `AudioEnergy` values to hijack Top-$K$ speaker slots), `wpdaemon` SFU nodes SHOULD implement energy rate-of-change validation and per-client average energy tracking to detect and suppress spoofed energy frames.
 
 ______________________________________________________________________
 
