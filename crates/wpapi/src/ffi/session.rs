@@ -4,6 +4,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::thread::{JoinHandle, spawn};
 use tokio::sync::oneshot;
 
@@ -53,6 +54,7 @@ pub struct WPAPIConfig(pub Configuration, pub(crate) Option<EventCallbackState>)
 pub struct WPAPICallHandle {
     pub(crate) stop_tx: Option<oneshot::Sender<()>>,
     pub(crate) thread_handle: Option<JoinHandle<()>>,
+    pub(crate) session: Arc<crate::session::ClientSession>,
 }
 
 /// Create a new client configuration handle with default settings.
@@ -296,6 +298,8 @@ pub unsafe extern "C" fn wpapi_call_start(
         };
 
         let (stop_tx, stop_rx) = oneshot::channel::<()>();
+        let session = Arc::new(crate::session::ClientSession::new());
+        let session_clone = session.clone();
 
         let thread_handle = spawn(move || {
             let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -309,8 +313,7 @@ pub unsafe extern "C" fn wpapi_call_start(
                 }
             };
 
-            let session = crate::session::ClientSession::new();
-            let mut event_rx = session.subscribe_events();
+            let mut event_rx = session_clone.subscribe_events();
 
             rt.block_on(async move {
                 if let Some(cb_state) = event_cb_state {
@@ -381,7 +384,8 @@ pub unsafe extern "C" fn wpapi_call_start(
                 }
 
                 if let Err(e) =
-                    call::start_call_with_session(&cfg, target_opt, Some(stop_rx), &session).await
+                    call::start_call_with_session(&cfg, target_opt, Some(stop_rx), &session_clone)
+                        .await
                 {
                     tracing::error!("Audio call session error: {}", e);
                 }
@@ -391,6 +395,7 @@ pub unsafe extern "C" fn wpapi_call_start(
         let handle = Box::new(WPAPICallHandle {
             stop_tx: Some(stop_tx),
             thread_handle: Some(thread_handle),
+            session,
         });
 
         Box::into_raw(handle)
@@ -429,6 +434,8 @@ pub unsafe extern "C" fn wpapi_room_call_start(
         };
 
         let (stop_tx, stop_rx) = oneshot::channel::<()>();
+        let session = Arc::new(crate::session::ClientSession::new());
+        let session_clone = session.clone();
 
         let thread_handle = spawn(move || {
             let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -442,8 +449,7 @@ pub unsafe extern "C" fn wpapi_room_call_start(
                 }
             };
 
-            let session = crate::session::ClientSession::new();
-            let mut event_rx = session.subscribe_events();
+            let mut event_rx = session_clone.subscribe_events();
 
             rt.block_on(async move {
                 if let Some(cb_state) = event_cb_state {
@@ -513,9 +519,13 @@ pub unsafe extern "C" fn wpapi_room_call_start(
                     });
                 }
 
-                if let Err(e) =
-                    call::start_room_call_with_session(&cfg, room_addr, Some(stop_rx), &session)
-                        .await
+                if let Err(e) = call::start_room_call_with_session(
+                    &cfg,
+                    room_addr,
+                    Some(stop_rx),
+                    &session_clone,
+                )
+                .await
                 {
                     tracing::error!("Audio room call session error: {}", e);
                 }
@@ -525,6 +535,7 @@ pub unsafe extern "C" fn wpapi_room_call_start(
         let handle = Box::new(WPAPICallHandle {
             stop_tx: Some(stop_tx),
             thread_handle: Some(thread_handle),
+            session,
         });
 
         Box::into_raw(handle)
@@ -552,6 +563,71 @@ pub unsafe extern "C" fn wpapi_call_stop(handle: *mut WPAPICallHandle) -> c_int 
         0
     }))
     .unwrap_or(-1)
+}
+
+/// Set microphone mute state for an active call session.
+/// # Safety
+/// `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpapi_call_set_muted(handle: *mut WPAPICallHandle, muted: bool) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if handle.is_null() {
+            set_last_error("Null handle argument");
+            return -1;
+        }
+        let call_handle = unsafe { &*handle };
+        call_handle.session.set_muted(muted);
+        0
+    }))
+    .unwrap_or(-1)
+}
+
+/// Check if microphone is currently muted for an active call session.
+/// # Safety
+/// `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpapi_call_is_muted(handle: *const WPAPICallHandle) -> bool {
+    catch_unwind(AssertUnwindSafe(|| {
+        if handle.is_null() {
+            set_last_error("Null handle argument");
+            return false;
+        }
+        let call_handle = unsafe { &*handle };
+        call_handle.session.is_muted()
+    }))
+    .unwrap_or(false)
+}
+
+/// Get current input audio energy level (0.0..=1.0) for an active call session.
+/// # Safety
+/// `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpapi_call_get_input_level(handle: *const WPAPICallHandle) -> f32 {
+    catch_unwind(AssertUnwindSafe(|| {
+        if handle.is_null() {
+            set_last_error("Null handle argument");
+            return 0.0;
+        }
+        let call_handle = unsafe { &*handle };
+        call_handle.session.get_input_level()
+    }))
+    .unwrap_or(0.0)
+}
+
+/// Get current output audio energy level (0.0..=1.0) for an active call session.
+/// # Safety
+/// `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpapi_call_get_output_level(handle: *const WPAPICallHandle) -> f32 {
+    catch_unwind(AssertUnwindSafe(|| {
+        if handle.is_null() {
+            set_last_error("Null handle argument");
+            return 0.0;
+        }
+        let call_handle = unsafe { &*handle };
+        call_handle.session.get_output_level()
+    }))
+    .unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -642,6 +718,38 @@ mod tests {
             wpapi_config_free(config_ptr);
             // Free null pointer safety
             wpapi_config_free(std::ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn test_ffi_in_call_controls() {
+        unsafe {
+            // Null pointer safety check
+            assert_eq!(wpapi_call_set_muted(std::ptr::null_mut(), true), -1);
+            assert!(!wpapi_call_is_muted(std::ptr::null()));
+            assert_eq!(wpapi_call_get_input_level(std::ptr::null()), 0.0);
+            assert_eq!(wpapi_call_get_output_level(std::ptr::null()), 0.0);
+
+            // Mock handle test
+            let session = Arc::new(crate::session::ClientSession::new());
+            let handle = Box::new(WPAPICallHandle {
+                stop_tx: None,
+                thread_handle: None,
+                session: session.clone(),
+            });
+            let handle_ptr = Box::into_raw(handle);
+
+            assert!(!wpapi_call_is_muted(handle_ptr));
+            assert_eq!(wpapi_call_set_muted(handle_ptr, true), 0);
+            assert!(wpapi_call_is_muted(handle_ptr));
+
+            session.set_input_level(0.75);
+            session.set_output_level(0.42);
+
+            assert_eq!(wpapi_call_get_input_level(handle_ptr), 0.75);
+            assert_eq!(wpapi_call_get_output_level(handle_ptr), 0.42);
+
+            let _ = Box::from_raw(handle_ptr);
         }
     }
 }

@@ -216,6 +216,15 @@ typedef void (*WPAPIEventCallback)(enum WPAPIEventType event_type,
 const char *wpapi_get_last_error(void);
 
 /**
+ * Copy the last thread-local C FFI error message into a caller-supplied buffer.
+ * Returns 0 on success, or -1 if no error is present or buffer is invalid.
+ *
+ * # Safety
+ * `buf` must be a valid pointer to a writeable memory buffer of at least `buf_len` bytes.
+ */
+int wpapi_get_last_error_copy(char *buf, uintptr_t buf_len);
+
+/**
  * Free a C string allocated by `wpapi_list_audio_devices` or other FFI calls.
  * # Safety
  * `ptr` must be a pointer allocated by Rust FFI, or NULL.
@@ -347,5 +356,33 @@ struct WPAPICallHandle *wpapi_room_call_start(const struct WPAPIConfig *config,
  * `handle` must be a valid pointer.
  */
 int wpapi_call_stop(struct WPAPICallHandle *handle);
+
+/**
+ * Set microphone mute state for an active call session.
+ * # Safety
+ * `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+ */
+int wpapi_call_set_muted(struct WPAPICallHandle *handle, bool muted);
+
+/**
+ * Check if microphone is currently muted for an active call session.
+ * # Safety
+ * `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+ */
+bool wpapi_call_is_muted(const struct WPAPICallHandle *handle);
+
+/**
+ * Get current input audio energy level (0.0..=1.0) for an active call session.
+ * # Safety
+ * `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+ */
+float wpapi_call_get_input_level(const struct WPAPICallHandle *handle);
+
+/**
+ * Get current output audio energy level (0.0..=1.0) for an active call session.
+ * # Safety
+ * `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+ */
+float wpapi_call_get_output_level(const struct WPAPICallHandle *handle);
 
 #endif  /* WPAPI_H */
