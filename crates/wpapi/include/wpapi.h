@@ -249,7 +249,7 @@ int wpapi_config_set_server(struct WPAPIConfig *config,
                             uint16_t server_port);
 
 /**
- * Set server URL string (e.g. "http://127.0.0.1:15000", "https://daemon.example.com:8443").
+ * Set server URL string (e.g. "<http://127.0.0.1:15000>", "<https://daemon.example.com:8443>").
  * # Safety
  * `config` and `server_url` must be valid non-null pointers.
  */

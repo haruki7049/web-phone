@@ -32,7 +32,7 @@ pub struct ServerConfig {
     /// Hostname or domain name override for the audio server (e.g. "localhost", "daemon.example.com").
     #[serde(default)]
     pub host: Option<String>,
-    /// Server URL override string (e.g. "http://127.0.0.1:15000", "https://daemon.example.com:15000").
+    /// Server URL override string (e.g. "<http://127.0.0.1:15000>", "<https://daemon.example.com:15000>").
     #[serde(default, rename = "url")]
     pub url_override: Option<String>,
     /// Use TLS/HTTPS and WSS for secure server communication (default: true).
