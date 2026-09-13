@@ -44,3 +44,12 @@ Before declaring any task or feature complete, agents MUST run and pass:
 1. `nix build` - Nix flake derivation build must succeed.
 1. `treefmt` - Code formatting MUST be performed using `treefmt` (installed via `nix develop`). If `treefmt` is not directly available in the execution environment, inspect the `treefmt-nix` configuration defined in `flake.nix` and manually apply the corresponding formatters for each file type (e.g., `rustfmt` for Rust, `nixfmt` for Nix, `taplo` for TOML, `shfmt` for Shell scripts, `mdformat` for Markdown).
 1. `cargo llvm-cov --workspace` - Test coverage MUST be checked using `cargo-llvm-cov`.
+
+______________________________________________________________________
+
+## 5. Proactive Maintenance & Specification Verification
+
+When no new feature requests or implementation tasks are specified by the user:
+
+- **Refactoring Existing Code**: Proactively identify, propose, and implement refactoring opportunities (e.g., reducing boilerplate, eliminating duplicate logic, enhancing DRY principles, adopting modern Rust idioms like `let-else`, and improving module encapsulation).
+- **WPIP Specification Compatibility Verification**: Audit and verify full compatibility with WPIP specifications (`docs/WPIP-*.md`). Ensure packet formats (`0x01` through `0x14`), authorization headers, rate-limiting rules, energy routing, and encryption algorithms strictly conform to the spec definitions across `wpapi`, `wpdaemon`, and `wpclient`.
