@@ -5438,7 +5438,6 @@ dependencies = [
  "clap",
  "color-eyre",
  "confy",
- "cpal",
  "crossterm",
  "futures",
  "hex",
