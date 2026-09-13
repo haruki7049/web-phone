@@ -22,9 +22,9 @@ pub use address::{
     verify_authorization_header_with_cache, verify_secp256k1_authorization_header,
     verify_secp256k1_authorization_header_with_cache,
 };
-pub use audio::AudioEngine;
+pub use audio::{AudioDevices, AudioEngine};
 pub use client::DaemonApiClient;
-pub use config::{CONFIGURATION, Configuration, DEFAULT_CONFIG_PATH};
+pub use config::{CONFIGURATION, Configuration, ConfigurationBuilder, DEFAULT_CONFIG_PATH};
 pub use error::WpapiError;
 pub use ffi::*;
 pub use keystore::{

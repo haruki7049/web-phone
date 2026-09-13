@@ -59,6 +59,8 @@ pub struct ClientSession {
     pub is_muted: Arc<AtomicBool>,
     /// Allow echo back (hear your own voice) toggle flag.
     pub allow_echoback: Arc<AtomicBool>,
+    /// Real-time call notification broadcast event channel sender.
+    pub event_broadcaster: tokio::sync::broadcast::Sender<CallNotification>,
 }
 
 impl std::fmt::Debug for ClientSession {
@@ -88,6 +90,7 @@ impl ClientSession {
 
     /// Create a `ClientSession` using a specific `UserKeypair`.
     pub fn with_keypair(keypair: UserKeypair) -> Self {
+        let (event_broadcaster, _) = tokio::sync::broadcast::channel(128);
         Self {
             audio_buffer: Arc::new(crate::audio::AudioRingBuffer::default_capacity()),
             client_id: Arc::new(AtomicU64::new(u64::MAX)),
@@ -102,6 +105,7 @@ impl ClientSession {
             output_level: Arc::new(AtomicU32::new(0)),
             is_muted: Arc::new(AtomicBool::new(false)),
             allow_echoback: Arc::new(AtomicBool::new(false)),
+            event_broadcaster,
         }
     }
 
@@ -243,8 +247,14 @@ impl ClientSession {
         self.call_notification_tx.lock().ok()?.clone()
     }
 
-    /// Send a call notification event if a handler is registered.
+    /// Subscribe to all real-time call notifications as a broadcast receiver.
+    pub fn subscribe_events(&self) -> tokio::sync::broadcast::Receiver<CallNotification> {
+        self.event_broadcaster.subscribe()
+    }
+
+    /// Send a call notification event to both the broadcast channel and registered mpsc handler.
     pub async fn notify_call_event(&self, notification: CallNotification) {
+        let _ = self.event_broadcaster.send(notification.clone());
         if let Some(tx) = self.get_call_notification_handler() {
             let _ = tx.send(notification).await;
         }
@@ -376,5 +386,28 @@ mod tests {
         assert_eq!(session.get_user_address(), None);
         assert!(session.get_incoming_call_handler().is_none());
         assert!(session.get_call_notification_handler().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_events_broadcast() {
+        let session = ClientSession::new();
+        let mut rx1 = session.subscribe_events();
+        let mut rx2 = session.subscribe_events();
+
+        let target_addr = UserAddress::new("caller1");
+        session
+            .notify_call_event(CallNotification::Accepted(target_addr.clone()))
+            .await;
+
+        let note1 = rx1.recv().await.expect("rx1 should receive broadcast");
+        let note2 = rx2.recv().await.expect("rx2 should receive broadcast");
+
+        match (note1, note2) {
+            (CallNotification::Accepted(a1), CallNotification::Accepted(a2)) => {
+                assert_eq!(a1, target_addr);
+                assert_eq!(a2, target_addr);
+            }
+            _ => panic!("Expected CallNotification::Accepted"),
+        }
     }
 }

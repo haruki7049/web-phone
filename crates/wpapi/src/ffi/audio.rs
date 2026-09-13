@@ -29,25 +29,15 @@ pub unsafe extern "C" fn wpapi_list_audio_devices(out_json: *mut *mut c_char) ->
             set_last_error("Null pointer argument");
             return -1;
         }
-        use cpal::traits::{DeviceTrait, HostTrait};
-        let host = cpal::default_host();
-        let input_devices: Vec<String> = match host.input_devices() {
-            Ok(devs) => devs
-                .filter_map(|d| d.description().map(|desc| desc.name().to_string()).ok())
-                .collect(),
-            Err(_) => Vec::new(),
+        let devices = match crate::audio::AudioEngine::list_devices() {
+            Ok(devs) => devs,
+            Err(e) => {
+                set_last_error(e);
+                return -1;
+            }
         };
-        let output_devices: Vec<String> = match host.output_devices() {
-            Ok(devs) => devs
-                .filter_map(|d| d.description().map(|desc| desc.name().to_string()).ok())
-                .collect(),
-            Err(_) => Vec::new(),
-        };
-        let val = serde_json::json!({
-            "input_devices": input_devices,
-            "output_devices": output_devices,
-        });
-        match CString::new(val.to_string()) {
+        let json_str = serde_json::to_string(&devices).unwrap_or_default();
+        match CString::new(json_str) {
             Ok(c_str) => {
                 unsafe { *out_json = c_str.into_raw() };
                 0

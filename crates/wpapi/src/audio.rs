@@ -107,6 +107,15 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::error;
 
+use serde::{Deserialize, Serialize};
+
+/// Available audio input (microphone) and output (speaker) device names listed by CPAL host.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AudioDevices {
+    pub input_devices: Vec<String>,
+    pub output_devices: Vec<String>,
+}
+
 /// Manages CPAL audio input (microphone) and output (speaker) streams and resampling pipeline.
 pub struct AudioEngine {
     _input_stream: Stream,
@@ -122,6 +131,15 @@ unsafe impl Sync for AudioEngine {}
 use crate::session::ClientSession;
 
 impl AudioEngine {
+    /// List available CPAL audio input (microphones) and output (speakers) device names.
+    pub fn list_devices() -> Result<AudioDevices> {
+        let (input_devices, output_devices) = get_device_names()?;
+        Ok(AudioDevices {
+            input_devices,
+            output_devices,
+        })
+    }
+
     /// Start microphone input and speaker output streams based on the provided `Configuration`.
     pub fn start(
         config: &Configuration,

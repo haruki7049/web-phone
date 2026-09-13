@@ -32,23 +32,14 @@ pub async fn list_registered_addresses(config: &Configuration) -> Result<()> {
 
 /// List available audio input and output devices.
 pub fn list_audio_devices() -> Result<()> {
-    use cpal::traits::{DeviceTrait, HostTrait};
-    let host = cpal::default_host();
+    let devices = wpapi::audio::AudioEngine::list_devices()?;
     println!("Audio Input Devices (Microphones):");
-    if let Ok(devices) = host.input_devices() {
-        for dev in devices {
-            if let Ok(desc) = dev.description() {
-                println!("  • {}", desc.name());
-            }
-        }
+    for dev in &devices.input_devices {
+        println!("  • {}", dev);
     }
     println!("\nAudio Output Devices (Speakers):");
-    if let Ok(devices) = host.output_devices() {
-        for dev in devices {
-            if let Ok(desc) = dev.description() {
-                println!("  • {}", desc.name());
-            }
-        }
+    for dev in &devices.output_devices {
+        println!("  • {}", dev);
     }
     Ok(())
 }

@@ -369,6 +369,11 @@ impl Configuration {
         }
         Ok(())
     }
+
+    /// Return a fluent `ConfigurationBuilder` instance.
+    pub fn builder() -> ConfigurationBuilder {
+        ConfigurationBuilder::new()
+    }
 }
 
 /// Fluent builder for constructing `Configuration` instances with validation.
@@ -426,7 +431,28 @@ impl ConfigurationBuilder {
         self
     }
 
-    pub fn build(self) -> Result<Configuration, String> {
+    pub fn auto_accept(mut self, auto_accept: bool) -> Self {
+        self.config.client.auto_accept = auto_accept;
+        self
+    }
+
+    pub fn allow_echoback(mut self, allow_echoback: bool) -> Self {
+        self.config.audio.allow_echoback = allow_echoback;
+        self
+    }
+
+    pub fn input_device(mut self, input_device: impl Into<String>) -> Self {
+        self.config.audio.input_device = Some(input_device.into());
+        self
+    }
+
+    pub fn output_device(mut self, output_device: impl Into<String>) -> Self {
+        self.config.audio.output_device = Some(output_device.into());
+        self
+    }
+
+    pub fn build(mut self) -> Result<Configuration, String> {
+        self.config.normalize()?;
         self.config.validate()?;
         Ok(self.config)
     }
@@ -606,10 +632,14 @@ mod tests {
 
     #[test]
     fn test_configuration_builder() {
-        let config = ConfigurationBuilder::new()
+        let config = Configuration::builder()
             .server_port(18000)
             .sample_rate(44100)
             .channels(2)
+            .auto_accept(true)
+            .allow_echoback(true)
+            .input_device("test_mic")
+            .output_device("test_speaker")
             .stun_server("stun:stun.l.google.com:19302")
             .build()
             .expect("Build should succeed");
@@ -617,6 +647,10 @@ mod tests {
         assert_eq!(config.server.port(), 18000);
         assert_eq!(config.audio.sample_rate, 44100);
         assert_eq!(config.audio.channels, 2);
+        assert!(config.client.auto_accept);
+        assert!(config.audio.allow_echoback);
+        assert_eq!(config.audio.input_device.as_deref(), Some("test_mic"));
+        assert_eq!(config.audio.output_device.as_deref(), Some("test_speaker"));
         assert_eq!(config.network.stun_server, "stun:stun.l.google.com:19302");
 
         let url_config = ConfigurationBuilder::new()
