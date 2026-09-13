@@ -55,6 +55,8 @@ pub struct ClientSession {
     pub incoming_call_tx: Arc<Mutex<Option<IncomingCallSender>>>,
     /// Optional call notification sender for session state updates.
     pub call_notification_tx: Arc<Mutex<Option<CallNotificationSender>>>,
+    /// Optional pending incoming call response oneshot sender.
+    pub pending_call_response: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
     /// Atomic input audio energy level (0.0..=1.0 stored as f32::to_bits).
     pub input_level: Arc<AtomicU32>,
     /// Atomic output audio energy level (0.0..=1.0 stored as f32::to_bits).
@@ -105,6 +107,7 @@ impl ClientSession {
             data_channel: Arc::new(Mutex::new(None)),
             incoming_call_tx: Arc::new(Mutex::new(None)),
             call_notification_tx: Arc::new(Mutex::new(None)),
+            pending_call_response: Arc::new(Mutex::new(None)),
             input_level: Arc::new(AtomicU32::new(0)),
             output_level: Arc::new(AtomicU32::new(0)),
             is_muted: Arc::new(AtomicBool::new(false)),
@@ -133,6 +136,9 @@ impl ClientSession {
             *guard = None;
         }
         if let Ok(mut guard) = self.call_notification_tx.lock() {
+            *guard = None;
+        }
+        if let Ok(mut guard) = self.pending_call_response.lock() {
             *guard = None;
         }
         self.input_level.store(0, Ordering::Relaxed);
@@ -254,6 +260,25 @@ impl ClientSession {
     /// Subscribe to all real-time call notifications as a broadcast receiver.
     pub fn subscribe_events(&self) -> tokio::sync::broadcast::Receiver<CallNotification> {
         self.event_broadcaster.subscribe()
+    }
+
+    /// Set pending incoming call response sender.
+    pub fn set_pending_call_response(&self, tx: tokio::sync::oneshot::Sender<bool>) {
+        if let Ok(mut guard) = self.pending_call_response.lock() {
+            *guard = Some(tx);
+        }
+    }
+
+    /// Respond to pending incoming call request (accept = true, reject = false).
+    pub fn respond_pending_call(&self, accept: bool) -> bool {
+        if let Ok(mut guard) = self.pending_call_response.lock()
+            && let Some(tx) = guard.take()
+        {
+            let _ = tx.send(accept);
+            true
+        } else {
+            false
+        }
     }
 
     /// Send a call notification event to both the broadcast channel and registered mpsc handler.

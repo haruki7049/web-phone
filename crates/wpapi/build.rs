@@ -43,6 +43,8 @@ fn main() {
     std::fs::write(out_dir.join("wpapi.pc"), pc_content).expect("Unable to write wpapi.pc");
 
     println!("cargo:rerun-if-changed=src/lib.rs");
+    println!("cargo:rerun-if-changed=src/ffi.rs");
+    println!("cargo:rerun-if-changed=src/ffi/");
     println!("cargo:rerun-if-changed=cbindgen.toml");
     println!("cargo:rerun-if-changed=Cargo.toml");
 }

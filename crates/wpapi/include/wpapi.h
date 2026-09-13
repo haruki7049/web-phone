@@ -163,7 +163,7 @@ typedef enum WPAPILogLevel {
 
 /**
  * Event types emitted by wpapi session event callback.
- * 0 = EventAccepted, 1 = EventRejected, 2 = EventError, 3 = EventHangup
+ * 0 = EventAccepted, 1 = EventRejected, 2 = EventError, 3 = EventHangup, 4 = EventIncomingCall
  */
 typedef enum WPAPIEventType {
   /**
@@ -182,6 +182,10 @@ typedef enum WPAPIEventType {
    * Call was hung up / ended (3)
    */
   EventHangup = 3,
+  /**
+   * Incoming call request received (4)
+   */
+  EventIncomingCall = 4,
 } WPAPIEventType;
 
 /**
@@ -201,6 +205,14 @@ typedef void (*WPAPILogCallback)(enum WPAPILogLevel level, const char *message, 
 
 /**
  * Function pointer type for session event callbacks.
+ *
+ * # Threading & Pointer Lifetime Rules
+ * - **Threading**: The callback is invoked from a Rust Tokio background worker thread.
+ *   Binding authors for runtimes like Python (GIL), Node.js (V8 loop), or Erlang (NIF) MUST
+ *   bridge to the target language thread/event loop accordingly.
+ * - **Pointer Lifetime**: `peer_address` and `detail_message` are temporary null-terminated C strings
+ *   valid ONLY for the duration of the callback execution. Callers MUST copy these strings
+ *   immediately if they need to be stored.
  */
 typedef void (*WPAPIEventCallback)(enum WPAPIEventType event_type,
                                    const char *peer_address,
@@ -351,11 +363,40 @@ struct WPAPICallHandle *wpapi_room_call_start(const struct WPAPIConfig *config,
                                               const char *room_address);
 
 /**
+ * Send an asynchronous stop signal to an active call session without blocking.
+ * Call `wpapi_call_free` later to free the handle memory after completion.
+ * # Safety
+ * `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+ */
+int wpapi_call_request_stop(struct WPAPICallHandle *handle);
+
+/**
+ * Free a call session handle, blocking until worker thread cleanup completes if needed.
+ * # Safety
+ * `handle` must be a valid pointer created by `wpapi_call_start` or `wpapi_room_call_start`, or NULL.
+ */
+int wpapi_call_free(struct WPAPICallHandle *handle);
+
+/**
  * Stop and terminate an active call session, freeing its handle.
  * # Safety
- * `handle` must be a valid pointer.
+ * `handle` must be a valid pointer created by `wpapi_call_start` or `wpapi_room_call_start`, or NULL.
  */
 int wpapi_call_stop(struct WPAPICallHandle *handle);
+
+/**
+ * Accept a pending incoming call request for the call session.
+ * # Safety
+ * `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+ */
+int wpapi_call_accept(struct WPAPICallHandle *handle);
+
+/**
+ * Reject a pending incoming call request for the call session.
+ * # Safety
+ * `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+ */
+int wpapi_call_reject(struct WPAPICallHandle *handle);
 
 /**
  * Set microphone mute state for an active call session.

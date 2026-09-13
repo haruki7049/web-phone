@@ -14,7 +14,7 @@ use crate::call;
 use crate::config::Configuration;
 
 /// Event types emitted by wpapi session event callback.
-/// 0 = EventAccepted, 1 = EventRejected, 2 = EventError, 3 = EventHangup
+/// 0 = EventAccepted, 1 = EventRejected, 2 = EventError, 3 = EventHangup, 4 = EventIncomingCall
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum WPAPIEventType {
@@ -26,6 +26,8 @@ pub enum WPAPIEventType {
     EventError = 2,
     /// Call was hung up / ended (3)
     EventHangup = 3,
+    /// Incoming call request received (4)
+    EventIncomingCall = 4,
 }
 
 /// Function pointer type for session event callbacks.
@@ -306,7 +308,9 @@ pub unsafe extern "C" fn wpapi_call_start(
         };
 
         let (stop_tx, stop_rx) = oneshot::channel::<()>();
+        let (incoming_tx, mut incoming_rx) = tokio::sync::mpsc::channel(16);
         let session = Arc::new(crate::session::ClientSession::new());
+        session.set_incoming_call_handler(incoming_tx);
         let session_clone = session.clone();
 
         let thread_handle = spawn(move || {
@@ -325,6 +329,31 @@ pub unsafe extern "C" fn wpapi_call_start(
 
             rt.block_on(async move {
                 if let Some(cb_state) = event_cb_state {
+                    let session_for_incoming = session_clone.clone();
+                    tokio::spawn(async move {
+                        let cb_fn: WPAPIEventCallback =
+                            unsafe { std::mem::transmute(cb_state.callback) };
+                        let user_data_usize = cb_state.user_data;
+                        if let Some(cb) = cb_fn {
+                            while let Some((caller_addr, resp_tx)) = incoming_rx.recv().await {
+                                session_for_incoming.set_pending_call_response(resp_tx);
+                                let addr_c =
+                                    CString::new(caller_addr.to_string()).unwrap_or_default();
+                                let msg_c =
+                                    CString::new("Incoming call request").unwrap_or_default();
+                                let raw_ptr = user_data_usize as *mut std::ffi::c_void;
+                                unsafe {
+                                    cb(
+                                        WPAPIEventType::EventIncomingCall,
+                                        addr_c.as_ptr(),
+                                        msg_c.as_ptr(),
+                                        raw_ptr,
+                                    );
+                                }
+                            }
+                        }
+                    });
+
                     tokio::spawn(async move {
                         let cb_fn: WPAPIEventCallback =
                             unsafe { std::mem::transmute(cb_state.callback) };
@@ -551,15 +580,34 @@ pub unsafe extern "C" fn wpapi_room_call_start(
     .unwrap_or(std::ptr::null_mut())
 }
 
-/// Stop and terminate an active call session, freeing its handle.
+/// Send an asynchronous stop signal to an active call session without blocking.
+/// Call `wpapi_call_free` later to free the handle memory after completion.
 /// # Safety
-/// `handle` must be a valid pointer.
+/// `handle` must be a valid non-null pointer to `WPAPICallHandle`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn wpapi_call_stop(handle: *mut WPAPICallHandle) -> c_int {
+pub unsafe extern "C" fn wpapi_call_request_stop(handle: *mut WPAPICallHandle) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
         if handle.is_null() {
             set_last_error("Null handle argument");
             return -1;
+        }
+        let call_handle = unsafe { &mut *handle };
+        if let Some(stop_tx) = call_handle.stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+        0
+    }))
+    .unwrap_or(-1)
+}
+
+/// Free a call session handle, blocking until worker thread cleanup completes if needed.
+/// # Safety
+/// `handle` must be a valid pointer created by `wpapi_call_start` or `wpapi_room_call_start`, or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpapi_call_free(handle: *mut WPAPICallHandle) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if handle.is_null() {
+            return 0;
         }
         let mut call_handle = unsafe { Box::from_raw(handle) };
         if let Some(stop_tx) = call_handle.stop_tx.take() {
@@ -569,6 +617,63 @@ pub unsafe extern "C" fn wpapi_call_stop(handle: *mut WPAPICallHandle) -> c_int 
             let _ = th.join();
         }
         0
+    }))
+    .unwrap_or(-1)
+}
+
+/// Stop and terminate an active call session, freeing its handle.
+/// # Safety
+/// `handle` must be a valid pointer created by `wpapi_call_start` or `wpapi_room_call_start`, or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpapi_call_stop(handle: *mut WPAPICallHandle) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if handle.is_null() {
+            set_last_error("Null handle argument");
+            return -1;
+        }
+        unsafe { wpapi_call_free(handle) }
+    }))
+    .unwrap_or(-1)
+}
+
+/// Accept a pending incoming call request for the call session.
+/// # Safety
+/// `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpapi_call_accept(handle: *mut WPAPICallHandle) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if handle.is_null() {
+            set_last_error("Null handle argument");
+            return -1;
+        }
+        let call_handle = unsafe { &*handle };
+        if call_handle.session.respond_pending_call(true) {
+            0
+        } else {
+            set_last_error("No pending incoming call request to accept");
+            -1
+        }
+    }))
+    .unwrap_or(-1)
+}
+
+/// Reject a pending incoming call request for the call session.
+/// # Safety
+/// `handle` must be a valid non-null pointer to `WPAPICallHandle`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpapi_call_reject(handle: *mut WPAPICallHandle) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if handle.is_null() {
+            set_last_error("Null handle argument");
+            return -1;
+        }
+        let call_handle = unsafe { &*handle };
+        if call_handle.session.respond_pending_call(false) {
+            0
+        } else {
+            set_last_error("No pending incoming call request to reject");
+            -1
+        }
     }))
     .unwrap_or(-1)
 }
@@ -758,6 +863,49 @@ mod tests {
             assert_eq!(wpapi_call_get_output_level(handle_ptr), 0.42);
 
             let _ = Box::from_raw(handle_ptr);
+        }
+    }
+
+    #[test]
+    fn test_ffi_async_stop_and_call_prompt() {
+        unsafe {
+            // Null pointer checks
+            assert_eq!(wpapi_call_request_stop(std::ptr::null_mut()), -1);
+            assert_eq!(wpapi_call_free(std::ptr::null_mut()), 0);
+            assert_eq!(wpapi_call_accept(std::ptr::null_mut()), -1);
+            assert_eq!(wpapi_call_reject(std::ptr::null_mut()), -1);
+
+            let session = Arc::new(crate::session::ClientSession::new());
+            let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+            let handle = Box::new(WPAPICallHandle {
+                stop_tx: Some(tx),
+                thread_handle: None,
+                session: session.clone(),
+            });
+            let handle_ptr = Box::into_raw(handle);
+
+            // No pending response error test
+            assert_eq!(wpapi_call_accept(handle_ptr), -1);
+            assert_eq!(wpapi_call_reject(handle_ptr), -1);
+
+            // Pending response accept test
+            let (prompt_tx, prompt_rx) = tokio::sync::oneshot::channel::<bool>();
+            session.set_pending_call_response(prompt_tx);
+            assert_eq!(wpapi_call_accept(handle_ptr), 0);
+            assert_eq!(prompt_rx.blocking_recv(), Ok(true));
+
+            // Pending response reject test
+            let (prompt_tx2, prompt_rx2) = tokio::sync::oneshot::channel::<bool>();
+            session.set_pending_call_response(prompt_tx2);
+            assert_eq!(wpapi_call_reject(handle_ptr), 0);
+            assert_eq!(prompt_rx2.blocking_recv(), Ok(false));
+
+            // Non-blocking request stop test
+            assert_eq!(wpapi_call_request_stop(handle_ptr), 0);
+            assert_eq!(rx.blocking_recv(), Ok(()));
+
+            // Free handle
+            assert_eq!(wpapi_call_free(handle_ptr), 0);
         }
     }
 }
