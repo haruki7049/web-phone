@@ -1,3 +1,5 @@
+//! Command-line client binary entry point for `wpclient`.
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::net::IpAddr;

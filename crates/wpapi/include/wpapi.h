@@ -83,24 +83,54 @@
  */
 #define MIN_LEN_CLIENT_ASSIGNMENT (1 + LEN_CLIENT_ID)
 
+/**
+ * Full length required for ClientAssignment packet (41 bytes).
+ */
 #define FULL_LEN_CLIENT_ASSIGNMENT ((1 + LEN_CLIENT_ID) + LEN_USER_ADDR)
 
+/**
+ * Minimum length required for ClientTargetedAudio packet (34 bytes).
+ */
 #define MIN_LEN_CLIENT_TARGETED_AUDIO ((1 + LEN_USER_ADDR) + 1)
 
+/**
+ * Minimum length required for ServerTargetedAudio packet (74 bytes).
+ */
 #define MIN_LEN_SERVER_TARGETED_AUDIO ((((1 + LEN_USER_ADDR) + LEN_CLIENT_ID) + LEN_USER_ADDR) + 1)
 
+/**
+ * Minimum length required for PeerTargetedAudio packet (83 bytes).
+ */
 #define MIN_LEN_PEER_TARGETED_AUDIO ((((((1 + LEN_CLIENT_ID) + LEN_CLIENT_ID) + LEN_USER_ADDR) + LEN_USER_ADDR) + 1) + 1)
 
+/**
+ * Minimum length required for CallRequest packet (41 bytes).
+ */
 #define MIN_LEN_CALL_REQUEST ((1 + LEN_CLIENT_ID) + LEN_USER_ADDR)
 
+/**
+ * Minimum length required for address-only response packets (33 bytes).
+ */
 #define MIN_LEN_ADDRESS_ONLY_PACKET (1 + LEN_USER_ADDR)
 
+/**
+ * Minimum length required for RoomStateNotification packet (37 bytes).
+ */
 #define MIN_LEN_ROOM_STATE_NOTIFICATION ((1 + LEN_USER_ADDR) + LEN_PARTICIPANT_COUNT)
 
+/**
+ * Minimum length required for Ping/Pong packets (9 bytes).
+ */
 #define MIN_LEN_PING_PONG (1 + LEN_TIMESTAMP)
 
+/**
+ * Minimum length required for VideoFrameData packet (34 bytes).
+ */
 #define MIN_LEN_VIDEO_FRAME_DATA ((1 + LEN_USER_ADDR) + 1)
 
+/**
+ * Minimum length required for RoomGroupAudioE2EE packet (35 bytes).
+ */
 #define MIN_LEN_ROOM_GROUP_AUDIO_E2EE (((1 + LEN_USER_ADDR) + 1) + 1)
 
 /**
@@ -113,9 +143,21 @@
  * 0 = DEBUG, 1 = INFO, 2 = WARN, 3 = ERROR
  */
 typedef enum WPAPILogLevel {
+  /**
+   * Debug severity level (0)
+   */
   Debug = 0,
+  /**
+   * Info severity level (1)
+   */
   Info = 1,
+  /**
+   * Warn severity level (2)
+   */
   Warn = 2,
+  /**
+   * Error severity level (3)
+   */
   Error = 3,
 } WPAPILogLevel;
 

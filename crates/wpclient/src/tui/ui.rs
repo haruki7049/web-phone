@@ -10,6 +10,7 @@ use ratatui::{
 
 use super::app::*;
 
+/// Render main TUI layout including header, body panels, footer controls, and modal prompts.
 pub fn render_ui(f: &mut Frame, app: &TuiApp) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)

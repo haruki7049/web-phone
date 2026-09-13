@@ -112,7 +112,9 @@ use serde::{Deserialize, Serialize};
 /// Available audio input (microphone) and output (speaker) device names listed by CPAL host.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AudioDevices {
+    /// List of available microphone input device names.
     pub input_devices: Vec<String>,
+    /// List of available speaker output device names.
     pub output_devices: Vec<String>,
 }
 

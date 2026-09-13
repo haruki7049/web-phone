@@ -13,9 +13,13 @@ type HmacSha1 = Hmac<Sha1>;
 /// Ephemeral TURN Server credential payload (WPIP-10).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnCredential {
+    /// List of TURN server URLs.
     pub urls: Vec<String>,
+    /// Ephemeral TURN username (`<expiration_timestamp>:<opaque_user_id>`).
     pub username: String,
+    /// Base64 encoded HMAC-SHA1 signature credential string.
     pub credential: String,
+    /// Expiration timestamp in seconds since Unix epoch.
     pub expiration_timestamp: u64,
 }
 

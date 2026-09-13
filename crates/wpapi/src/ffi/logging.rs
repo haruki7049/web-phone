@@ -12,9 +12,13 @@ use tracing_subscriber::util::SubscriberInitExt;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum WPAPILogLevel {
+    /// Debug severity level (0)
     Debug = 0,
+    /// Info severity level (1)
     Info = 1,
+    /// Warn severity level (2)
     Warn = 2,
+    /// Error severity level (3)
     Error = 3,
 }
 

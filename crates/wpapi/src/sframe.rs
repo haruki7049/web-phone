@@ -9,15 +9,19 @@ use thiserror::Error;
 /// SFrame encryption and decryption errors.
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum SFrameError {
+    /// Encryption operation failed.
     #[error("Encryption failed: {0}")]
     EncryptionFailed(String),
 
+    /// Decryption operation failed due to invalid key or corrupted payload.
     #[error("Decryption failed: corrupted payload or invalid key")]
     DecryptionFailed,
 
+    /// Key length is invalid.
     #[error("Invalid key size: expected 32 bytes")]
     InvalidKeySize,
 
+    /// Payload frame format is invalid.
     #[error("Invalid payload format")]
     InvalidPayloadFormat,
 }

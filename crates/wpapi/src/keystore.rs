@@ -22,19 +22,28 @@ pub fn get_default_keystore_path() -> PathBuf {
 /// Argon2id KDF parameters structure for JSON storage.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KdfParams {
+    /// Base64 encoded salt byte array.
     pub salt: String,
+    /// Memory limit parameter in KiB.
     pub mem_limit_kib: u32,
+    /// Number of operation passes (iterations).
     pub ops_limit: u32,
+    /// Degree of parallelism (threads).
     pub parallelism: u32,
 }
 
 /// Crypto metadata structure for JSON storage.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CryptoMeta {
+    /// Key Derivation Function algorithm name (e.g. `argon2id`).
     pub kdf: String,
+    /// KDF configuration parameters.
     pub kdf_params: KdfParams,
+    /// Symmetric cipher algorithm name (e.g. `aes-256-gcm`).
     pub cipher: String,
+    /// Base64 encoded initialization vector / nonce.
     pub nonce: String,
+    /// Base64 encoded encrypted secret key ciphertext.
     pub ciphertext: String,
 }
 
@@ -45,10 +54,14 @@ fn default_key_type() -> String {
 /// Encrypted Client Key Store JSON format (WPIP-14).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EncryptedKeyStore {
+    /// Format version number (must be 1).
     pub version: u32,
+    /// Target user public key hex address.
     pub user_address: String,
+    /// Cryptographic key type (`ed25519` or `secp256k1`).
     #[serde(default = "default_key_type")]
     pub key_type: String,
+    /// Cryptographic metadata and encrypted ciphertext payload.
     pub crypto: CryptoMeta,
 }
 
@@ -57,42 +70,58 @@ use thiserror::Error;
 /// Encrypted keystore storage and decryption errors (WPIP-14).
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum KeyStoreError {
+    /// File I/O failure.
     #[error("File I/O error: {0}")]
     Io(String),
 
+    /// JSON serialization or deserialization failure.
     #[error("JSON format error: {0}")]
     Json(String),
 
+    /// Passphrase decryption failure.
     #[error("Decryption failed: Incorrect passphrase or corrupted keystore")]
     InvalidPassphrase,
 
+    /// Unsupported keystore version.
     #[error("Unsupported keystore version: {0}")]
     UnsupportedVersion(u32),
 
+    /// Unsupported KDF algorithm name.
     #[error("Unsupported KDF algorithm: {0}")]
     UnsupportedKdf(String),
 
+    /// Unsupported cipher algorithm name.
     #[error("Unsupported cipher algorithm: {0}")]
     UnsupportedCipher(String),
 
+    /// Invalid Base64 string in keystore field.
     #[error("Invalid Base64 encoding in field '{field}'")]
-    InvalidBase64 { field: &'static str },
+    InvalidBase64 {
+        /// Name of the field containing invalid Base64.
+        field: &'static str,
+    },
 
+    /// Nonce length is invalid.
     #[error("Invalid nonce length: expected 12 bytes")]
     InvalidNonceLength,
 
+    /// Argon2id KDF operation failure.
     #[error("Argon2id KDF error: {0}")]
     KdfError(String),
 
+    /// Cipher encryption operation failure.
     #[error("Encryption error: {0}")]
     EncryptionError(String),
 
+    /// Decrypted public address mismatch.
     #[error("Decrypted public key does not match keystore user_address")]
     AddressMismatch,
 
+    /// Decrypted key payload length is invalid.
     #[error("Invalid keypair payload length")]
     InvalidPayloadLength,
 
+    /// Keypair generation failure.
     #[error("Keypair creation failed: {0}")]
     KeypairError(String),
 }

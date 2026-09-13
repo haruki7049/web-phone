@@ -11,9 +11,13 @@ use tokio::sync::mpsc;
 /// Call status notifications emitted by `webrtc_session`.
 #[derive(Debug, Clone)]
 pub enum CallNotification {
+    /// Call request was accepted by peer user.
     Accepted(crate::address::UserAddress),
+    /// Call request was rejected by peer user.
     Rejected(crate::address::UserAddress),
+    /// Call connection error occurred.
     Error(crate::address::UserAddress, String),
+    /// Call was hung up / ended.
     Hangup(crate::address::UserAddress),
 }
 

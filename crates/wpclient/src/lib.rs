@@ -1,3 +1,5 @@
+//! CLI client library and binary module re-exports.
+
 pub mod commands;
 pub mod error;
 pub mod tui;

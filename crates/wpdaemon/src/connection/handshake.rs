@@ -80,8 +80,11 @@ impl PeerConnectionEventHandler for ClientConnectionHandler {
 /// SDP Answer response payload containing session description and optional TURN credentials (WPIP-10).
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct SdpAnswerResponse {
+    /// SDP type string (e.g. `answer`).
     pub r#type: String,
+    /// SDP description string payload.
     pub sdp: String,
+    /// Optional list of ephemeral TURN server credentials.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ice_servers: Option<Vec<wpapi::TurnCredential>>,
 }

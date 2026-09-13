@@ -67,6 +67,7 @@ pub struct ClientRegistry {
 }
 
 impl ClientRegistry {
+    /// Create a new empty `ClientRegistry`.
     pub fn new() -> Self {
         Self::default()
     }

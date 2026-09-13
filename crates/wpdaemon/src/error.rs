@@ -10,27 +10,35 @@ use wpapi::AuthError;
 /// Structured signaling error types for wpdaemon HTTP handlers.
 #[derive(Debug, Error)]
 pub enum SignalingError {
+    /// Maximum client connection limit reached (503 Service Unavailable).
     #[error("503 Service Unavailable: Maximum concurrent connections reached ({0})")]
     MaxConnectionsReached(usize),
 
+    /// Maximum mesh peer connection limit reached (503 Service Unavailable).
     #[error("503 Service Unavailable: Maximum mesh peer connections reached ({0})")]
     MaxMeshPeersReached(usize),
 
+    /// Authentication failure or missing header (401 Unauthorized).
     #[error("401 Unauthorized: {0}")]
     Unauthorized(#[from] AuthError),
 
+    /// Invalid SDP offer format or payload (400 Bad Request).
     #[error("400 Bad Request: Invalid SDP offer: {0}")]
     InvalidSdpOffer(String),
 
+    /// Internal daemon server error (500 Internal Server Error).
     #[error("500 Internal Server Error: {0}")]
     InternalError(String),
 
+    /// Short ID prefix match is ambiguous (409 Conflict).
     #[error("409 Conflict: Address prefix is ambiguous (matches multiple active clients)")]
     AddressAmbiguous,
 
+    /// Resource or address not found (404 Not Found).
     #[error("404 Not Found: {0}")]
     NotFound(String),
 
+    /// Client request rate limit exceeded (429 Too Many Requests).
     #[error("429 Too Many Requests: Rate limit exceeded")]
     RateLimitExceeded,
 }

@@ -383,10 +383,12 @@ pub struct ConfigurationBuilder {
 }
 
 impl ConfigurationBuilder {
+    /// Create a new `ConfigurationBuilder` with default settings.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Set server IP address.
     pub fn server_ip(mut self, ip: IpAddr) -> Self {
         let port = self.config.server.port();
         self.config.server.address = match ip {
@@ -396,61 +398,73 @@ impl ConfigurationBuilder {
         self
     }
 
+    /// Set server port.
     pub fn server_port(mut self, port: u16) -> Self {
         self.config.server.set_port(port);
         self
     }
 
+    /// Set server host name override.
     pub fn server_host(mut self, host: impl Into<String>) -> Self {
         self.config.server.host = Some(host.into());
         self
     }
 
+    /// Set server URL string (e.g. `http://127.0.0.1:15000` or `https://daemon.example.com:8443`).
     pub fn server_url(mut self, url: impl AsRef<str>) -> Result<Self, String> {
         self.config.parse_and_apply_server_url(url.as_ref())?;
         Ok(self)
     }
 
+    /// Set STUN server URL.
     pub fn stun_server(mut self, stun: impl Into<String>) -> Self {
         self.config.network.stun_server = stun.into();
         self
     }
 
+    /// Set audio sample rate in Hz.
     pub fn sample_rate(mut self, rate: u32) -> Self {
         self.config.audio.sample_rate = rate;
         self
     }
 
+    /// Set number of audio channels.
     pub fn channels(mut self, channels: u16) -> Self {
         self.config.audio.channels = channels;
         self
     }
 
+    /// Set use TLS flag for server connection.
     pub fn use_tls(mut self, use_tls: bool) -> Self {
         self.config.server.use_tls = use_tls;
         self
     }
 
+    /// Set auto-accept incoming calls flag.
     pub fn auto_accept(mut self, auto_accept: bool) -> Self {
         self.config.client.auto_accept = auto_accept;
         self
     }
 
+    /// Set allow echoback flag.
     pub fn allow_echoback(mut self, allow_echoback: bool) -> Self {
         self.config.audio.allow_echoback = allow_echoback;
         self
     }
 
+    /// Set microphone input device substring filter.
     pub fn input_device(mut self, input_device: impl Into<String>) -> Self {
         self.config.audio.input_device = Some(input_device.into());
         self
     }
 
+    /// Set speaker output device substring filter.
     pub fn output_device(mut self, output_device: impl Into<String>) -> Self {
         self.config.audio.output_device = Some(output_device.into());
         self
     }
 
+    /// Build and validate `Configuration`.
     pub fn build(mut self) -> Result<Configuration, String> {
         self.config.normalize()?;
         self.config.validate()?;

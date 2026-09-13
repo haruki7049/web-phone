@@ -7,79 +7,127 @@ use wpapi::{Configuration, UserAddress, session::ClientSession};
 /// Background events sent to the TUI event loop.
 #[derive(Debug)]
 pub enum AppEvent {
+    /// Temporary UserAddress assigned by server.
     ServerAddressAssigned(UserAddress),
+    /// Active session ended with result message or error.
     SessionEnded {
+        /// Session identifier.
         session_id: u64,
+        /// Result of session execution.
         result: Result<String, String>,
     },
+    /// Call request accepted by peer.
     CallAccepted {
+        /// Session identifier.
         session_id: u64,
+        /// Target peer address string.
         target: String,
     },
+    /// Call request rejected by peer.
     CallRejected {
+        /// Session identifier.
         session_id: u64,
+        /// Target peer address string.
         target: String,
+        /// Reason for rejection.
         reason: String,
     },
+    /// Active call ended by remote peer.
     CallEnded {
+        /// Target peer address string.
         target: String,
     },
+    /// Incoming call prompt request.
     IncomingCall {
+        /// Short ID of caller.
         from: String,
+        /// Oneshot channel to accept (true) or reject (false).
         responder: oneshot::Sender<bool>,
     },
+    /// List of registered user addresses retrieved from daemon.
     RegisteredAddresses(Vec<UserAddress>),
+    /// Microphone input and speaker output energy levels.
     AudioLevels {
+        /// Input audio RMS level (0.0..=1.0).
         input: f32,
+        /// Output audio RMS level (0.0..=1.0).
         output: f32,
     },
+    /// Log message line to record.
     Log(String),
 }
 
 /// UI Interaction Modes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputMode {
+    /// Normal navigation mode.
     Normal,
+    /// Entering target user address for 1-to-1 call.
     CallInput,
+    /// Entering room ID for SFU group call.
     RoomInput,
+    /// Prompting for incoming call accept/reject.
     IncomingCall,
 }
 
 /// Connection and call state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallState {
+    /// Client idle and disconnected.
     Idle,
+    /// Standby mode listening for incoming calls.
     Standby,
+    /// Connecting to 1-to-1 call target.
     Connecting(String),
+    /// Active 1-to-1 call session with target user.
     InCall(String),
+    /// Active SFU group room session.
     InRoom(String),
 }
 
 /// Application state for the TUI client.
 pub struct TuiApp {
+    /// Client configuration settings.
     pub config: Configuration,
+    /// Current UI input mode.
     pub input_mode: InputMode,
+    /// Current call/connection state.
     pub call_state: CallState,
+    /// Counter for active session IDs.
     pub current_session_id: u64,
+    /// Local client user address.
     pub my_address: Option<UserAddress>,
+    /// Text input buffer for modal prompts.
     pub input_buffer: String,
+    /// Activity log message queue.
     pub logs: VecDeque<String>,
+    /// List of registered peer addresses.
     pub registered_addresses: Vec<UserAddress>,
+    /// Microphone mute toggle status.
     pub is_muted: bool,
+    /// Measured input audio level.
     pub input_level: f32,
+    /// Measured output audio level.
     pub output_level: f32,
+    /// Incoming call caller ID if prompting.
     pub incoming_from: Option<String>,
+    /// Incoming call responder channel sender.
     pub incoming_responder: Option<oneshot::Sender<bool>>,
+    /// Cancellation channel sender for standby task.
     pub cancel_tx: Option<oneshot::Sender<()>>,
+    /// Active client session handle.
     pub session: Option<ClientSession>,
+    /// Application event channel sender.
     pub event_tx: mpsc::Sender<AppEvent>,
 }
 
 impl TuiApp {
+    /// Create a new `TuiApp` state with default identity keypair.
     pub fn new(config: Configuration, event_tx: mpsc::Sender<AppEvent>) -> Self {
         Self::with_keypair(config, event_tx, None)
     }
 
+    /// Create a new `TuiApp` state with optional custom identity keypair.
     pub fn with_keypair(
         config: Configuration,
         event_tx: mpsc::Sender<AppEvent>,
@@ -116,6 +164,7 @@ impl TuiApp {
         app
     }
 
+    /// Add a log message string to the activity log queue.
     pub fn add_log(&mut self, msg: String) {
         if self.logs.len() >= 100 {
             self.logs.pop_front();
@@ -123,6 +172,7 @@ impl TuiApp {
         self.logs.push_back(msg);
     }
 
+    /// Increment and return the next session ID.
     pub fn next_session_id(&mut self) -> u64 {
         self.current_session_id += 1;
         self.current_session_id

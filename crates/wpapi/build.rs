@@ -1,3 +1,5 @@
+//! Build script for `wpapi` C header generation.
+
 extern crate cbindgen;
 
 use std::env;

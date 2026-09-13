@@ -18,45 +18,69 @@ pub const MAX_TIMESTAMP_DRIFT_SECS: u64 = 300;
 /// Authentication and authorization errors per WPIP-02 / WPIP-10 / WPIP-16.
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum AuthError {
+    /// Invalid authorization scheme string.
     #[error("Invalid authorization scheme: {0}")]
     InvalidScheme(String),
 
+    /// Invalid authorization header format.
     #[error("Invalid authorization header format (expected PubKey:Timestamp:Sig)")]
     InvalidHeaderFormat,
 
+    /// Invalid timestamp format in authorization header.
     #[error("Invalid timestamp in authorization header")]
     InvalidTimestamp,
 
+    /// Timestamp drift exceeds allowable window.
     #[error("Authorization timestamp drift too large ({diff}s > {max}s)")]
-    TimestampDrift { diff: u64, max: u64 },
+    TimestampDrift {
+        /// Measured difference in seconds.
+        diff: u64,
+        /// Maximum allowed difference in seconds.
+        max: u64,
+    },
 
+    /// Invalid Ed25519 signature.
     #[error("Invalid Ed25519 cryptographic signature")]
     InvalidEd25519Signature,
 
+    /// Invalid secp256k1 public key format.
     #[error("Invalid secp256k1 public key format")]
     InvalidSecp256k1Key,
 
+    /// Invalid secp256k1 Schnorr signature.
     #[error("Invalid secp256k1 Schnorr cryptographic signature")]
     InvalidSecp256k1Signature,
 
+    /// Invalid hex encoding.
     #[error("Invalid hex encoding: {0}")]
     InvalidHex(String),
 
+    /// Replay attack detected.
     #[error("Replay attack detected: signature already used")]
     ReplayDetected,
 
+    /// Invalid TURN username format.
     #[error("Invalid TURN username format (expected timestamp:user_address_hex)")]
     InvalidTurnUsernameFormat,
 
+    /// Ephemeral TURN credential has expired.
     #[error("TURN credential expired (expired at {expired_at}, current time {current_time})")]
-    TurnCredentialExpired { expired_at: u64, current_time: u64 },
+    TurnCredentialExpired {
+        /// Expiration timestamp in seconds.
+        expired_at: u64,
+        /// Current timestamp in seconds.
+        current_time: u64,
+    },
 
+    /// Invalid TURN signature.
     #[error("Invalid TURN credential signature")]
     InvalidTurnSignature,
 
+    /// Invalid Base64 encoding in TURN credential.
     #[error("Invalid Base64 encoding in TURN credential")]
     InvalidTurnBase64,
 
+    /// Authorization header is missing.
     #[error("Authorization header required")]
     MissingHeader,
 }
@@ -71,6 +95,7 @@ pub struct AntiReplayCache {
 }
 
 impl AntiReplayCache {
+    /// Create a new empty `AntiReplayCache`.
     pub fn new() -> Self {
         Self {
             signatures: Arc::new(RwLock::new(HashMap::new())),

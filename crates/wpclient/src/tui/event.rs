@@ -8,24 +8,43 @@ use super::app::*;
 /// User actions triggered via TUI keyboard input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppAction {
+    /// Exit the application.
     Quit,
+    /// Enter standby mode.
     StartStandby,
+    /// Exit standby mode.
     StopStandby,
+    /// Renew identity keypair.
     RenewIdentity,
+    /// Enter 1-to-1 call prompt input mode.
     EnterCallInput,
+    /// Enter SFU room ID input mode.
     EnterRoomInput,
+    /// Toggle microphone mute state.
     ToggleMute,
+    /// Toggle auto-accept incoming calls setting.
     ToggleAutoAccept,
+    /// Toggle local audio echoback setting.
     ToggleEchoback,
+    /// Hang up current call/session.
     Hangup,
+    /// Fetch registered user addresses from daemon.
     FetchRegisteredAddresses,
+    /// Submit 1-to-1 call target input.
     SubmitCallInput,
+    /// Submit SFU room ID input.
     SubmitRoomInput,
+    /// Cancel current input mode.
     CancelInputMode,
+    /// Append character to input buffer.
     InputChar(char),
+    /// Remove last character from input buffer.
     BackspaceInput,
+    /// Accept incoming call prompt.
     AcceptIncomingCall,
+    /// Reject incoming call prompt.
     RejectIncomingCall,
+    /// No action.
     None,
 }
 

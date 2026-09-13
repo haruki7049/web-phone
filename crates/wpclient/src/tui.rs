@@ -31,6 +31,7 @@ pub async fn run_tui(config: Configuration) -> Result<()> {
 pub struct TerminalGuard;
 
 impl TerminalGuard {
+    /// Initialize raw terminal mode and enter alternate screen with panic hook restoration.
     pub fn new() -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = stdout();

@@ -155,6 +155,7 @@ pub struct DataChannelRateLimiter {
 }
 
 impl DataChannelRateLimiter {
+    /// Create a new `DataChannelRateLimiter` with specified refill rate and maximum token capacity.
     pub fn new(refill_rate: f64, max_tokens: f64) -> Self {
         Self {
             refill_rate,
@@ -163,6 +164,7 @@ impl DataChannelRateLimiter {
         }
     }
 
+    /// Check if a packet from `client_id` can be processed and consume 1 token if available.
     pub fn check_and_consume(&self, client_id: u64) -> bool {
         let now = Instant::now();
         let mut buckets = self.buckets.lock().unwrap();
@@ -188,6 +190,7 @@ impl DataChannelRateLimiter {
         }
     }
 
+    /// Remove stored token bucket entry for a disconnected client.
     pub fn remove_client(&self, client_id: u64) {
         let mut buckets = self.buckets.lock().unwrap();
         buckets.remove(&client_id);
