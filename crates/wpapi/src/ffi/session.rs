@@ -1,6 +1,6 @@
 //! Session control FFI bindings for `wpapi`.
 
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::str::FromStr;
@@ -12,8 +12,42 @@ use crate::address::UserAddress;
 use crate::call;
 use crate::config::Configuration;
 
+/// Event types emitted by wpapi session event callback.
+/// 0 = EventAccepted, 1 = EventRejected, 2 = EventError, 3 = EventHangup
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum WPAPIEventType {
+    /// Call request was accepted (0)
+    EventAccepted = 0,
+    /// Call request was rejected (1)
+    EventRejected = 1,
+    /// Call connection error occurred (2)
+    EventError = 2,
+    /// Call was hung up / ended (3)
+    EventHangup = 3,
+}
+
+/// Function pointer type for session event callbacks.
+pub type WPAPIEventCallback = Option<
+    unsafe extern "C" fn(
+        event_type: WPAPIEventType,
+        peer_address: *const c_char,
+        detail_message: *const c_char,
+        user_data: *mut std::ffi::c_void,
+    ),
+>;
+
+#[derive(Clone, Copy)]
+pub(crate) struct EventCallbackState {
+    pub callback: usize,
+    pub user_data: usize,
+}
+
+unsafe impl Send for EventCallbackState {}
+unsafe impl Sync for EventCallbackState {}
+
 /// Opaque configuration handle for wpclient.
-pub struct WPAPIConfig(pub Configuration);
+pub struct WPAPIConfig(pub Configuration, pub(crate) Option<EventCallbackState>);
 
 /// Opaque handle representing an active audio call session.
 pub struct WPAPICallHandle {
@@ -25,7 +59,7 @@ pub struct WPAPICallHandle {
 #[unsafe(no_mangle)]
 pub extern "C" fn wpapi_config_new() -> *mut WPAPIConfig {
     catch_unwind(AssertUnwindSafe(|| {
-        Box::into_raw(Box::new(WPAPIConfig(Configuration::default())))
+        Box::into_raw(Box::new(WPAPIConfig(Configuration::default(), None)))
     }))
     .unwrap_or(std::ptr::null_mut())
 }
@@ -207,6 +241,30 @@ pub unsafe extern "C" fn wpapi_config_set_audio_devices(
     .unwrap_or(-1)
 }
 
+/// Register a custom C session event callback function on the configuration handle.
+/// # Safety
+/// `config` must be a valid non-null pointer. `user_data` must remain valid during session execution.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wpapi_config_set_event_callback(
+    config: *mut WPAPIConfig,
+    callback: WPAPIEventCallback,
+    user_data: *mut std::ffi::c_void,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        if config.is_null() {
+            set_last_error("Null pointer argument");
+            return -1;
+        }
+        let cfg = unsafe { &mut *config };
+        cfg.1 = callback.map(|cb| EventCallbackState {
+            callback: cb as usize,
+            user_data: user_data as usize,
+        });
+        0
+    }))
+    .unwrap_or(-1)
+}
+
 /// Start an audio call session in a background worker thread.
 /// # Safety
 /// `config` must be a valid non-null pointer.
@@ -221,6 +279,7 @@ pub unsafe extern "C" fn wpapi_call_start(
             return std::ptr::null_mut();
         }
         let cfg = unsafe { (*config).0.clone() };
+        let event_cb_state = unsafe { (*config).1 };
         let target_opt = if !target_address.is_null() {
             match unsafe { CStr::from_ptr(target_address) }.to_str() {
                 Ok(s) if !s.trim().is_empty() => match UserAddress::from_str(s) {
@@ -250,8 +309,79 @@ pub unsafe extern "C" fn wpapi_call_start(
                 }
             };
 
+            let session = crate::session::ClientSession::new();
+            let mut event_rx = session.subscribe_events();
+
             rt.block_on(async move {
-                if let Err(e) = call::start_call_with_cancel(&cfg, target_opt, Some(stop_rx)).await
+                if let Some(cb_state) = event_cb_state {
+                    tokio::spawn(async move {
+                        let cb_fn: WPAPIEventCallback =
+                            unsafe { std::mem::transmute(cb_state.callback) };
+                        let user_data_usize = cb_state.user_data;
+                        if let Some(cb) = cb_fn {
+                            while let Ok(notification) = event_rx.recv().await {
+                                let raw_ptr = user_data_usize as *mut std::ffi::c_void;
+                                match notification {
+                                    crate::session::CallNotification::Accepted(addr) => {
+                                        let addr_c =
+                                            CString::new(addr.to_string()).unwrap_or_default();
+                                        let msg_c = CString::new("").unwrap_or_default();
+                                        unsafe {
+                                            cb(
+                                                WPAPIEventType::EventAccepted,
+                                                addr_c.as_ptr(),
+                                                msg_c.as_ptr(),
+                                                raw_ptr,
+                                            );
+                                        }
+                                    }
+                                    crate::session::CallNotification::Rejected(addr) => {
+                                        let addr_c =
+                                            CString::new(addr.to_string()).unwrap_or_default();
+                                        let msg_c = CString::new("").unwrap_or_default();
+                                        unsafe {
+                                            cb(
+                                                WPAPIEventType::EventRejected,
+                                                addr_c.as_ptr(),
+                                                msg_c.as_ptr(),
+                                                raw_ptr,
+                                            );
+                                        }
+                                    }
+                                    crate::session::CallNotification::Error(addr, err_msg) => {
+                                        let addr_c =
+                                            CString::new(addr.to_string()).unwrap_or_default();
+                                        let msg_c = CString::new(err_msg).unwrap_or_default();
+                                        unsafe {
+                                            cb(
+                                                WPAPIEventType::EventError,
+                                                addr_c.as_ptr(),
+                                                msg_c.as_ptr(),
+                                                raw_ptr,
+                                            );
+                                        }
+                                    }
+                                    crate::session::CallNotification::Hangup(addr) => {
+                                        let addr_c =
+                                            CString::new(addr.to_string()).unwrap_or_default();
+                                        let msg_c = CString::new("").unwrap_or_default();
+                                        unsafe {
+                                            cb(
+                                                WPAPIEventType::EventHangup,
+                                                addr_c.as_ptr(),
+                                                msg_c.as_ptr(),
+                                                raw_ptr,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                if let Err(e) =
+                    call::start_call_with_session(&cfg, target_opt, Some(stop_rx), &session).await
                 {
                     tracing::error!("Audio call session error: {}", e);
                 }
@@ -282,6 +412,7 @@ pub unsafe extern "C" fn wpapi_room_call_start(
             return std::ptr::null_mut();
         }
         let cfg = unsafe { (*config).0.clone() };
+        let event_cb_state = unsafe { (*config).1 };
         let r_str = match unsafe { CStr::from_ptr(room_address) }.to_str() {
             Ok(s) => s,
             Err(e) => {
@@ -311,9 +442,80 @@ pub unsafe extern "C" fn wpapi_room_call_start(
                 }
             };
 
+            let session = crate::session::ClientSession::new();
+            let mut event_rx = session.subscribe_events();
+
             rt.block_on(async move {
+                if let Some(cb_state) = event_cb_state {
+                    tokio::spawn(async move {
+                        let cb_fn: WPAPIEventCallback =
+                            unsafe { std::mem::transmute(cb_state.callback) };
+                        let user_data_usize = cb_state.user_data;
+                        if let Some(cb) = cb_fn {
+                            while let Ok(notification) = event_rx.recv().await {
+                                let raw_ptr = user_data_usize as *mut std::ffi::c_void;
+                                match notification {
+                                    crate::session::CallNotification::Accepted(addr) => {
+                                        let addr_c =
+                                            CString::new(addr.to_string()).unwrap_or_default();
+                                        let msg_c = CString::new("").unwrap_or_default();
+                                        unsafe {
+                                            cb(
+                                                WPAPIEventType::EventAccepted,
+                                                addr_c.as_ptr(),
+                                                msg_c.as_ptr(),
+                                                raw_ptr,
+                                            );
+                                        }
+                                    }
+                                    crate::session::CallNotification::Rejected(addr) => {
+                                        let addr_c =
+                                            CString::new(addr.to_string()).unwrap_or_default();
+                                        let msg_c = CString::new("").unwrap_or_default();
+                                        unsafe {
+                                            cb(
+                                                WPAPIEventType::EventRejected,
+                                                addr_c.as_ptr(),
+                                                msg_c.as_ptr(),
+                                                raw_ptr,
+                                            );
+                                        }
+                                    }
+                                    crate::session::CallNotification::Error(addr, err_msg) => {
+                                        let addr_c =
+                                            CString::new(addr.to_string()).unwrap_or_default();
+                                        let msg_c = CString::new(err_msg).unwrap_or_default();
+                                        unsafe {
+                                            cb(
+                                                WPAPIEventType::EventError,
+                                                addr_c.as_ptr(),
+                                                msg_c.as_ptr(),
+                                                raw_ptr,
+                                            );
+                                        }
+                                    }
+                                    crate::session::CallNotification::Hangup(addr) => {
+                                        let addr_c =
+                                            CString::new(addr.to_string()).unwrap_or_default();
+                                        let msg_c = CString::new("").unwrap_or_default();
+                                        unsafe {
+                                            cb(
+                                                WPAPIEventType::EventHangup,
+                                                addr_c.as_ptr(),
+                                                msg_c.as_ptr(),
+                                                raw_ptr,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+
                 if let Err(e) =
-                    call::start_room_call_with_cancel(&cfg, room_addr, Some(stop_rx)).await
+                    call::start_room_call_with_session(&cfg, room_addr, Some(stop_rx), &session)
+                        .await
                 {
                     tracing::error!("Audio room call session error: {}", e);
                 }
@@ -418,6 +620,15 @@ mod tests {
             let dev_out = std::ffi::CString::new("Default Speaker").unwrap();
             assert_eq!(
                 wpapi_config_set_audio_devices(config_ptr, dev_in.as_ptr(), dev_out.as_ptr()),
+                0
+            );
+
+            assert_eq!(
+                wpapi_config_set_event_callback(std::ptr::null_mut(), None, std::ptr::null_mut()),
+                -1
+            );
+            assert_eq!(
+                wpapi_config_set_event_callback(config_ptr, None, std::ptr::null_mut()),
                 0
             );
 

@@ -162,6 +162,29 @@ typedef enum WPAPILogLevel {
 } WPAPILogLevel;
 
 /**
+ * Event types emitted by wpapi session event callback.
+ * 0 = EventAccepted, 1 = EventRejected, 2 = EventError, 3 = EventHangup
+ */
+typedef enum WPAPIEventType {
+  /**
+   * Call request was accepted (0)
+   */
+  EventAccepted = 0,
+  /**
+   * Call request was rejected (1)
+   */
+  EventRejected = 1,
+  /**
+   * Call connection error occurred (2)
+   */
+  EventError = 2,
+  /**
+   * Call was hung up / ended (3)
+   */
+  EventHangup = 3,
+} WPAPIEventType;
+
+/**
  * Opaque handle representing an active audio call session.
  */
 typedef struct WPAPICallHandle WPAPICallHandle;
@@ -175,6 +198,14 @@ typedef struct WPAPIConfig WPAPIConfig;
  * Function pointer type for log callbacks.
  */
 typedef void (*WPAPILogCallback)(enum WPAPILogLevel level, const char *message, void *user_data);
+
+/**
+ * Function pointer type for session event callbacks.
+ */
+typedef void (*WPAPIEventCallback)(enum WPAPIEventType event_type,
+                                   const char *peer_address,
+                                   const char *detail_message,
+                                   void *user_data);
 
 /**
  * Retrieve the last thread-local C FFI error message.
@@ -284,6 +315,15 @@ int wpapi_config_set_allow_echoback(struct WPAPIConfig *config, bool allow_echob
 int wpapi_config_set_audio_devices(struct WPAPIConfig *config,
                                    const char *input_device,
                                    const char *output_device);
+
+/**
+ * Register a custom C session event callback function on the configuration handle.
+ * # Safety
+ * `config` must be a valid non-null pointer. `user_data` must remain valid during session execution.
+ */
+int wpapi_config_set_event_callback(struct WPAPIConfig *config,
+                                    WPAPIEventCallback callback,
+                                    void *user_data);
 
 /**
  * Start an audio call session in a background worker thread.
