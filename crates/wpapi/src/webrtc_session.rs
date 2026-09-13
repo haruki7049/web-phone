@@ -121,7 +121,20 @@ pub async fn setup_data_channel(
                         let sess_target = session_ref.clone();
                         tokio::spawn(async move {
                             while let Some(audio_bytes) = rx.recv().await {
-                                if let Some(target) = sess_target.get_target_address() {
+                                if let Some(room) = sess_target.get_room_address() {
+                                    let packet = ProtocolPacket::RoomGroupAudio {
+                                        room_address: room,
+                                        codec_id: crate::protocol::CODEC_OPUS,
+                                        audio_data: audio_bytes,
+                                    };
+                                    if dc_inner
+                                        .send(BytesMut::from(packet.encode().as_slice()))
+                                        .await
+                                        .is_err()
+                                    {
+                                        break;
+                                    }
+                                } else if let Some(target) = sess_target.get_target_address() {
                                     let packet = ProtocolPacket::ClientTargetedAudio {
                                         target_address: target,
                                         codec_id: crate::protocol::CODEC_OPUS,
@@ -314,7 +327,9 @@ async fn dispatch_client_packet(
             }
         }
         ProtocolPacket::ServerTargetedAudio { audio_data, .. }
-        | ProtocolPacket::PeerTargetedAudio { audio_data, .. } => {
+        | ProtocolPacket::PeerTargetedAudio { audio_data, .. }
+        | ProtocolPacket::RoomGroupAudio { audio_data, .. }
+        | ProtocolPacket::RoomGroupAudioE2EE { audio_data, .. } => {
             let samples: Vec<f32> = audio_data
                 .as_chunks::<4>()
                 .0
@@ -431,7 +446,8 @@ pub async fn setup_room_data_channel(
                                 short_ids
                             );
                         }
-                        ProtocolPacket::RoomGroupAudio { audio_data, .. } => {
+                        ProtocolPacket::RoomGroupAudio { audio_data, .. }
+                        | ProtocolPacket::RoomGroupAudioE2EE { audio_data, .. } => {
                             let samples: Vec<f32> = audio_data
                                 .as_chunks::<4>()
                                 .0

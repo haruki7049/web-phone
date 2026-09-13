@@ -224,7 +224,14 @@ async fn handle_client_targeted_audio(
     let caller_user_addr = sender_addr.clone().unwrap_or_default();
 
     if super::is_client_in_room(client_id, &target_address) {
-        // Group call mode
+        handle_room_group_audio(
+            client_id,
+            target_address,
+            wpapi::protocol::CODEC_OPUS,
+            payload,
+        )
+        .await;
+        return;
     } else if let crate::registry::AddressSearchResult::Found(target_cid) =
         super::find_client_by_address(&target_address)
     {

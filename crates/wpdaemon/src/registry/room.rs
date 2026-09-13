@@ -130,7 +130,9 @@ impl ClientRegistry {
         let mut count = 0;
         let mut target_room_key = None;
         for (room_key, members) in self.room_members.iter_mut() {
-            if matches_address(room_key, room_address) {
+            if matches_address(room_key, room_address)
+                || matches_address_prefix(room_key, room_address)
+            {
                 members.retain(|&cid| cid != client_id);
                 count = members.len() as u32;
                 target_room_key = Some(room_key.clone());
@@ -148,7 +150,9 @@ impl ClientRegistry {
     /// Get all client IDs registered in a room matching room_address.
     pub fn get_room_member_ids(&self, room_address: &UserAddress) -> Vec<u64> {
         for (room_key, members) in self.room_members.iter() {
-            if matches_address(room_key, room_address) {
+            if matches_address(room_key, room_address)
+                || matches_address_prefix(room_key, room_address)
+            {
                 return members.clone();
             }
         }
@@ -167,7 +171,7 @@ impl ClientRegistry {
         let mut room_key = room_address.clone();
 
         for key in self.room_members.keys() {
-            if matches_address(key, room_address) {
+            if matches_address(key, room_address) || matches_address_prefix(key, room_address) {
                 room_key = key.clone();
                 break;
             }

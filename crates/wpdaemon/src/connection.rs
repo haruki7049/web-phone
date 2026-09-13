@@ -26,7 +26,11 @@ pub fn calculate_audio_energy(audio_data: &[u8]) -> f64 {
         .iter()
         .map(|c| {
             let sample = f32::from_le_bytes(*c) as f64;
-            sample * sample
+            if sample.is_nan() || sample.is_infinite() {
+                0.0
+            } else {
+                sample.clamp(-1.0, 1.0).powi(2)
+            }
         })
         .sum();
     (sum_sq / chunks.len() as f64).sqrt()
