@@ -29,6 +29,14 @@ pub enum WPAPIEventType {
 }
 
 /// Function pointer type for session event callbacks.
+///
+/// # Threading & Pointer Lifetime Rules
+/// - **Threading**: The callback is invoked from a Rust Tokio background worker thread.
+///   Binding authors for runtimes like Python (GIL), Node.js (V8 loop), or Erlang (NIF) MUST
+///   bridge to the target language thread/event loop accordingly.
+/// - **Pointer Lifetime**: `peer_address` and `detail_message` are temporary null-terminated C strings
+///   valid ONLY for the duration of the callback execution. Callers MUST copy these strings
+///   immediately if they need to be stored.
 pub type WPAPIEventCallback = Option<
     unsafe extern "C" fn(
         event_type: WPAPIEventType,
