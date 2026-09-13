@@ -220,47 +220,7 @@ async fn main() -> Result<()> {
         tracing::warn!("Failed to normalize server_url from config file: {}", e);
     }
 
-    if let Some(ref server_url) = args.server_url
-        && let Err(e) = loaded_config.parse_and_apply_server_url(server_url)
-    {
-        tracing::error!("Invalid --server-url argument '{}': {}", server_url, e);
-        return Err(anyhow::anyhow!("Invalid --server-url: {}", e));
-    }
-
-    if let Some(ref server_ip_raw) = args.server_ip {
-        if server_ip_raw.contains("://")
-            || (server_ip_raw.contains(':') && server_ip_raw.parse::<IpAddr>().is_err())
-        {
-            if let Err(e) = loaded_config.parse_and_apply_server_url(server_ip_raw) {
-                tracing::error!("Invalid --server-ip argument '{}': {}", server_ip_raw, e);
-                return Err(anyhow::anyhow!("Invalid --server-ip: {}", e));
-            }
-        } else if let Ok(ip) = server_ip_raw.parse::<IpAddr>() {
-            let port = loaded_config.server.port();
-            loaded_config.server.address = format!("{}:{}", ip, port);
-            loaded_config.server.host = Some(ip.to_string());
-        } else {
-            let port = loaded_config.server.port();
-            loaded_config.server.address = format!("{}:{}", server_ip_raw, port);
-            loaded_config.server.host = Some(server_ip_raw.clone());
-        }
-    }
-
-    if let Some(server_port) = args.server_port {
-        loaded_config.server.set_port(server_port);
-    }
-    if let Some(stun_server) = args.stun_server {
-        loaded_config.network.stun_server = stun_server;
-    }
-    if let Some(input_device) = args.input_device {
-        loaded_config.audio.input_device = Some(input_device);
-    }
-    if let Some(output_device) = args.output_device {
-        loaded_config.audio.output_device = Some(output_device);
-    }
-    if args.auto_accept {
-        loaded_config.client.auto_accept = true;
-    }
+    apply_cli_overrides(&mut loaded_config, &args)?;
 
     CONFIGURATION.set(loaded_config.clone()).unwrap();
 
@@ -311,6 +271,53 @@ async fn main() -> Result<()> {
             );
             wpclient::tui::run_tui_with_keypair(loaded_config, Some(keypair)).await?;
         }
+    }
+
+    Ok(())
+}
+
+/// Apply CLI command-line argument overrides to the Client Configuration.
+fn apply_cli_overrides(config: &mut Configuration, args: &CLIArgs) -> anyhow::Result<()> {
+    if let Some(server_url) = &args.server_url
+        && let Err(e) = config.parse_and_apply_server_url(server_url)
+    {
+        tracing::error!("Invalid --server-url argument '{}': {}", server_url, e);
+        return Err(anyhow::anyhow!("Invalid --server-url: {}", e));
+    }
+
+    if let Some(server_ip_raw) = &args.server_ip {
+        if server_ip_raw.contains("://")
+            || (server_ip_raw.contains(':') && server_ip_raw.parse::<IpAddr>().is_err())
+        {
+            if let Err(e) = config.parse_and_apply_server_url(server_ip_raw) {
+                tracing::error!("Invalid --server-ip argument '{}': {}", server_ip_raw, e);
+                return Err(anyhow::anyhow!("Invalid --server-ip: {}", e));
+            }
+        } else if let Ok(ip) = server_ip_raw.parse::<IpAddr>() {
+            let port = config.server.port();
+            config.server.address = format!("{}:{}", ip, port);
+            config.server.host = Some(ip.to_string());
+        } else {
+            let port = config.server.port();
+            config.server.address = format!("{}:{}", server_ip_raw, port);
+            config.server.host = Some(server_ip_raw.clone());
+        }
+    }
+
+    if let Some(server_port) = args.server_port {
+        config.server.set_port(server_port);
+    }
+    if let Some(stun_server) = &args.stun_server {
+        config.network.stun_server = stun_server.clone();
+    }
+    if let Some(input_device) = &args.input_device {
+        config.audio.input_device = Some(input_device.clone());
+    }
+    if let Some(output_device) = &args.output_device {
+        config.audio.output_device = Some(output_device.clone());
+    }
+    if args.auto_accept {
+        config.client.auto_accept = true;
     }
 
     Ok(())

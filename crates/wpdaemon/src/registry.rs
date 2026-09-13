@@ -34,21 +34,7 @@ pub fn matches_address(addr: &UserAddress, key: &UserAddress) -> bool {
 
 /// Helper to check if address matches target key using prefix match (min 12 chars) for address resolution / routing (WPIP-02 Section 5).
 pub fn matches_address_prefix(addr: &UserAddress, key: &UserAddress) -> bool {
-    if addr.id == key.id {
-        return true;
-    }
-    // Direct Short ID input (12..63 characters)
-    if key.id.len() >= 12 && key.id.len() < 64 && addr.id.starts_with(&key.id) {
-        return true;
-    }
-    // Wire zero-padded Short ID (64 chars total: >=12 hex prefix + trailing zero padding)
-    if key.id.len() == 64 && addr.id.len() == 64 {
-        let clean_key = key.id.trim_end_matches('0');
-        if clean_key.len() >= 12 && clean_key.len() < 64 && addr.id.starts_with(clean_key) {
-            return true;
-        }
-    }
-    false
+    addr.matches_short_id_prefix(key)
 }
 
 /// Unified registry for managing all WebRTC client state, routing, and call approvals.

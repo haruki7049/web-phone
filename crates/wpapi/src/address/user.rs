@@ -93,6 +93,25 @@ impl UserAddress {
     pub fn matches_prefix(&self, other: &UserAddress) -> bool {
         self.id == other.id
     }
+
+    /// Check if this address matches a target key using prefix match (min 12 chars) for address resolution / routing (WPIP-02 Section 5).
+    pub fn matches_short_id_prefix(&self, key: &UserAddress) -> bool {
+        if self.id == key.id {
+            return true;
+        }
+        // Direct Short ID input (12..63 characters)
+        if key.id.len() >= 12 && key.id.len() < 64 && self.id.starts_with(&key.id) {
+            return true;
+        }
+        // Wire zero-padded Short ID (64 chars total: >=12 hex prefix + trailing zero padding)
+        if key.id.len() == 64 && self.id.len() == 64 {
+            let clean_key = key.id.trim_end_matches('0');
+            if clean_key.len() >= 12 && clean_key.len() < 64 && self.id.starts_with(clean_key) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl fmt::Display for UserAddress {

@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Gauge, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph},
 };
 
 use crate::tui::app::TuiApp;
@@ -55,28 +55,8 @@ pub fn render_call_view(f: &mut Frame, app: &TuiApp, target: &str, area: Rect) {
         .border_style(Style::default().fg(Color::Cyan));
     f.render_widget(Paragraph::new(call_header).block(header_block), chunks[0]);
 
-    // Mic Level
-    let (mic_title, mic_color) = if app.is_muted {
-        (" Mic Level (MUTED - Press [m] to unmute) ", Color::Red)
-    } else {
-        (" Mic Level ", Color::Green)
-    };
-    let mic_gauge = Gauge::default()
-        .block(Block::default().title(mic_title).borders(Borders::ALL))
-        .gauge_style(Style::default().fg(mic_color))
-        .ratio(app.input_level.clamp(0.0, 1.0) as f64);
-    f.render_widget(mic_gauge, chunks[1]);
-
-    // Speaker Level
-    let spk_gauge = Gauge::default()
-        .block(
-            Block::default()
-                .title(" Speaker Level ")
-                .borders(Borders::ALL),
-        )
-        .gauge_style(Style::default().fg(Color::Cyan))
-        .ratio(app.output_level.clamp(0.0, 1.0) as f64);
-    f.render_widget(spk_gauge, chunks[2]);
+    // Render shared audio gauges (Mic and Speaker)
+    super::render_audio_gauges(f, app, chunks[1], chunks[2], " Speaker Level ", Color::Cyan);
 
     let details_text = vec![
         Line::from(format!(

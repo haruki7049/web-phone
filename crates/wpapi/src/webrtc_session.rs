@@ -271,16 +271,16 @@ async fn dispatch_client_packet(
         ProtocolPacket::CallAcceptResponse { caller_address } => {
             info!("Call accepted by {}", caller_address.short_id());
             session_ref.set_target_address(Some(caller_address.clone()));
-            if let Some(tx) = session_ref.get_call_notification_handler() {
-                let _ = tx.send(CallNotification::Accepted(caller_address)).await;
-            }
+            session_ref
+                .notify_call_event(CallNotification::Accepted(caller_address))
+                .await;
         }
         ProtocolPacket::CallRejectResponse { caller_address } => {
             info!("Call rejected by {}", caller_address.short_id());
             session_ref.set_target_address(None);
-            if let Some(tx) = session_ref.get_call_notification_handler() {
-                let _ = tx.send(CallNotification::Rejected(caller_address)).await;
-            }
+            session_ref
+                .notify_call_event(CallNotification::Rejected(caller_address))
+                .await;
         }
         ProtocolPacket::CallAcceptedNotification { target_address } => {
             info!(
@@ -288,9 +288,9 @@ async fn dispatch_client_packet(
                 target_address.short_id()
             );
             session_ref.set_target_address(Some(target_address.clone()));
-            if let Some(tx) = session_ref.get_call_notification_handler() {
-                let _ = tx.send(CallNotification::Accepted(target_address)).await;
-            }
+            session_ref
+                .notify_call_event(CallNotification::Accepted(target_address))
+                .await;
         }
         ProtocolPacket::CallRejectedNotification { target_address } => {
             info!(
@@ -298,21 +298,19 @@ async fn dispatch_client_packet(
                 target_address.short_id()
             );
             session_ref.set_target_address(None);
-            if let Some(tx) = session_ref.get_call_notification_handler() {
-                let _ = tx.send(CallNotification::Rejected(target_address)).await;
-            }
+            session_ref
+                .notify_call_event(CallNotification::Rejected(target_address))
+                .await;
         }
         ProtocolPacket::ConnectionError { target_address } => {
             info!("Connection error for target {}", target_address.short_id());
             session_ref.set_target_address(None);
-            if let Some(tx) = session_ref.get_call_notification_handler() {
-                let _ = tx
-                    .send(CallNotification::Error(
-                        target_address,
-                        "Target user is unavailable or connection is stale (waiting for keep-alive cleanup). Operation explicitly blocked.".to_string(),
-                    ))
-                    .await;
-            }
+            session_ref
+                .notify_call_event(CallNotification::Error(
+                    target_address,
+                    "Target user is unavailable or connection is stale (waiting for keep-alive cleanup). Operation explicitly blocked.".to_string(),
+                ))
+                .await;
         }
         ProtocolPacket::CallEndedNotification { target_address } => {
             info!(
@@ -320,11 +318,9 @@ async fn dispatch_client_packet(
                 target_address.short_id()
             );
             session_ref.set_target_address(None);
-            if let Some(tx) = session_ref.get_call_notification_handler() {
-                let _ = tx
-                    .send(CallNotification::Hangup(target_address.clone()))
-                    .await;
-            }
+            session_ref
+                .notify_call_event(CallNotification::Hangup(target_address))
+                .await;
         }
         ProtocolPacket::ServerTargetedAudio { audio_data, .. }
         | ProtocolPacket::PeerTargetedAudio { audio_data, .. }

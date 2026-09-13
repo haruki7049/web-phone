@@ -243,6 +243,13 @@ impl ClientSession {
         self.call_notification_tx.lock().ok()?.clone()
     }
 
+    /// Send a call notification event if a handler is registered.
+    pub async fn notify_call_event(&self, notification: CallNotification) {
+        if let Some(tx) = self.get_call_notification_handler() {
+            let _ = tx.send(notification).await;
+        }
+    }
+
     /// Get current client ID if assigned by server.
     pub fn get_client_id(&self) -> Option<u64> {
         let id = self.client_id.load(Ordering::SeqCst);
