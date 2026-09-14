@@ -104,5 +104,5 @@ ______________________________________________________________________
    git checkout -b feature/your-feature-name
    ```
 1. Make your changes following the coding standards and concurrency guidelines outlined in [`AGENTS.md`](./AGENTS.md).
-1. Commit your changes with clear, descriptive commit messages.
+1. Commit your changes following the [Conventional Commits](https://www.conventionalcommits.org/) specification (e.g., `feat:`, `fix:`, `refactor:`, `perf:`, `docs:`, `test:`, `build:`, `ci:`, `chore:`).
 1. Push to your branch and open a Pull Request against `main`.
