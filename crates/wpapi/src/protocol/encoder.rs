@@ -77,53 +77,23 @@ impl ProtocolPacket {
                 b
             }
             Self::CallAcceptResponse { caller_address } => {
-                let mut b = BytesMut::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
-                b.put_u8(0x06);
-                b.put_slice(&caller_address.to_bytes());
-                b
+                encode_address_packet(0x06, caller_address)
             }
             Self::CallRejectResponse { caller_address } => {
-                let mut b = BytesMut::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
-                b.put_u8(0x07);
-                b.put_slice(&caller_address.to_bytes());
-                b
+                encode_address_packet(0x07, caller_address)
             }
             Self::CallAcceptedNotification { target_address } => {
-                let mut b = BytesMut::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
-                b.put_u8(0x08);
-                b.put_slice(&target_address.to_bytes());
-                b
+                encode_address_packet(0x08, target_address)
             }
             Self::CallRejectedNotification { target_address } => {
-                let mut b = BytesMut::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
-                b.put_u8(0x09);
-                b.put_slice(&target_address.to_bytes());
-                b
+                encode_address_packet(0x09, target_address)
             }
-            Self::ConnectionError { target_address } => {
-                let mut b = BytesMut::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
-                b.put_u8(0x0A);
-                b.put_slice(&target_address.to_bytes());
-                b
-            }
-            Self::CallHangup { target_address } => {
-                let mut b = BytesMut::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
-                b.put_u8(0x0B);
-                b.put_slice(&target_address.to_bytes());
-                b
-            }
+            Self::ConnectionError { target_address } => encode_address_packet(0x0A, target_address),
+            Self::CallHangup { target_address } => encode_address_packet(0x0B, target_address),
             Self::CallEndedNotification { target_address } => {
-                let mut b = BytesMut::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
-                b.put_u8(0x0C);
-                b.put_slice(&target_address.to_bytes());
-                b
+                encode_address_packet(0x0C, target_address)
             }
-            Self::RoomJoinRequest { room_address } => {
-                let mut b = BytesMut::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
-                b.put_u8(0x0D);
-                b.put_slice(&room_address.to_bytes());
-                b
-            }
+            Self::RoomJoinRequest { room_address } => encode_address_packet(0x0D, room_address),
             Self::RoomStateNotification {
                 room_address,
                 participant_count,
@@ -134,12 +104,7 @@ impl ProtocolPacket {
                 b.put_u32_le(*participant_count);
                 b
             }
-            Self::RoomLeaveRequest { room_address } => {
-                let mut b = BytesMut::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
-                b.put_u8(0x0F);
-                b.put_slice(&room_address.to_bytes());
-                b
-            }
+            Self::RoomLeaveRequest { room_address } => encode_address_packet(0x0F, room_address),
             Self::RoomGroupAudio {
                 room_address,
                 codec_id,
@@ -219,4 +184,11 @@ impl ProtocolPacket {
         };
         buf.to_vec()
     }
+}
+
+fn encode_address_packet(msg_type: u8, address: &crate::UserAddress) -> BytesMut {
+    let mut b = BytesMut::with_capacity(MIN_LEN_ADDRESS_ONLY_PACKET);
+    b.put_u8(msg_type);
+    b.put_slice(&address.to_bytes());
+    b
 }

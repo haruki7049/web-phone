@@ -17,11 +17,7 @@ impl ClientRegistry {
             .addresses
             .iter()
             .filter_map(|(&cid, addr)| {
-                if cid != client_id && addr.id == user_address.id {
-                    Some(cid)
-                } else {
-                    None
-                }
+                (cid != client_id && addr.id == user_address.id).then_some(cid)
             })
             .collect();
         for old_cid in old_cids {
@@ -93,20 +89,16 @@ impl ClientRegistry {
 
     /// Check if a call from `caller_addr` to `target_id` is approved.
     pub fn is_call_approved(&self, target_id: u64, caller_addr: &UserAddress) -> bool {
-        if let Some(list) = self.approved_calls.get(&target_id) {
-            list.iter().any(|a| matches_address(a, caller_addr))
-        } else {
-            false
-        }
+        self.approved_calls
+            .get(&target_id)
+            .is_some_and(|list| list.iter().any(|a| matches_address(a, caller_addr)))
     }
 
     /// Check if a call from `caller_addr` to `target_id` is rejected.
     pub fn is_call_rejected(&self, target_id: u64, caller_addr: &UserAddress) -> bool {
-        if let Some(list) = self.rejected_calls.get(&target_id) {
-            list.iter().any(|a| matches_address(a, caller_addr))
-        } else {
-            false
-        }
+        self.rejected_calls
+            .get(&target_id)
+            .is_some_and(|list| list.iter().any(|a| matches_address(a, caller_addr)))
     }
 
     /// Mark a call from `caller_addr` to `target_id` as approved.
@@ -127,11 +119,9 @@ impl ClientRegistry {
 
     /// Check if target_id has already been notified about caller_id's request.
     pub fn has_been_notified(&self, target_id: u64, caller_id: u64) -> bool {
-        if let Some(list) = self.notified_requests.get(&target_id) {
-            list.contains(&caller_id)
-        } else {
-            false
-        }
+        self.notified_requests
+            .get(&target_id)
+            .is_some_and(|list| list.contains(&caller_id))
     }
 
     /// Mark target_id as notified about caller_id's request.

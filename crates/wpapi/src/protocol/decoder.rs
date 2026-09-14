@@ -211,108 +211,72 @@ fn decode_call_request(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
     })
 }
 
-fn decode_call_accept_response(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+fn decode_address_only_packet<F>(
+    data: &[u8],
+    packet_type: u8,
+    constructor: F,
+) -> Result<ProtocolPacket, ProtocolError>
+where
+    F: FnOnce(UserAddress) -> ProtocolPacket,
+{
     if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
         return Err(ProtocolError::InsufficientLength {
-            packet_type: 0x06,
+            packet_type,
             actual: data.len(),
             expected: MIN_LEN_ADDRESS_ONLY_PACKET,
         });
     }
     let mut buf = &data[1..];
-    let caller_address = parse_user_address(&mut buf);
-    Ok(ProtocolPacket::CallAcceptResponse { caller_address })
+    let address = parse_user_address(&mut buf);
+    Ok(constructor(address))
+}
+
+fn decode_call_accept_response(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
+    decode_address_only_packet(data, 0x06, |caller_address| {
+        ProtocolPacket::CallAcceptResponse { caller_address }
+    })
 }
 
 fn decode_call_reject_response(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
-    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
-        return Err(ProtocolError::InsufficientLength {
-            packet_type: 0x07,
-            actual: data.len(),
-            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
-        });
-    }
-    let mut buf = &data[1..];
-    let caller_address = parse_user_address(&mut buf);
-    Ok(ProtocolPacket::CallRejectResponse { caller_address })
+    decode_address_only_packet(data, 0x07, |caller_address| {
+        ProtocolPacket::CallRejectResponse { caller_address }
+    })
 }
 
 fn decode_call_accepted_notification(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
-    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
-        return Err(ProtocolError::InsufficientLength {
-            packet_type: 0x08,
-            actual: data.len(),
-            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
-        });
-    }
-    let mut buf = &data[1..];
-    let target_address = parse_user_address(&mut buf);
-    Ok(ProtocolPacket::CallAcceptedNotification { target_address })
+    decode_address_only_packet(data, 0x08, |target_address| {
+        ProtocolPacket::CallAcceptedNotification { target_address }
+    })
 }
 
 fn decode_call_rejected_notification(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
-    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
-        return Err(ProtocolError::InsufficientLength {
-            packet_type: 0x09,
-            actual: data.len(),
-            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
-        });
-    }
-    let mut buf = &data[1..];
-    let target_address = parse_user_address(&mut buf);
-    Ok(ProtocolPacket::CallRejectedNotification { target_address })
+    decode_address_only_packet(data, 0x09, |target_address| {
+        ProtocolPacket::CallRejectedNotification { target_address }
+    })
 }
 
 fn decode_connection_error(data: &[u8], msg_type: u8) -> Result<ProtocolPacket, ProtocolError> {
-    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
-        return Err(ProtocolError::InsufficientLength {
-            packet_type: msg_type,
-            actual: data.len(),
-            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
-        });
-    }
-    let mut buf = &data[1..];
-    let target_address = parse_user_address(&mut buf);
-    Ok(ProtocolPacket::ConnectionError { target_address })
+    decode_address_only_packet(data, msg_type, |target_address| {
+        ProtocolPacket::ConnectionError { target_address }
+    })
 }
 
 fn decode_call_hangup(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
-    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
-        return Err(ProtocolError::InsufficientLength {
-            packet_type: 0x0B,
-            actual: data.len(),
-            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
-        });
-    }
-    let mut buf = &data[1..];
-    let target_address = parse_user_address(&mut buf);
-    Ok(ProtocolPacket::CallHangup { target_address })
+    decode_address_only_packet(data, 0x0B, |target_address| ProtocolPacket::CallHangup {
+        target_address,
+    })
 }
 
 fn decode_call_ended_notification(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
-    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
-        return Err(ProtocolError::InsufficientLength {
-            packet_type: 0x0C,
-            actual: data.len(),
-            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
-        });
-    }
-    let mut buf = &data[1..];
-    let target_address = parse_user_address(&mut buf);
-    Ok(ProtocolPacket::CallEndedNotification { target_address })
+    decode_address_only_packet(data, 0x0C, |target_address| {
+        ProtocolPacket::CallEndedNotification { target_address }
+    })
 }
 
 fn decode_room_join_request(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
-    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
-        return Err(ProtocolError::InsufficientLength {
-            packet_type: 0x0D,
-            actual: data.len(),
-            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
-        });
-    }
-    let mut buf = &data[1..];
-    let room_address = parse_user_address(&mut buf);
-    Ok(ProtocolPacket::RoomJoinRequest { room_address })
+    decode_address_only_packet(data, 0x0D, |room_address| ProtocolPacket::RoomJoinRequest {
+        room_address,
+    })
 }
 
 fn decode_room_state_notification(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
@@ -333,16 +297,9 @@ fn decode_room_state_notification(data: &[u8]) -> Result<ProtocolPacket, Protoco
 }
 
 fn decode_room_leave_request(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {
-    if data.len() < MIN_LEN_ADDRESS_ONLY_PACKET {
-        return Err(ProtocolError::InsufficientLength {
-            packet_type: 0x0F,
-            actual: data.len(),
-            expected: MIN_LEN_ADDRESS_ONLY_PACKET,
-        });
-    }
-    let mut buf = &data[1..];
-    let room_address = parse_user_address(&mut buf);
-    Ok(ProtocolPacket::RoomLeaveRequest { room_address })
+    decode_address_only_packet(data, 0x0F, |room_address| {
+        ProtocolPacket::RoomLeaveRequest { room_address }
+    })
 }
 
 fn decode_room_group_audio(data: &[u8]) -> Result<ProtocolPacket, ProtocolError> {

@@ -372,6 +372,90 @@ async fn handle_client_targeted_audio(
     }
 }
 
+async fn send_call_response_notification(
+    client_id: u64,
+    caller_address: &UserAddress,
+    make_packet: impl FnOnce(UserAddress) -> ProtocolPacket,
+) {
+    let caller_dc = if let crate::registry::AddressSearchResult::Found(caller_cid) =
+        super::find_client_by_address(caller_address)
+    {
+        CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .data_channels
+            .get(&caller_cid)
+            .cloned()
+    } else {
+        None
+    };
+
+    if let Some(caller_dc) = caller_dc {
+        let my_addr = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .addresses
+            .get(&client_id)
+            .cloned()
+            .unwrap_or_default();
+        let packet = make_packet(my_addr);
+        let _ = caller_dc
+            .send(BytesMut::from(packet.encode().as_slice()))
+            .await;
+    }
+}
+
+async fn broadcast_to_room_members(
+    room_address: &UserAddress,
+    bytes: BytesMut,
+    exclude_cid: Option<u64>,
+) {
+    let member_cids = CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .get_room_member_ids(room_address);
+
+    for member_cid in member_cids {
+        if Some(member_cid) == exclude_cid {
+            continue;
+        }
+        let dc = CLIENT_REGISTRY
+            .read()
+            .unwrap()
+            .data_channels
+            .get(&member_cid)
+            .cloned();
+        if let Some(dc) = dc {
+            let _ = dc.send(bytes.clone()).await;
+        }
+    }
+}
+
+async fn process_room_speaker_update(
+    client_id: u64,
+    room_address: UserAddress,
+    is_top_k: bool,
+    top_speakers: Vec<UserAddress>,
+    speaker_list_changed: bool,
+    server_audio_pkt: ProtocolPacket,
+) {
+    if !is_top_k {
+        return;
+    }
+
+    let audio_bytes = BytesMut::from(server_audio_pkt.encode().as_slice());
+    broadcast_to_room_members(&room_address, audio_bytes, Some(client_id)).await;
+
+    if speaker_list_changed && !top_speakers.is_empty() {
+        let notice_pkt = ProtocolPacket::ActiveSpeakerNotice {
+            room_address: room_address.clone(),
+            speaker_addresses: top_speakers,
+        };
+        let notice_bytes = BytesMut::from(notice_pkt.encode().as_slice());
+        broadcast_to_room_members(&room_address, notice_bytes, None).await;
+    }
+}
+
 async fn handle_call_accept_response(client_id: u64, caller_address: UserAddress) {
     info!(
         "Client {} accepted call request from caller {}",
@@ -387,34 +471,12 @@ async fn handle_call_accept_response(client_id: u64, caller_address: UserAddress
             .or_insert_with(|| caller_address.clone());
     }
 
-    let caller_dc = if let crate::registry::AddressSearchResult::Found(caller_cid) =
-        super::find_client_by_address(&caller_address)
-    {
-        CLIENT_REGISTRY
-            .read()
-            .unwrap()
-            .data_channels
-            .get(&caller_cid)
-            .cloned()
-    } else {
-        None
-    };
-
-    if let Some(caller_dc) = caller_dc {
-        let my_addr = CLIENT_REGISTRY
-            .read()
-            .unwrap()
-            .addresses
-            .get(&client_id)
-            .cloned()
-            .unwrap_or_default();
-        let accept_packet = ProtocolPacket::CallAcceptedNotification {
+    send_call_response_notification(client_id, &caller_address, |my_addr| {
+        ProtocolPacket::CallAcceptedNotification {
             target_address: my_addr,
-        };
-        let _ = caller_dc
-            .send(BytesMut::from(accept_packet.encode().as_slice()))
-            .await;
-    }
+        }
+    })
+    .await;
 }
 
 async fn handle_call_reject_response(client_id: u64, caller_address: UserAddress) {
@@ -425,34 +487,12 @@ async fn handle_call_reject_response(client_id: u64, caller_address: UserAddress
     );
     super::mark_call_rejected(client_id, caller_address.clone());
 
-    let caller_dc = if let crate::registry::AddressSearchResult::Found(caller_cid) =
-        super::find_client_by_address(&caller_address)
-    {
-        CLIENT_REGISTRY
-            .read()
-            .unwrap()
-            .data_channels
-            .get(&caller_cid)
-            .cloned()
-    } else {
-        None
-    };
-
-    if let Some(caller_dc) = caller_dc {
-        let my_addr = CLIENT_REGISTRY
-            .read()
-            .unwrap()
-            .addresses
-            .get(&client_id)
-            .cloned()
-            .unwrap_or_default();
-        let reject_packet = ProtocolPacket::CallRejectedNotification {
+    send_call_response_notification(client_id, &caller_address, |my_addr| {
+        ProtocolPacket::CallRejectedNotification {
             target_address: my_addr,
-        };
-        let _ = caller_dc
-            .send(BytesMut::from(reject_packet.encode().as_slice()))
-            .await;
-    }
+        }
+    })
+    .await;
 }
 
 async fn handle_call_hangup(
@@ -472,41 +512,24 @@ async fn handle_call_hangup(
         .unwrap()
         .clear_call_session(client_id, &target_address);
 
-    let target_dc = if let crate::registry::AddressSearchResult::Found(target_cid) =
-        super::find_client_by_address(&target_address)
-    {
-        CLIENT_REGISTRY
-            .read()
-            .unwrap()
-            .data_channels
-            .get(&target_cid)
-            .cloned()
-    } else {
-        None
-    };
-
-    if let Some(target_dc) = target_dc {
-        let ended_pkt = ProtocolPacket::CallEndedNotification {
-            target_address: my_addr.clone(),
-        };
+    send_call_response_notification(client_id, &target_address, |my_addr| {
         info!(
             "Sent CallEndedNotification to target {} for call ended by Client {} ({})",
             target_address.short_id(),
             client_id,
             my_addr.short_id()
         );
-        let _ = target_dc
-            .send(BytesMut::from(ended_pkt.encode().as_slice()))
-            .await;
-    }
+        ProtocolPacket::CallEndedNotification {
+            target_address: my_addr,
+        }
+    })
+    .await;
 }
 
 async fn handle_room_join(client_id: u64, room_address: UserAddress) {
-    let (member_count, member_cids) = {
+    let member_count = {
         let mut reg = CLIENT_REGISTRY.write().unwrap();
-        let count = reg.join_room(client_id, room_address.clone());
-        let members = reg.get_room_member_ids(&room_address);
-        (count, members)
+        reg.join_room(client_id, room_address.clone())
     };
 
     info!(
@@ -517,30 +540,21 @@ async fn handle_room_join(client_id: u64, room_address: UserAddress) {
     );
 
     let state_pkt = ProtocolPacket::RoomStateNotification {
-        room_address,
+        room_address: room_address.clone(),
         participant_count: member_count,
     };
-    let bytes = BytesMut::from(state_pkt.encode().as_slice());
-
-    for member_cid in member_cids {
-        let dc = CLIENT_REGISTRY
-            .read()
-            .unwrap()
-            .data_channels
-            .get(&member_cid)
-            .cloned();
-        if let Some(dc) = dc {
-            let _ = dc.send(bytes.clone()).await;
-        }
-    }
+    broadcast_to_room_members(
+        &room_address,
+        BytesMut::from(state_pkt.encode().as_slice()),
+        None,
+    )
+    .await;
 }
 
 async fn handle_room_leave(client_id: u64, room_address: &UserAddress) {
-    let (remaining_count, member_cids) = {
+    let remaining_count = {
         let mut reg = CLIENT_REGISTRY.write().unwrap();
-        let count = reg.leave_room(client_id, room_address);
-        let members = reg.get_room_member_ids(room_address);
-        (count, members)
+        reg.leave_room(client_id, room_address)
     };
 
     info!(
@@ -554,19 +568,12 @@ async fn handle_room_leave(client_id: u64, room_address: &UserAddress) {
         room_address: room_address.clone(),
         participant_count: remaining_count,
     };
-    let bytes = BytesMut::from(state_pkt.encode().as_slice());
-
-    for member_cid in member_cids {
-        let dc = CLIENT_REGISTRY
-            .read()
-            .unwrap()
-            .data_channels
-            .get(&member_cid)
-            .cloned();
-        if let Some(dc) = dc {
-            let _ = dc.send(bytes.clone()).await;
-        }
-    }
+    broadcast_to_room_members(
+        room_address,
+        BytesMut::from(state_pkt.encode().as_slice()),
+        None,
+    )
+    .await;
 }
 
 async fn handle_room_group_audio(
@@ -590,55 +597,21 @@ async fn handle_room_group_audio(
         reg.update_speaker_energy(&room_address, client_id, energy)
     };
 
-    if !is_top_k {
-        return;
-    }
-
-    let member_cids = CLIENT_REGISTRY
-        .read()
-        .unwrap()
-        .get_room_member_ids(&room_address);
-
     let server_audio_pkt = ProtocolPacket::RoomGroupAudio {
         room_address: room_address.clone(),
         codec_id,
         audio_data: payload,
     };
-    let bytes = BytesMut::from(server_audio_pkt.encode().as_slice());
 
-    for member_cid in &member_cids {
-        if *member_cid == client_id {
-            continue;
-        }
-        let dc = CLIENT_REGISTRY
-            .read()
-            .unwrap()
-            .data_channels
-            .get(member_cid)
-            .cloned();
-        if let Some(dc) = dc {
-            let _ = dc.send(bytes.clone()).await;
-        }
-    }
-
-    if speaker_list_changed && !top_speakers.is_empty() {
-        let notice_pkt = ProtocolPacket::ActiveSpeakerNotice {
-            room_address,
-            speaker_addresses: top_speakers,
-        };
-        let notice_bytes = BytesMut::from(notice_pkt.encode().as_slice());
-        for member_cid in member_cids {
-            let dc = CLIENT_REGISTRY
-                .read()
-                .unwrap()
-                .data_channels
-                .get(&member_cid)
-                .cloned();
-            if let Some(dc) = dc {
-                let _ = dc.send(notice_bytes.clone()).await;
-            }
-        }
-    }
+    process_room_speaker_update(
+        client_id,
+        room_address,
+        is_top_k,
+        top_speakers,
+        speaker_list_changed,
+        server_audio_pkt,
+    )
+    .await;
 }
 
 async fn handle_room_group_audio_e2ee(
@@ -663,54 +636,20 @@ async fn handle_room_group_audio_e2ee(
         reg.update_speaker_energy(&room_address, client_id, energy)
     };
 
-    if !is_top_k {
-        return;
-    }
-
-    let member_cids = CLIENT_REGISTRY
-        .read()
-        .unwrap()
-        .get_room_member_ids(&room_address);
-
     let server_audio_pkt = ProtocolPacket::RoomGroupAudioE2EE {
         room_address: room_address.clone(),
         codec_id,
         audio_energy,
         audio_data: payload,
     };
-    let bytes = BytesMut::from(server_audio_pkt.encode().as_slice());
 
-    for member_cid in &member_cids {
-        if *member_cid == client_id {
-            continue;
-        }
-        let dc = CLIENT_REGISTRY
-            .read()
-            .unwrap()
-            .data_channels
-            .get(member_cid)
-            .cloned();
-        if let Some(dc) = dc {
-            let _ = dc.send(bytes.clone()).await;
-        }
-    }
-
-    if speaker_list_changed && !top_speakers.is_empty() {
-        let notice_pkt = ProtocolPacket::ActiveSpeakerNotice {
-            room_address,
-            speaker_addresses: top_speakers,
-        };
-        let notice_bytes = BytesMut::from(notice_pkt.encode().as_slice());
-        for member_cid in member_cids {
-            let dc = CLIENT_REGISTRY
-                .read()
-                .unwrap()
-                .data_channels
-                .get(&member_cid)
-                .cloned();
-            if let Some(dc) = dc {
-                let _ = dc.send(notice_bytes.clone()).await;
-            }
-        }
-    }
+    process_room_speaker_update(
+        client_id,
+        room_address,
+        is_top_k,
+        top_speakers,
+        speaker_list_changed,
+        server_audio_pkt,
+    )
+    .await;
 }

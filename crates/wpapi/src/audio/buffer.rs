@@ -22,10 +22,9 @@ impl AudioRingBuffer {
     pub fn new(requested_capacity: usize) -> Self {
         let capacity = requested_capacity.next_power_of_two().max(1024);
         let mask = capacity - 1;
-        let mut buffer = Vec::with_capacity(capacity);
-        for _ in 0..capacity {
-            buffer.push(AtomicU32::new(0));
-        }
+        let buffer = std::iter::repeat_with(|| AtomicU32::new(0))
+            .take(capacity)
+            .collect();
         Self {
             buffer,
             capacity,
