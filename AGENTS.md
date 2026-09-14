@@ -30,6 +30,7 @@ ______________________________________________________________________
   - Clone necessary `Arc` handles (`RTCDataChannel`, `RTCPeerConnection`, `UserAddress`) inside short synchronous blocks, drop the guard, and then perform async `.await` calls.
 - **Error Handling**: Preserve full log tracebacks and return proper `Result` types. Do not mask errors with superficial fallbacks or silent swallows.
 - **Issue Verification**: Before starting any task or feature implementation, agents MUST check relevant GitHub Issues and existing discussions to confirm requirements and prevent duplicate or redundant work.
+- **No Unsolicited Execution on Possibility Inquiries**: When the user asks whether an action or task is possible (e.g., "Is it possible to...?"), agents MUST NOT execute the action automatically (such as creating/modifying GitHub issues, modifying labels, or executing destructive/modifying commands). Agents MUST ONLY answer whether it is possible, explain the method, and present proposed options, and MUST WAIT for explicit user confirmation before executing.
 - **Documentation**: Retain existing doc comments and docstrings.
 
 ______________________________________________________________________
