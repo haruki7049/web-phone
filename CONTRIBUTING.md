@@ -52,6 +52,22 @@ ______________________________________________________________________
 - `CLIENT_REGISTRY` and shared state are protected by `std::sync::RwLock`. NEVER hold `RwLock` read/write guards across `.await` points when sending over WebRTC DataChannels or performing async I/O.
 - Clone necessary `Arc` handles (`RTCDataChannel`, `RTCPeerConnection`, `UserAddress`) inside short synchronous blocks, drop the guard, and then perform `.await` calls.
 
+### Issue Estimates (Token-Based Scale)
+
+Issue complexity is estimated based on expected AI Agent token consumption, using a **30pt upper limit**:
+
+| Estimate | Token Usage | Complexity Description |
+| :--- | :--- | :--- |
+| **`30pt`** | 500k – 1M+ tokens | **Upper Limit**. Major cross-crate architectures or complex protocol state machines. (Split tasks >1M tokens) |
+| **`20pt`** | 300k – 500k tokens | High complexity single-crate logic, complex E2EE session management |
+| **`13pt`** | 150k – 300k tokens | Medium-high complexity. ICE restart, resampler additions, lock refactoring |
+| **`8pt`** | 80k – 150k tokens | Medium complexity. Audio device selection UI, dynamic config hot-reloading |
+| **`5pt`** | 40k – 80k tokens | Low-medium complexity. Text input modal controls, packet drop metrics tracking |
+| **`3pt`** | 20k – 40k tokens | Low complexity. Persistent file logging, cache-line padding optimizations |
+| **`1pt`** | < 20k tokens | Very low complexity. C FFI lifetime docs, minor comment/typo fixes |
+
+Estimates are managed via the GitHub Projects `Estimate` numeric field.
+
 ### Code Formatting (`treefmt`)
 
 Code formatting MUST be performed using `treefmt`:

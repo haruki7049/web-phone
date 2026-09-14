@@ -32,6 +32,17 @@ ______________________________________________________________________
 - **Issue Verification**: Before starting any task or feature implementation, agents MUST check relevant GitHub Issues and existing discussions to confirm requirements and prevent duplicate or redundant work.
 - **No Unsolicited Execution on Possibility Inquiries**: When the user asks whether an action or task is possible (e.g., "Is it possible to...?"), agents MUST NOT execute the action automatically (such as creating/modifying GitHub issues, modifying labels, or executing destructive/modifying commands). Agents MUST ONLY answer whether it is possible, explain the method, and present proposed options, and MUST WAIT for explicit user confirmation before executing.
 - **Commit Message Standards**: All commit messages MUST strictly adhere to the [Conventional Commits](https://www.conventionalcommits.org/) specification (e.g., `feat:`, `fix:`, `refactor:`, `perf:`, `docs:`, `test:`, `build:`, `ci:`, `chore:`).
+- **Issue Estimate Guidelines**:
+  - Issue Estimates MUST be derived from expected AI agent token usage, using a **30pt upper limit**.
+  - **Estimate Scale**:
+    - `30pt`: Maximum complexity (500k – 1M+ tokens). Cross-crate architectures or complex protocol state machines. (Tasks >1M tokens MUST be decomposed).
+    - `20pt`: High complexity (300k – 500k tokens). Extensive single-crate logic, complex E2EE session management.
+    - `13pt`: Medium-high complexity (150k – 300k tokens). Auto-reconnection / ICE restart, resampler additions, lock refactorings.
+    - `8pt`: Medium complexity (80k – 150k tokens). Audio device selection UI, dynamic config hot-reloading.
+    - `5pt`: Low-medium complexity (40k – 80k tokens). Text input modal controls, packet drop metrics tracking.
+    - `3pt`: Low complexity (20k – 40k tokens). Persistent file logging, cache-line padding optimizations.
+    - `1pt`: Very low complexity (<20k tokens). C FFI lifetime docs, minor comment/typo fixes.
+  - Estimates MUST be tracked using the GitHub Projects custom `Estimate` numeric field.
 - **Documentation**: Retain existing doc comments and docstrings.
 
 ______________________________________________________________________
