@@ -41,7 +41,7 @@ ______________________________________________________________________
     - `8pt`: Medium complexity (80k – 150k tokens). Audio device selection UI, dynamic config hot-reloading.
     - `5pt`: Low-medium complexity (40k – 80k tokens). Text input modal controls, packet drop metrics tracking.
     - `3pt`: Low complexity (20k – 40k tokens). Persistent file logging, cache-line padding optimizations.
-    - `1pt`: Very low complexity (<20k tokens). C FFI lifetime docs, minor comment/typo fixes.
+    - `1pt`: Very low complexity (\<20k tokens). C FFI lifetime docs, minor comment/typo fixes.
   - Estimates MUST be tracked using the GitHub Projects custom `Estimate` numeric field.
 - **Documentation**: Retain existing doc comments and docstrings.
 
