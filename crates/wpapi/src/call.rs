@@ -34,6 +34,7 @@ pub async fn start_call_with_session(
     session: &ClientSession,
 ) -> Result<()> {
     if let Some(ref target) = target_address {
+        session.set_target_address(Some(target.clone()));
         info!(
             "Targeting direct 1-to-1 call to wpclient user ID: {}",
             target

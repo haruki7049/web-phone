@@ -284,7 +284,6 @@ impl AudioEngine {
                                 + 4;
                             let mut net_samples = Vec::with_capacity(net_needed);
                             {
-                                audio_buf.cap_latency(4800, 1920);
                                 let drain_count = net_needed.min(audio_buf.len());
                                 for _ in 0..drain_count {
                                     if let Some(s) = audio_buf.pop() {

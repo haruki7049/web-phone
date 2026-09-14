@@ -73,17 +73,26 @@ impl AudioRingBuffer {
         self.cap_latency(4800, 1920);
     }
 
-    /// Pop a single audio sample from the buffer (SPSC lock-free).
+    /// Pop a single audio sample from the buffer (MPSC/MPMC lock-free safe).
     /// Returns `None` if the buffer is empty.
     pub fn pop(&self) -> Option<f32> {
-        let tail = self.tail.load(Ordering::Relaxed);
-        let head = self.head.load(Ordering::Acquire);
-        if tail == head {
-            return None;
+        let mut tail = self.tail.load(Ordering::Relaxed);
+        loop {
+            let head = self.head.load(Ordering::Acquire);
+            if tail == head {
+                return None;
+            }
+            let bits = self.buffer[tail & self.mask].load(Ordering::Acquire);
+            match self.tail.compare_exchange_weak(
+                tail,
+                tail.wrapping_add(1),
+                Ordering::Release,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(f32::from_bits(bits)),
+                Err(actual) => tail = actual,
+            }
         }
-        let bits = self.buffer[tail & self.mask].load(Ordering::Acquire);
-        self.tail.store(tail.wrapping_add(1), Ordering::Release);
-        Some(f32::from_bits(bits))
     }
 
     /// Clear all pending samples from the buffer.
@@ -97,9 +106,19 @@ impl AudioRingBuffer {
         let current_len = self.len();
         if current_len > max_samples {
             let drop_count = current_len.saturating_sub(target_samples);
-            let tail = self.tail.load(Ordering::Relaxed);
-            self.tail
-                .store(tail.wrapping_add(drop_count), Ordering::Release);
+            let mut tail = self.tail.load(Ordering::Relaxed);
+            loop {
+                let new_tail = tail.wrapping_add(drop_count);
+                match self.tail.compare_exchange_weak(
+                    tail,
+                    new_tail,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(actual) => tail = actual,
+                }
+            }
         }
     }
 }
