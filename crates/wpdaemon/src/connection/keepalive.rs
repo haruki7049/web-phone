@@ -33,7 +33,7 @@ pub fn start_keepalive_task() {
 
             let stale_cids = {
                 let reg = CLIENT_REGISTRY.read().unwrap();
-                reg.get_stale_clients(30)
+                reg.get_stale_clients(crate::constants::KEEP_ALIVE_TIMEOUT_SECS)
             };
 
             for cid in stale_cids {

@@ -76,7 +76,7 @@ pub(crate) async fn handle_client_datachannel_events(
                                             sender_address: audio_msg
                                                 .sender_address
                                                 .unwrap_or_default(),
-                                            codec_id: wpapi::protocol::CODEC_OPUS,
+                                            codec_id: audio_msg.codec_id,
                                             audio_data: audio_msg.data,
                                         };
                                         if dc_inner
@@ -144,13 +144,14 @@ async fn dispatch_daemon_packet(
     match packet {
         ProtocolPacket::ClientTargetedAudio {
             target_address,
+            codec_id,
             audio_data,
-            ..
         } => {
             handle_client_targeted_audio(
                 client_id,
                 sender_addr,
                 target_address,
+                codec_id,
                 my_node_id,
                 audio_data,
                 dc,
@@ -208,6 +209,7 @@ async fn handle_client_targeted_audio(
     client_id: u64,
     sender_addr: Option<UserAddress>,
     target_address: UserAddress,
+    codec_id: u8,
     my_node_id: u64,
     payload: Vec<u8>,
     dc: &Arc<dyn DataChannel>,
@@ -224,43 +226,16 @@ async fn handle_client_targeted_audio(
     let caller_user_addr = sender_addr.clone().unwrap_or_default();
 
     if super::is_client_in_room(client_id, &target_address) {
-        handle_room_group_audio(
-            client_id,
-            target_address,
-            wpapi::protocol::CODEC_OPUS,
-            payload,
-        )
-        .await;
+        handle_room_group_audio(client_id, target_address, codec_id, payload).await;
         return;
-    } else if let crate::registry::AddressSearchResult::Found(target_cid) =
-        super::find_client_by_address(&target_address)
-    {
-        let is_stale = {
-            let reg = CLIENT_REGISTRY.read().unwrap();
-            reg.get_stale_clients(15).contains(&target_cid)
-        };
-        if is_stale {
-            warn!(
-                "Rejecting Client {} call to {}: target peer connection is stale/unresponsive (waiting for keep-alive cleanup)",
-                client_id,
-                target_address.short_id()
-            );
-            CLIENT_REGISTRY
-                .write()
-                .unwrap()
-                .unregister_client(target_cid);
-            let err_packet = ProtocolPacket::ConnectionError {
-                target_address: target_address.clone(),
-            };
-            let _ = dc
-                .send(BytesMut::from(err_packet.encode().as_slice()))
-                .await;
-            return;
-        }
+    }
 
-        if target_cid == client_id {
+    let search_result = super::find_client_by_address(&target_address);
+    let target_cid = match search_result {
+        crate::registry::AddressSearchResult::Found(cid) => cid,
+        crate::registry::AddressSearchResult::Ambiguous => {
             warn!(
-                "Rejecting Client {} call to {}: target is self",
+                "Rejecting Client {} call to {}: short ID prefix matches multiple registered addresses (WPIP-02 Section 5)",
                 client_id,
                 target_address.short_id()
             );
@@ -272,10 +247,9 @@ async fn handle_client_targeted_audio(
                 .await;
             return;
         }
-
-        if super::is_call_rejected(target_cid, &caller_user_addr) {
+        crate::registry::AddressSearchResult::NotFound => {
             warn!(
-                "Rejecting Client {} call to {}: call rejected by recipient",
+                "Rejecting Client {} connection to target {}: target user not found or offline",
                 client_id,
                 target_address.short_id()
             );
@@ -287,61 +261,35 @@ async fn handle_client_targeted_audio(
                 .await;
             return;
         }
+    };
 
-        let is_in_same_call = super::is_client_in_same_call(client_id, &target_address);
-        let is_mutual = CLIENT_REGISTRY
-            .read()
-            .unwrap()
-            .targets
-            .get(&target_cid)
-            .map(|addr| matches_address_prefix(addr, &caller_user_addr))
-            .unwrap_or(false);
-
-        if !is_in_same_call && !is_mutual && super::is_room_or_target_full(&target_address) {
-            warn!(
-                "Rejecting Client {} call to {}: target user busy",
-                client_id,
-                target_address.short_id()
-            );
-            let err_packet = ProtocolPacket::ConnectionError {
-                target_address: target_address.clone(),
-            };
-            let _ = dc
-                .send(BytesMut::from(err_packet.encode().as_slice()))
-                .await;
-            return;
-        }
-
-        if !is_mutual && !super::is_call_approved(target_cid, &caller_user_addr) {
-            if !super::has_been_notified(target_cid, client_id) {
-                super::mark_notified(target_cid, client_id);
-                let target_dc = CLIENT_REGISTRY
-                    .read()
-                    .unwrap()
-                    .data_channels
-                    .get(&target_cid)
-                    .cloned();
-                if let Some(target_dc) = target_dc {
-                    let req_packet = ProtocolPacket::CallRequest {
-                        caller_id: client_id,
-                        caller_address: caller_user_addr.clone(),
-                    };
-                    let _ = target_dc
-                        .send(BytesMut::from(req_packet.encode().as_slice()))
-                        .await;
-                    info!(
-                        "Sent call request notification to Client {} for caller Client {} ({})",
-                        target_cid,
-                        client_id,
-                        caller_user_addr.short_id()
-                    );
-                }
-            }
-            return;
-        }
-    } else {
+    let is_stale = {
+        let reg = CLIENT_REGISTRY.read().unwrap();
+        reg.get_stale_clients(crate::constants::KEEP_ALIVE_TIMEOUT_SECS)
+            .contains(&target_cid)
+    };
+    if is_stale {
         warn!(
-            "Rejecting Client {} connection to target {}: target user not found or offline",
+            "Rejecting Client {} call to {}: target peer connection is stale/unresponsive (waiting for keep-alive cleanup)",
+            client_id,
+            target_address.short_id()
+        );
+        CLIENT_REGISTRY
+            .write()
+            .unwrap()
+            .unregister_client(target_cid);
+        let err_packet = ProtocolPacket::ConnectionError {
+            target_address: target_address.clone(),
+        };
+        let _ = dc
+            .send(BytesMut::from(err_packet.encode().as_slice()))
+            .await;
+        return;
+    }
+
+    if target_cid == client_id {
+        warn!(
+            "Rejecting Client {} call to {}: target is self",
             client_id,
             target_address.short_id()
         );
@@ -351,6 +299,73 @@ async fn handle_client_targeted_audio(
         let _ = dc
             .send(BytesMut::from(err_packet.encode().as_slice()))
             .await;
+        return;
+    }
+
+    if super::is_call_rejected(target_cid, &caller_user_addr) {
+        warn!(
+            "Rejecting Client {} call to {}: call rejected by recipient",
+            client_id,
+            target_address.short_id()
+        );
+        let err_packet = ProtocolPacket::ConnectionError {
+            target_address: target_address.clone(),
+        };
+        let _ = dc
+            .send(BytesMut::from(err_packet.encode().as_slice()))
+            .await;
+        return;
+    }
+
+    let is_in_same_call = super::is_client_in_same_call(client_id, &target_address);
+    let is_mutual = CLIENT_REGISTRY
+        .read()
+        .unwrap()
+        .targets
+        .get(&target_cid)
+        .map(|addr| matches_address_prefix(addr, &caller_user_addr))
+        .unwrap_or(false);
+
+    if !is_in_same_call && !is_mutual && super::is_room_or_target_full(&target_address) {
+        warn!(
+            "Rejecting Client {} call to {}: target user busy",
+            client_id,
+            target_address.short_id()
+        );
+        let err_packet = ProtocolPacket::ConnectionError {
+            target_address: target_address.clone(),
+        };
+        let _ = dc
+            .send(BytesMut::from(err_packet.encode().as_slice()))
+            .await;
+        return;
+    }
+
+    if !is_mutual && !super::is_call_approved(target_cid, &caller_user_addr) {
+        if !super::has_been_notified(target_cid, client_id) {
+            super::mark_notified(target_cid, client_id);
+            let target_dc = CLIENT_REGISTRY
+                .read()
+                .unwrap()
+                .data_channels
+                .get(&target_cid)
+                .cloned();
+            if let Some(target_dc) = target_dc {
+                let req_packet = ProtocolPacket::CallRequest {
+                    caller_id: client_id,
+                    caller_address: caller_user_addr.clone(),
+                };
+                let _ = target_dc
+                    .send(BytesMut::from(req_packet.encode().as_slice()))
+                    .await;
+                info!(
+                    "Sent call request notification to Client {} for caller Client {} ({})",
+                    target_cid,
+                    client_id,
+                    caller_user_addr.short_id()
+                );
+            }
+        }
         return;
     }
 
@@ -365,6 +380,7 @@ async fn handle_client_targeted_audio(
             sender_id: client_id,
             sender_address: sender_addr,
             target_address,
+            codec_id,
             origin_node: my_node_id,
             ttl: DEFAULT_INITIAL_TTL,
             data: payload,

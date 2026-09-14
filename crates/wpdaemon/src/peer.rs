@@ -67,11 +67,11 @@ fn handle_peer_incoming_message(msg_data: &[u8], my_node_id: u64) {
     if let Ok(wpapi::protocol::ProtocolPacket::PeerTargetedAudio {
         sender_id,
         origin_node,
+        codec_id,
         target_address,
         sender_address,
         ttl,
         audio_data,
-        ..
     }) = wpapi::protocol::ProtocolPacket::decode(msg_data)
     {
         // WPIP-05 Loop prevention & TTL expiration checks
@@ -81,6 +81,7 @@ fn handle_peer_incoming_message(msg_data: &[u8], my_node_id: u64) {
                 sender_id,
                 sender_address: Some(sender_address),
                 target_address,
+                codec_id,
                 origin_node,
                 ttl: next_ttl,
                 data: audio_data,

@@ -28,3 +28,6 @@ pub const DATACHANNEL_RATE_LIMIT_REFILL: f64 = 100.0;
 
 /// WebRTC DataChannel packet rate limiter: bucket capacity (max burst).
 pub const DATACHANNEL_RATE_LIMIT_BURST: f64 = 200.0;
+
+/// Keep-alive stale connection detection threshold duration in seconds (WPIP-09 / WPIP-15).
+pub const KEEP_ALIVE_TIMEOUT_SECS: u64 = 30;

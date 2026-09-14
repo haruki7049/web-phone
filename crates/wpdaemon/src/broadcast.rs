@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use tokio::sync::broadcast;
 use wpapi::UserAddress;
 
-/// Audio message with sender, target address, and origin node information.
+/// Audio message with sender, target address, codec ID, and origin node information.
 #[derive(Clone, Debug)]
 pub struct AudioMessage {
     /// ID of the client who sent this audio.
@@ -16,11 +16,13 @@ pub struct AudioMessage {
     pub sender_address: Option<UserAddress>,
     /// Target UserAddress for targeted 1-to-1 audio call.
     pub target_address: UserAddress,
+    /// Audio codec ID (WPIP-04 / WPIP-12).
+    pub codec_id: u8,
     /// ID of the daemon node where this audio originated.
     pub origin_node: u64,
     /// Time-to-Live (TTL) hop limit for peer mesh routing (default 8).
     pub ttl: u8,
-    /// Raw audio data bytes (PCM f32 LE).
+    /// Raw audio data bytes.
     pub data: Vec<u8>,
 }
 
@@ -40,12 +42,14 @@ mod tests {
             sender_id: 42,
             sender_address: None,
             target_address: UserAddress::new("target_id_12345"),
+            codec_id: wpapi::protocol::CODEC_OPUS,
             origin_node: 1,
             ttl: 8,
             data: vec![1, 2, 3, 4],
         };
         assert_eq!(msg.sender_id, 42);
         assert_eq!(msg.target_address.id, "target_id_12345");
+        assert_eq!(msg.codec_id, wpapi::protocol::CODEC_OPUS);
         assert_eq!(msg.origin_node, 1);
         assert_eq!(msg.ttl, 8);
         assert_eq!(msg.data, vec![1, 2, 3, 4]);
@@ -60,6 +64,7 @@ mod tests {
             sender_id: 1,
             sender_address: None,
             target_address: UserAddress::new("target_id_12345"),
+            codec_id: wpapi::protocol::CODEC_OPUS,
             origin_node: 10,
             ttl: 8,
             data: vec![100, 200],
@@ -69,6 +74,7 @@ mod tests {
         let received = rx.recv().await.expect("Failed to receive");
         assert_eq!(received.sender_id, 1);
         assert_eq!(received.target_address.id, "target_id_12345");
+        assert_eq!(received.codec_id, wpapi::protocol::CODEC_OPUS);
         assert_eq!(received.origin_node, 10);
         assert_eq!(received.ttl, 8);
         assert_eq!(received.data, vec![100, 200]);
