@@ -66,3 +66,12 @@ When no new feature requests or implementation tasks are specified by the user:
 
 - **Refactoring Existing Code**: Proactively identify, propose, and implement refactoring opportunities (e.g., reducing boilerplate, eliminating duplicate logic, enhancing DRY principles, adopting modern Rust idioms like `let-else`, and improving module encapsulation).
 - **WPIP Specification Compatibility Verification**: Audit and verify full compatibility with WPIP specifications (`docs/WPIP-*.md`). Ensure packet formats (`0x01` through `0x14`), authorization headers, rate-limiting rules, energy routing, and encryption algorithms strictly conform to the spec definitions across `wpapi`, `wpdaemon`, and `wpclient`.
+
+______________________________________________________________________
+
+## 6. Git & Pull Request Rules
+
+- **NEVER MERGE PULL REQUESTS**: AI agents MUST NEVER merge PRs (including enabling auto-merge with `gh pr merge --auto`), execute `git merge` into `main`, or commit / push to `main` on their own initiative. Merging into `main` rests strictly with the human maintainer.
+- **Topic Branches & Pushing**: Work on a topic branch. Agents may push new commits to their own topic branch without confirmation when instructed by the user or when creating or updating a pull request. Rewriting pushed history (amending or rebasing pushed commits and force-pushing) and pushing to `main` need explicit user approval.
+- **No Issue Numbers in Commit Messages**: Do not include issue numbers (e.g. `(#24)` or `#24`) anywhere in a commit message, summary or body, or in a PR title. Squash merges copy every commit message into `main`, so a `Closes #24` in a commit body can close an issue the PR was never meant to close. Link issues only from the PR description with closing keywords (e.g. `Closes #24`). The ` (#N)` suffix GitHub appends to a squash-merge summary is the one exception.
+- **No Session Links**: Do not include AI session URLs or other internal session identifiers (e.g. a `Claude-Session:` trailer) in commit messages, PR descriptions, issues, or comments. Such links are not accessible from outside the private session, so publishing them in this public repository serves no purpose and only confuses readers. A `Co-Authored-By:` trailer is fine. Exception: if the user explicitly states the session is public and instructs the agent to include its URL, doing so is allowed.
