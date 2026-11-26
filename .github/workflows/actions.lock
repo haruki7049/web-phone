@@ -15,7 +15,7 @@ workflows:
     '.github/workflows/dependabot-auto-merge.yml': []
     '.github/workflows/nix-ci.yml':
         - 'actions/checkout@v7.0.1'
-        - 'cachix/install-nix-action@v31.11.1'
+        - 'cachix/install-nix-action@v32.0.0'
     '.github/workflows/release.yml':
         - 'actions/checkout@v7.0.1'
         - 'dtolnay/rust-toolchain@master'
@@ -23,7 +23,7 @@ workflows:
         - 'swatinem/rust-cache@v2.9.3'
     '.github/workflows/rust-ci.yml':
         - 'actions/checkout@v7.0.1'
-        - 'cachix/install-nix-action@v31.11.1'
+        - 'cachix/install-nix-action@v32.0.0'
         - 'dtolnay/rust-toolchain@master'
         - 'swatinem/rust-cache@v2.9.3'
     '.github/workflows/stale-issues-pullrequests.yml':
@@ -56,9 +56,9 @@ dependencies:
         commit: 'sha1-ea165f8d65b6e75b540449e92b4886f43607fa02'
         owner_id: 44036562
         repo_id: 192625955
-    'cachix/install-nix-action@v31.11.1':
-        ref: 'v31.11.1'
-        commit: 'sha1-13d8dd58da0234aa297dedd986986ccb8e7f3e24'
+    'cachix/install-nix-action@v32.0.0':
+        ref: 'v32.0.0'
+        commit: 'sha1-bb0495a1086c46893eee56f32fd192dfe4a15bb9'
         owner_id: 36824654
         repo_id: 212301524
     'docker/build-push-action@v7.4.0':
