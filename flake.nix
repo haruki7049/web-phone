@@ -1,18 +1,12 @@
 {
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    crane.url = "github:ipetkov/crane";
-    flake-compat.url = "github:edolstra/flake-compat";
     flake-parts = {
       url = "github:hercules-ci/flake-parts";
       inputs.nixpkgs-lib.follows = "nixpkgs";
     };
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -35,158 +29,59 @@
           config,
           lib,
           pkgs,
-          system,
           ...
         }:
         let
-          rustForPkgs = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-          rust = rustForPkgs pkgs;
-          craneLib = (inputs.crane.mkLib pkgs).overrideToolchain (p: rustForPkgs p);
-          overlays = [ inputs.rust-overlay.overlays.default ];
-          src = lib.cleanSource ./.;
+          # The replacement of pkgs.haskellPackages
+          hp = pkgs.haskell.packages.ghc9103.extend ( pkgs.haskell.lib.compose.packageSourceOverrides { } );
 
-          buildInputs =
-            lib.optionals pkgs.stdenv.hostPlatform.isLinux [
-              pkgs.pkg-config
-              pkgs.udev
-              pkgs.alsa-lib
-              pkgs.vulkan-loader
-              pkgs.libX11
-              pkgs.libXcursor
-              pkgs.libXi
-              pkgs.libXrandr
-              pkgs.libxkbcommon
-              pkgs.wayland
-              pkgs.cacert
-            ]
-            ++ [
-              pkgs.llvmPackages.libclang.lib
-            ];
+          GHC = hp.ghc;
           nativeBuildInputs = [
-            pkgs.pkg-config # pkg-config
-            pkgs.makeWrapper # For the Nix packaging
+            GHC # Haskell compiler
+            pkgs.cabal-install # Haskell cabal package manager
+            pkgs.haskell-language-server # Haskell language server
+            hp.hspec-discover # Hspec test discover & runner tool
             pkgs.nil # Nix LSP
-            rust # Rust toolchain
-            pkgs.cargo-llvm-cov
-            pkgs.nushell # Script runner
-            pkgs.cachix # cachix CLI
           ];
-          inputsFrom = [ config.treefmt.build.devShell ];
 
-          cargoArtifacts = craneLib.buildDepsOnly {
-            inherit src buildInputs nativeBuildInputs;
-
-            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
-            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
-          };
-          web-phone = craneLib.buildPackage {
-            inherit
-              src
-              cargoArtifacts
-              buildInputs
-              nativeBuildInputs
-              ;
-            strictDeps = true;
-            doCheck = true;
-
-            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
-            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
-
-            postInstall = ''
-              mkdir -p $out/include $out/lib/pkgconfig
-              cp crates/wpapi/include/wpapi.h $out/include/wpapi.h
-              sed "s|^prefix=.*|prefix=$out|" crates/wpapi/include/wpapi.pc > $out/lib/pkgconfig/wpapi.pc
-            '';
-
-            meta = {
-              licenses = [ lib.licenses.mit ];
-              mainProgram = "wpclient";
-            };
-          };
-          cargo-clippy = craneLib.cargoClippy {
-            inherit
-              src
-              cargoArtifacts
-              buildInputs
-              nativeBuildInputs
-              ;
-            cargoClippyExtraArgs = "--verbose -- --deny warnings";
-
-            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
-            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
-          };
-          cargo-doc = craneLib.cargoDoc {
-            inherit
-              src
-              cargoArtifacts
-              buildInputs
-              nativeBuildInputs
-              ;
-
-            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
-            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
-          };
-          llvm-cov = craneLib.cargoLlvmCov {
-            inherit
-              src
-              cargoArtifacts
-              buildInputs
-              nativeBuildInputs
-              ;
-
-            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
-            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
-            cargoLlvmCovExtraArgs = "test --html --output-dir $out";
-          };
+          buildInputs = [ ];
         in
         {
-          _module.args.pkgs = import inputs.nixpkgs {
-            inherit system overlays;
-          };
-
           treefmt = {
-            projectRootFile = "flake.nix";
+            projectRootFile = ".git/config";
 
             # Nix
             programs.nixfmt.enable = true;
 
-            # Rust
-            programs.rustfmt.enable = true;
-            settings.formatter.rustfmt.command = "${rust}/bin/rustfmt";
-
-            # TOML
-            programs.taplo.enable = true;
+            # Haskell
+            programs.ormolu.enable = true;
+            programs.cabal-fmt.enable = true;
 
             # GitHub Actions
             programs.actionlint.enable = true;
 
             # Markdown
             programs.mdformat.enable = true;
+            # Keep the YAML front matter of agent skills (SKILL.md) intact
+            programs.mdformat.plugins = ps: [ ps.mdformat-frontmatter ];
 
             # ShellScript
             programs.shellcheck.enable = true;
             programs.shfmt.enable = true;
           };
 
-          packages = {
-            inherit web-phone llvm-cov;
-            default = web-phone;
-            doc = cargo-doc;
-          };
+          # checks = {
+          #   inherit (hp) web-phone;
+          # };
 
-          checks = {
-            inherit cargo-clippy;
-          };
+          # packages = {
+          #   default = hp.web-phone;
+          #   inherit (hp) web-phone;
+          # };
 
           devShells.default = pkgs.mkShell {
-            inherit buildInputs nativeBuildInputs inputsFrom;
-
-            LIBCLANG_PATH = lib.makeLibraryPath buildInputs;
-            LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
-
-            shellHook = ''
-              export PS1="\n[nix-shell:\w]$ "
-            '';
+            inherit buildInputs nativeBuildInputs;
+            inputsFrom = [ config.treefmt.build.devShell ];
           };
         };
     };
