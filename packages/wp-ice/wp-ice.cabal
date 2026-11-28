@@ -1,0 +1,37 @@
+cabal-version:      3.0
+name:               wp-ice
+version:            0.1.0.0
+license:            MIT
+author:             haruki7049
+maintainer:         haruki7049@mail.haruki7049.dev
+category:           Network
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    hs-source-dirs:   src
+    default-language: GHC2024
+
+    exposed-modules:
+      , WebPhone.Network.ICE
+
+    build-depends:
+      , base ^>=4.20.2.0
+
+test-suite wp-ice-test
+    import:           warnings
+    default-language: GHC2024
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+
+    other-modules:
+      , WebPhone.Network.ICESpec
+
+    build-depends:
+      , base ^>=4.20.2.0
+      , hspec
+      , wp-ice

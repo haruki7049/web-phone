@@ -1,0 +1,5 @@
+packages: packages/*/*.cabal
+
+active-repositories: hackage.haskell.org:merge
+index-state:
+ , hackage.haskell.org 2026-11-27T00:00:00Z
