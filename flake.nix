@@ -33,7 +33,11 @@
         }:
         let
           # The replacement of pkgs.haskellPackages
-          hp = pkgs.haskell.packages.ghc9103.extend ( pkgs.haskell.lib.compose.packageSourceOverrides { } );
+          hp = pkgs.haskell.packages.ghc9103.extend (
+            pkgs.haskell.lib.compose.packageSourceOverrides {
+              wp-ice = ./packages/wp-ice;
+            }
+          );
 
           GHC = hp.ghc;
           nativeBuildInputs = [
@@ -70,9 +74,9 @@
             programs.shfmt.enable = true;
           };
 
-          # checks = {
-          #   inherit (hp) web-phone;
-          # };
+          checks = {
+            inherit (hp) wp-ice;
+          };
 
           # packages = {
           #   default = hp.web-phone;
